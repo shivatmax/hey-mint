@@ -34,7 +34,7 @@ brew --prefix portaudio >/dev/null 2>&1 || { echo "Install portaudio first: brew
 
 # --- a self-contained Python --------------------------------------------------------------
 if [[ ! -f "$CACHE/$PY_FILE" ]]; then
-  echo "Downloading Python $PY_VERSION…"
+  echo "Downloading Python ${PY_VERSION}…"
   curl -fsSL -o "$CACHE/$PY_FILE.part" "$PY_URL"
   curl -fsSL -o "$CACHE/SHA256SUMS-$PY_RELEASE" \
     "https://github.com/astral-sh/python-build-standalone/releases/download/${PY_RELEASE}/SHA256SUMS"
@@ -44,7 +44,7 @@ if [[ ! -f "$CACHE/$PY_FILE" ]]; then
   mv "$CACHE/$PY_FILE.part" "$CACHE/$PY_FILE"
 fi
 
-echo "Assembling Hey Mint.app $VERSION…"
+echo "Assembling Hey Mint.app ${VERSION}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$RES/runtime" "$RES/app/models"
 tar -xzf "$CACHE/$PY_FILE" -C "$RES/runtime"          # -> runtime/python

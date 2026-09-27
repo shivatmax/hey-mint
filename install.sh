@@ -40,7 +40,7 @@ OLD="Jar""vis"
 OLD_RUNTIME="$HOME/Library/Application Support/$OLD"
 RELOGIN=0
 if [[ -d "$OLD_RUNTIME" && ! -d "$RUNTIME" ]]; then
-  echo "Moving your data from $OLD_RUNTIME to $RUNTIME…"
+  echo "Moving your data from $OLD_RUNTIME to ${RUNTIME}…"
   pkill -x "$OLD" 2>/dev/null || true
   pkill -f "python -m $(echo "$OLD" | tr '[:upper:]' '[:lower:]')" 2>/dev/null || true
   sleep 2
@@ -74,7 +74,7 @@ fi
 rm -rf "$HOME/Applications/$OLD.app"
 
 # --- runtime -----------------------------------------------------------------------
-echo "Installing the runtime to $RUNTIME…"
+echo "Installing the runtime to ${RUNTIME}…"
 mkdir -p "$RUNTIME"
 rm -rf "$RUNTIME/mint"
 ditto "$ROOT/mint" "$RUNTIME/mint"
