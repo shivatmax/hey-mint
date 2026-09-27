@@ -1,0 +1,70 @@
+<!--{"title": "Your voice", "nav": "Voice", "eyebrow": "Voice", "lede": "“Hey Mint” is Mint's own wake word, running on your Mac. Train your voice once and only you can wake it, talk to it, or talk over it.", "hello": "Train your voice and only you can wake me."}-->
+
+<section id="wake" data-say="“Hey Mint” runs on your Mac.">
+  <div class="eyebrow">Voice</div>
+  <h2>The wake word</h2>
+  <p class="lead">“Hey Mint” is a small detector on your Mac. Nothing leaves the Mac while Mint is asleep; only after it wakes does your speech go to Gemini.</p>
+  <p>Rename the assistant in Settings ▸ You and it builds a new “Hey &lt;name&gt;” wake word in about a minute; “Hey Mint” keeps working until it is ready.</p>
+</section>
+
+<section id="train" data-say="Two minutes, once.">
+  <div class="eyebrow">Voice</div>
+  <h2>Training your voice</h2>
+  <div class="cols">
+    {{img settings-yourvoice.png | <b>Settings ▸ Your voice.</b> Train, retrain or forget; the voice lock; strictness; ignoring talk not meant for Mint.}}
+    <div>
+      <p>Menu bar ▸ <b>Train my voice…</b> (or the button in Settings). It takes about two minutes, once:</p>
+      <ol class="steps">
+        <li>Say “Hey Mint” eight times.</li>
+        <li>Read eight sentences out loud.</li>
+        <li>Mint builds your voiceprint and retrains “Hey Mint” on your own voice.</li>
+        <li>A live test marks each thing you say “that's you” or “not you”.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="lock" data-say="With the voice lock, only you get through.">
+  <div class="eyebrow">Voice</div>
+  <h2>The voice lock</h2>
+  <ul>
+    <li>Only <b>your</b> “Hey Mint” wakes it. Someone else saying it is ignored.</li>
+    <li>Only your speech reaches Gemini; anything else is replaced by silence.</li>
+    <li>Only your voice can talk over it; another voice just turns it down while it checks.</li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>Strictness</th><th>When to use it</th></tr>
+    <tr><td>Relaxed</td><td>It sometimes misses you (a noisy room, a cold)</td></tr>
+    <tr><td>Balanced</td><td>The default</td></tr>
+    <tr><td>Strict</td><td>People with similar voices are around</td></tr>
+  </table></div>
+</section>
+
+<section id="others" data-say="Talking to someone else? I'll stay quiet.">
+  <div class="eyebrow">Voice</div>
+  <h2>Talking to someone else</h2>
+  <p>The first thing after “Hey Mint” is always for Mint. For follow-ups, Jev decides whether you were talking to Mint or to someone in the room, using what Mint last said and how loud you were. Anything on screen waits for that verdict (about a second).</p>
+  <div class="table"><table>
+    <tr><th>You say</th><th>Mint</th></tr>
+    <tr><td>“Rahul, did you finish your lunch?”</td><td>Ignores it</td></tr>
+    <tr><td>“and what's the date today?”</td><td>Answers</td></tr>
+  </table></div>
+  <p>Turn this off in the menu: “Ignore talk not meant for Mint”.</p>
+</section>
+
+<section id="hearing" data-say="If I mishear a word, tell me once.">
+  <div class="eyebrow">Voice</div>
+  <h2>Words it gets wrong</h2>
+  <p class="lead">Tell Mint once and it hears the word right from then on.</p>
+  <ul class="say"><li><q>you heard “cube con”, I said KubeCon</q></li><li><q>no, I said on-call</q></li><li><q>it's GitHub, one word</q></li><li><q>forget the KubeCon fix</q></li></ul>
+  <p>“Hey Mint” itself is cut out of what Gemini hears, so it no longer turns into words like “payment”. English and Hindi (and the two mixed) are understood; names from <code>custom.json</code> are given to the transcriber as vocabulary.</p>
+</section>
+
+<section id="calls" data-say="On a call, I step aside.">
+  <div class="eyebrow">Voice</div>
+  <h2>Calls, and saving memory</h2>
+  <ul>
+    <li><b>Calls:</b> when Zoom, Meet, Teams, FaceTime or the like uses the microphone, Mint steps aside and comes back three seconds after the call ends.</li>
+    <li><b>Asleep for a while:</b> after 20 minutes asleep and idle (Settings ▸ Appearance ▸ Free memory), Mint unloads to about 70 MB. The orb stays on screen as a picture, <kbd>⌘J</kbd> still works, and “Hey Mint” brings it back in a few seconds.</li>
+  </ul>
+</section>

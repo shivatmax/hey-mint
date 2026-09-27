@@ -1,0 +1,62 @@
+<!--{"title": "Say “Hey Mint”", "full_title": "Hey Mint — an open-source Jarvis-style voice assistant for macOS", "description": "Hey Mint is a free, open-source Jarvis for your Mac: say “Hey Mint” and it clicks, types, browses, manages files, runs agents and talks back. Guide with real clips of every feature.", "nav": "Home", "lede": "Everything Mint can do on your Mac: what to say, and what you will see.", "hello": "Hi! I'm the page's Mint. Poke me, or try a ▶ example."}-->
+<header class="hero">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow">Open-source voice assistant for macOS</div>
+      <h1>Say <span class="quote">“Hey&nbsp;Mint.”</span></h1>
+      <p class="lede">Mint lives on your Mac. It listens, talks back, and does the thing on your screen. Every clip in this guide is the real Mint.</p>
+      <div class="ask">
+        <label for="q">What do you want Mint to do?</label>
+        <input id="q" type="search" placeholder="Try “pdf”, “tab group”, “dance”, “remember”…" autocomplete="off">
+        <ul class="results" id="results" aria-label="Matching things to say"></ul>
+      </div>
+    </div>
+    <div class="stage">
+      <button class="orb" aria-label="Mint's orb. Poke it.">{{orb}}</button>
+      <img class="critter-strip" src="shots/hero-critters.png" alt="The critter family lined up beside Mint's toy box" width="748" height="251">
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="section-title"><div class="eyebrow">Try it right here</div>
+  <p class="lead" style="margin-top:10px">The little Mint in the corner of every page acts out the examples marked <b>▶ try</b>. Click one:</p>
+  <ul class="say">
+    <li><q data-try="emote:love">show me a heart</q></li><li><q data-try="trick:loop">do a loop the loop</q></li>
+    <li><q data-try="trick:chase">chase a star</q></li><li><q data-try="emote:cool">put your sunglasses on</q></li>
+    <li><q data-try="move:up">go a little up</q></li><li><q data-try="move:back">go back</q></li>
+  </ul>
+</div>
+
+<div class="cards">
+  <a class="card" href="talking.html"><video src="clips/talk.mp4" poster="clips/talk.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Basics</div><h3>Talking to Mint</h3><p>Wake it, talk over it, stop it, type to it. Captions, the chat, and changing how it behaves.</p></div></a>
+  <a class="card" href="orb.html"><video src="clips/morphs.mp4" poster="clips/morphs.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Basics</div><h3>The orb at work</h3><p>The orb turns into whatever it is doing, then shows a ✓ or ✗. What every animation means.</p></div></a>
+  <a class="card" href="doing.html"><video src="clips/click-type.mp4" poster="clips/click-type.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Doing things</div><h3>Apps, files, web, browser</h3><p>Clicking and typing, files, web search, full browser control, menus, screenshots, the clipboard, long tasks.</p></div></a>
+  <a class="card" href="showing.html"><video src="clips/mark-box.mp4" poster="clips/mark-box.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Showing and moving</div><h3>Showing you things, and tricks</h3><p>Boxes, underlines and arrows on anything on screen. Moving on command, and eight tricks.</p></div></a>
+  <a class="card" href="personality.html"><video src="clips/emote-love.mp4" poster="clips/emote-love.jpg" preload="none" muted loop playsinline style="object-fit:contain"></video>
+    <div class="in"><div class="eyebrow">Personality</div><h3>Expressions and voices</h3><p>Fourteen expressions, teasing, and thirty voices with any speaking style.</p></div></a>
+  <a class="card" href="agents.html"><video src="clips/agent-life.mp4" poster="clips/agent-life.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Personality</div><h3>Agents and critters</h3><p>Background helpers that pop out of a toy box, ask you questions, team up, and put on a show.</p></div></a>
+  <a class="card" href="learning.html"><video src="clips/flourishes.mp4" poster="clips/flourishes.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Learning</div><h3>Skills and memory</h3><p>How-tos Mint learns and ranks, and the facts it remembers about you.</p></div></a>
+  <a class="card" href="voice.html"><video src="clips/stop.mp4" poster="clips/stop.jpg" preload="none" muted loop playsinline></video>
+    <div class="in"><div class="eyebrow">Voice</div><h3>Your voice</h3><p>The wake word, training your voice, the voice lock, and words it gets wrong.</p></div></a>
+  <a class="card" href="settings.html"><video src="clips/chat.mp4" poster="clips/chat.jpg" preload="none" muted loop playsinline style="object-fit:contain"></video>
+    <div class="in"><div class="eyebrow">Settings</div><h3>Settings, sharing, safety</h3><p>Every setting, being visible in Google Meet, quitting, and the rules Mint never breaks.</p></div></a>
+</div>
+
+<div class="section-title" style="margin-bottom:80px">
+  <div class="eyebrow">Start here</div>
+  <ol class="steps">
+    <li><b>Install.</b> <code>./set-key.sh</code> (your Gemini key), <code>./install.sh</code>, then <code>open ~/Applications/Mint.app</code>. Details on the <a href="reference.html#install">Reference</a> page.</li>
+    <li><b>Allow it.</b> Microphone first, then Accessibility from the menu bar icon, so Mint can click and type.</li>
+    <li><b>Say “Hey Mint”</b>, or press <kbd>⌘J</kbd> and type. Ask for anything below.</li>
+    <li><b>Train your voice</b> (menu bar ▸ Train my voice…, two minutes) so only you can wake it.</li>
+  </ol>
+  <p><a href="reference.html#tools">See all 88 tools</a> · <a href="agents.html">Meet the critters</a></p>
+</div>
+</main>

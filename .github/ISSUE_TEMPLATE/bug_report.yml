@@ -1,0 +1,18 @@
+name: Bug report
+description: Something Mint did wrong, or didn't do
+labels: [bug]
+body:
+  - type: textarea
+    attributes: {label: What you said or typed, placeholder: "“Hey Mint, open the on-call channel in Slack”"}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: What happened, description: What Mint did or said instead.}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: What you expected}
+  - type: textarea
+    attributes: {label: Log lines, description: "From ~/Library/Logs/Mint/mint.log. Remove anything personal.", render: text}
+  - type: input
+    attributes: {label: macOS version, placeholder: "e.g. macOS 15.3"}
+  - type: input
+    attributes: {label: Commit or date you installed}

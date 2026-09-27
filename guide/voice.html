@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your voice · Hey Mint, the open-source voice assistant for macOS</title><meta name="description" content="“Hey Mint” is Mint&#x27;s own wake word, running on your Mac. Train your voice once and only you can wake it, talk to it, or talk over it.">
+<link rel="canonical" href="https://shivatmax.github.io/hey-mint/voice.html"><meta name="theme-color" content="#2EC4B6">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Your voice · Hey Mint, the open-source voice assistant for macOS"><meta property="og:description" content="“Hey Mint” is Mint&#x27;s own wake word, running on your Mac. Train your voice once and only you can wake it, talk to it, or talk over it.">
+<meta property="og:url" content="https://shivatmax.github.io/hey-mint/voice.html"><meta property="og:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Your voice · Hey Mint, the open-source voice assistant for macOS">
+<meta name="twitter:description" content="“Hey Mint” is Mint&#x27;s own wake word, running on your Mac. Train your voice once and only you can wake it, talk to it, or talk over it."><meta name="twitter:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/guide.css"></head>
+<body data-hello="Train your voice and only you can wake me.">
+<header class="top"><div class="top-in"><a class="brand" href="index.html"><span class="dot"></span>Hey Mint</a>
+<nav class="pages" aria-label="Guide pages"><a href="talking.html">Talking</a><a href="orb.html">The orb</a><a href="doing.html">Doing things</a><a href="showing.html">Showing &amp; moving</a><a href="personality.html">Expressions</a><a href="agents.html">Agents</a><a href="learning.html">Skills &amp; memory</a><a href="voice.html" class=on>Voice</a><a href="settings.html">Settings</a><a href="reference.html">Reference</a></nav></div></header>
+<div class="page-head"><div class="in"><div class="eyebrow">Voice</div><h1>Your voice</h1><p class="lede">“Hey Mint” is Mint's own wake word, running on your Mac. Train your voice once and only you can wake it, talk to it, or talk over it.</p></div></div><div class="wrap"><nav class="toc" aria-label="On this page"><h4>On this page</h4><a href="#wake">The wake word</a><a href="#train">Training your voice</a><a href="#lock">The voice lock</a><a href="#others">Talking to someone else</a><a href="#hearing">Words it gets wrong</a><a href="#calls">Calls, and saving memory</a></nav><main>
+
+<section id="wake" data-say="“Hey Mint” runs on your Mac.">
+  <div class="eyebrow">Voice</div>
+  <h2>The wake word</h2>
+  <p class="lead">“Hey Mint” is a small detector on your Mac. Nothing leaves the Mac while Mint is asleep; only after it wakes does your speech go to Gemini.</p>
+  <p>Rename the assistant in Settings ▸ You and it builds a new “Hey &lt;name&gt;” wake word in about a minute; “Hey Mint” keeps working until it is ready.</p>
+</section>
+
+<section id="train" data-say="Two minutes, once.">
+  <div class="eyebrow">Voice</div>
+  <h2>Training your voice</h2>
+  <div class="cols">
+    <figure><img src="shots/settings-yourvoice.png" alt="Settings ▸ Your voice. Train, retrain or forget; the voice lock; strictness; ignoring talk not meant for Mint." loading="lazy"><figcaption><b>Settings ▸ Your voice.</b> Train, retrain or forget; the voice lock; strictness; ignoring talk not meant for Mint.</figcaption></figure>
+    <div>
+      <p>Menu bar ▸ <b>Train my voice…</b> (or the button in Settings). It takes about two minutes, once:</p>
+      <ol class="steps">
+        <li>Say “Hey Mint” eight times.</li>
+        <li>Read eight sentences out loud.</li>
+        <li>Mint builds your voiceprint and retrains “Hey Mint” on your own voice.</li>
+        <li>A live test marks each thing you say “that's you” or “not you”.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="lock" data-say="With the voice lock, only you get through.">
+  <div class="eyebrow">Voice</div>
+  <h2>The voice lock</h2>
+  <ul>
+    <li>Only <b>your</b> “Hey Mint” wakes it. Someone else saying it is ignored.</li>
+    <li>Only your speech reaches Gemini; anything else is replaced by silence.</li>
+    <li>Only your voice can talk over it; another voice just turns it down while it checks.</li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>Strictness</th><th>When to use it</th></tr>
+    <tr><td>Relaxed</td><td>It sometimes misses you (a noisy room, a cold)</td></tr>
+    <tr><td>Balanced</td><td>The default</td></tr>
+    <tr><td>Strict</td><td>People with similar voices are around</td></tr>
+  </table></div>
+</section>
+
+<section id="others" data-say="Talking to someone else? I'll stay quiet.">
+  <div class="eyebrow">Voice</div>
+  <h2>Talking to someone else</h2>
+  <p>The first thing after “Hey Mint” is always for Mint. For follow-ups, Jev decides whether you were talking to Mint or to someone in the room, using what Mint last said and how loud you were. Anything on screen waits for that verdict (about a second).</p>
+  <div class="table"><table>
+    <tr><th>You say</th><th>Mint</th></tr>
+    <tr><td>“Rahul, did you finish your lunch?”</td><td>Ignores it</td></tr>
+    <tr><td>“and what's the date today?”</td><td>Answers</td></tr>
+  </table></div>
+  <p>Turn this off in the menu: “Ignore talk not meant for Mint”.</p>
+</section>
+
+<section id="hearing" data-say="If I mishear a word, tell me once.">
+  <div class="eyebrow">Voice</div>
+  <h2>Words it gets wrong</h2>
+  <p class="lead">Tell Mint once and it hears the word right from then on.</p>
+  <ul class="say"><li><q>you heard “cube con”, I said KubeCon</q></li><li><q>no, I said on-call</q></li><li><q>it's GitHub, one word</q></li><li><q>forget the KubeCon fix</q></li></ul>
+  <p>“Hey Mint” itself is cut out of what Gemini hears, so it no longer turns into words like “payment”. English and Hindi (and the two mixed) are understood; names from <code>custom.json</code> are given to the transcriber as vocabulary.</p>
+</section>
+
+<section id="calls" data-say="On a call, I step aside.">
+  <div class="eyebrow">Voice</div>
+  <h2>Calls, and saving memory</h2>
+  <ul>
+    <li><b>Calls:</b> when Zoom, Meet, Teams, FaceTime or the like uses the microphone, Mint steps aside and comes back three seconds after the call ends.</li>
+    <li><b>Asleep for a while:</b> after 20 minutes asleep and idle (Settings ▸ Appearance ▸ Free memory), Mint unloads to about 70 MB. The orb stays on screen as a picture, <kbd>⌘J</kbd> still works, and “Hey Mint” brings it back in a few seconds.</li>
+  </ul>
+</section>
+<div class="next"><a href="learning.html"><span>Previous</span><b>Skills &amp; memory</b></a><a href="settings.html"><span>Next</span><b>Settings</b></a></div></main></div><footer>Hey Mint · an open-source voice assistant for macOS · <a href="https://github.com/shivatmax/hey-mint">GitHub</a> · GPL-3.0 · every clip here is the real Mint, recorded on a blank desktop.</footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<dialog class="lb" id="lb"><img alt=""><p></p></dialog>
+<script src="assets/search-index.js"></script><script src="assets/guide.js"></script>
+</body></html>

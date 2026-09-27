@@ -1,0 +1,14 @@
+google-genai>=1.20.0
+pyaudio>=0.2.14
+pillow>=10.0.0
+mss>=9.0.1
+pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-Quartz>=10.0
+pyobjc-framework-ApplicationServices>=10.0
+openwakeword>=0.6.0
+onnxruntime>=1.17
+numpy>=1.26
+pyobjc-framework-EventKit>=10.0
+pyobjc-framework-Vision>=10.0
+pyobjc-framework-AVFoundation>=10.0
+kaldi-native-fbank>=1.20

@@ -1,0 +1,82 @@
+<!--{"title": "Showing you things, and tricks", "nav": "Showing & moving", "eyebrow": "Showing and moving", "lede": "Mint can point at anything on your screen, and it moves like a little creature: on command, beside what it shows you, and in eight tricks.", "hello": "I can mark things on this page too. Try a ▶ example."}-->
+
+<section id="marks" data-say="Ask me to show you something and I'll mark it.">
+  <div class="eyebrow">Showing</div>
+  <h2>Showing you where something is</h2>
+  <p class="lead">Ask where something is, in any app: a PDF, a web page, a chat, a document, code. Mint finds the words on screen, scrolls to them if needed, marks them, and flies over beside the mark to look at it.</p>
+  <div class="clips wide">
+    {{clip mark-box | <b>Box</b> with a note: “the deadline”. The orb swoops over and looks at it.}}
+    {{clip mark-underline | <b>Underline</b>, drawn in like a pen stroke.}}
+    {{clip mark-highlight | <b>Highlight</b>, with the note “budget cap”.}}
+    {{clip mark-circle | <b>Circle</b>, hand-drawn.}}
+    {{clip mark-arrow | <b>Arrow</b>, with the note “review day”.}}
+  </div>
+  <h3>Try it on this page</h3>
+  <p>The page's Mint can do the same here. Click an example and watch the document below:</p>
+  <ul class="say">
+    <li><q data-try="mark:#d-deadline:box:the deadline">where's the deadline?</q></li>
+    <li><q data-try="mark:#d-owner:underline">underline who owns the release notes</q></li>
+    <li><q data-try="mark:#d-budget:highlight:budget cap">highlight the budget</q></li>
+    <li><q data-try="mark:#d-risk:circle">circle the biggest risk</q></li>
+    <li><q data-try="mark:#d-review:arrow:review day">point at the review day</q></li>
+    <li><q data-try="clear">clear the marks</q></li>
+  </ul>
+  <div class="doc">
+    <h4>Launch plan — Mint 2.0</h4><small>Shared with the team · updated today</small>
+    <p>We ship the new voice experience to everyone next week. <span id="d-deadline"><b>The launch deadline is Friday, 3 October.</b></span></p>
+    <p><span id="d-review">Design review happens on Tuesday</span> with the whole team. <span id="d-owner">Priya handles the release notes and the demo.</span></p>
+    <p><span id="d-budget">Budget for the launch event stays under $4,000.</span> <span id="d-risk">Biggest risk: the wake word on older Macs.</span></p>
+  </div>
+  <h3>How it finds things</h3>
+  <ol class="steps">
+    <li><b>The exact words</b>, even when they wrap onto the next line; only those words are marked, not the whole paragraph.</li>
+    <li><b>Most of the words</b>, allowing for plurals and word endings (“refund” finds “refunds”).</li>
+    <li><b>The meaning</b>: Jev picks the line that says it from the real text on screen, or says none does.</li>
+    <li>Not visible? It scrolls the window a screen at a time, down then up, and looks again.</li>
+  </ol>
+  <p>A picture or chart with no text is marked from a screenshot (<code>mark_area</code>). Marks fade after about ten seconds, or say “clear the marks”. Name the app (“in the PDF”) and Mint brings it forward first.</p>
+</section>
+
+<section id="move" data-say="Tell me to move and I'll swoop there.">
+  <div class="eyebrow">Moving</div>
+  <h2>Moving on command</h2>
+  <p class="lead">Every move is a curved path at 60 frames a second: it speeds up, overshoots a touch and settles, leans into the turn, stretches when fast, and squashes like jelly when it lands. The new spot is kept.</p>
+  {{clip nudge | <b>“Move up”, “move left”, “go back”</b>, then home.}}
+  <ul class="say">
+    <li><q data-try="move:up">go a little up</q></li><li><q data-try="move:left">move left</q></li><li><q data-try="move:down">go a little down</q></li>
+    <li><q data-try="move:away">you're covering something</q></li><li><q data-try="move:back">go back</q></li>
+    <li><q>go to the middle</q></li><li><q>circle around the window</q></li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>Say</th><th>What happens</th></tr>
+    <tr><td>“a little / more / a lot” up, down, left, right</td><td>About 70 / 160 / 320 points that way</td></tr>
+    <tr><td>“you're covering something”, “move away”</td><td>Hops to the other end of the same edge</td></tr>
+    <tr><td>“go to the middle”</td><td>The centre of the screen</td></tr>
+    <tr><td>“go back”</td><td>Undoes the last move</td></tr>
+    <tr><td>“circle around the window”</td><td>Once round the front window: slow into the corners, fast along the edges, then home</td></tr>
+    <tr><td>“move to the top left”</td><td>A corner, kept as the orb's home</td></tr>
+  </table></div>
+</section>
+
+<section id="tricks" data-say="I know eight tricks. Try one!">
+  <div class="eyebrow">Moving</div>
+  <h2>Tricks</h2>
+  <p class="lead">Ask for one by name, or “do a trick” for a random one. Each ends back home with a little expression. “Do all your tricks” plays all eight back to back.</p>
+  <ul class="say">
+    <li><q data-try="trick:hops">hops</q></li><li><q data-try="trick:loop">do a loop the loop</q></li><li><q data-try="trick:figure8">a figure eight</q></li>
+    <li><q data-try="trick:bounce">bounce like a ball</q></li><li><q data-try="trick:zigzag">zigzag like a bee</q></li><li><q data-try="trick:chase">chase a star</q></li>
+    <li><q data-try="trick:peek">peek</q></li><li><q data-try="trick:spin">spin</q></li><li><q data-try="trick:all">do all your tricks</q></li>
+  </ul>
+  <div class="clips">
+    {{clip trick-hops | <b>Hops.</b> Three hops out, a wave, one big hop home.}}
+    {{clip trick-loop | <b>Loop.</b> Up, a loop-the-loop, then dizzy or laughing.}}
+    {{clip trick-figure8 | <b>Figure eight.</b> Fast, slow, fast.}}
+    {{clip trick-bounce | <b>Bounce.</b> Like a ball, lower each time.}}
+    {{clip trick-bee | <b>Zigzag.</b> A bumblebee flight out and back.}}
+    {{clip trick-chase | <b>Chase.</b> A star appears; it zooms after it and catches it.}}
+    {{clip trick-peek | <b>Peek.</b> Darts out, looks around, surprised.}}
+    {{clip trick-spin | <b>Spin.</b> A spinning hop, and a small one back.}}
+  </div>
+  <h3>On its own</h3>
+  <p>About once every ten minutes, only while you have left the computer alone for a few seconds and nothing is going on, it does a random trick. Turn that off with <code>"wander": false</code> in <code>settings.json</code>. Grab the orb and any move stops at once.</p>
+</section>

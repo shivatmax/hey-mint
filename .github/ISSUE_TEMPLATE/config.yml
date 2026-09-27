@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Illustrated guide
+    url: https://shivatmax.github.io/hey-mint/
+    about: What Mint can do and what to say, with clips of every feature.
+  - name: Report a security problem
+    url: https://github.com/shivatmax/hey-mint/security/advisories/new
+    about: Please report vulnerabilities privately.

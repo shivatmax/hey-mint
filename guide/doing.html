@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doing things · Hey Mint, the open-source voice assistant for macOS</title><meta name="description" content="Apps, clicking, files, the web, the browser, menus, screenshots, the clipboard and long jobs. Mint takes a direct route wherever one exists, and moves your pointer only when nothing else can do it.">
+<link rel="canonical" href="https://shivatmax.github.io/hey-mint/doing.html"><meta name="theme-color" content="#2EC4B6">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Doing things · Hey Mint, the open-source voice assistant for macOS"><meta property="og:description" content="Apps, clicking, files, the web, the browser, menus, screenshots, the clipboard and long jobs. Mint takes a direct route wherever one exists, and moves your pointer only when nothing else can do it.">
+<meta property="og:url" content="https://shivatmax.github.io/hey-mint/doing.html"><meta property="og:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Doing things · Hey Mint, the open-source voice assistant for macOS">
+<meta name="twitter:description" content="Apps, clicking, files, the web, the browser, menus, screenshots, the clipboard and long jobs. Mint takes a direct route wherever one exists, and moves your pointer only when nothing else can do it."><meta name="twitter:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/guide.css"></head>
+<body data-hello="Here&#x27;s everything I can do on your Mac.">
+<header class="top"><div class="top-in"><a class="brand" href="index.html"><span class="dot"></span>Hey Mint</a>
+<nav class="pages" aria-label="Guide pages"><a href="talking.html">Talking</a><a href="orb.html">The orb</a><a href="doing.html" class=on>Doing things</a><a href="showing.html">Showing &amp; moving</a><a href="personality.html">Expressions</a><a href="agents.html">Agents</a><a href="learning.html">Skills &amp; memory</a><a href="voice.html">Voice</a><a href="settings.html">Settings</a><a href="reference.html">Reference</a></nav></div></header>
+<div class="page-head"><div class="in"><div class="eyebrow">Doing things</div><h1>Doing things</h1><p class="lede">Apps, clicking, files, the web, the browser, menus, screenshots, the clipboard and long jobs. Mint takes a direct route wherever one exists, and moves your pointer only when nothing else can do it.</p></div></div><div class="wrap"><nav class="toc" aria-label="On this page"><h4>On this page</h4><a href="#order">How Mint picks a way to do it</a><a href="#apps">Apps, windows and tabs</a><a href="#screen">Clicking, typing and reading</a><a href="#files">Files</a><a href="#web">The web</a><a href="#browser">The browser</a><a href="#menus">Menus, scrolling and AppleScript</a><a href="#screenshots">Screenshots and the clipboard</a><a href="#everyday">Everyday Mac tasks</a><a href="#long">Long tasks across apps</a></nav><main>
+
+<section id="order" data-say="I work in the background first.">
+  <div class="eyebrow">How it chooses</div>
+  <h2>How Mint picks a way to do it</h2>
+  <ol class="steps">
+    <li><b>In the background:</b> web search and page reading, file tools, the browser's own scripting, AppleScript. Nothing moves on screen.</li>
+    <li><b>In the app, by name:</b> the app comes to the front; Mint uses its menu bar, scrolls to things, and clicks controls by their names (from the accessibility tree).</li>
+    <li><b>With your pointer, last:</b> only when you say “this” or “here”, or for things nothing else can see (canvases, games), from a screenshot.</li>
+  </ol>
+  <p>Mint is told never to say “I can't” about something on the Mac before trying these.</p>
+</section>
+
+<section id="apps" data-say="Name an app however you say it.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Apps, windows and tabs</h2>
+  <p class="lead">Name an app however you say it. Mint matches it against what is installed (exact names, known names, partial names, mishearings, then Jev) and checks the app really came to the front.</p>
+  <ul class="say">
+    <li><q>open Figma</q></li><li><q>open Xcode</q></li><li><q>go to youtube.com</q></li><li><q>open my Downloads folder</q></li>
+    <li><q>open Chrome as my work account on Gmail</q></li><li><q>open the on-call channel in Slack</q></li>
+    <li><q>what's open?</q></li><li><q>switch to the Jira tab</q></li><li><q>quit Spotify</q></li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>Tool</th><th>What it does</th></tr>
+    <tr><td><code>open_app</code></td><td>Opens or switches to an app; “Xcode” finds ZCode if that is what you have</td></tr>
+    <tr><td><code>open_url</code></td><td>Opens a page in the right browser, reusing a tab already showing it</td></tr>
+    <tr><td><code>open_chrome</code>, <code>open_slack</code></td><td>Chrome as a named profile; Slack at a workspace and channel (from <code>custom.json</code>)</td></tr>
+    <tr><td><code>list_open</code>, <code>switch_to</code></td><td>What's open; bring a tab or window forward instead of opening a duplicate</td></tr>
+    <tr><td><code>quit_app</code></td><td>Only when you said quit or close</td></tr>
+  </table></div>
+  <p>Electron apps (ChatGPT, ZCode, Slack, VS Code, Claude, Notion) are unlocked first, so Mint sees all their buttons.</p>
+</section>
+
+<section id="screen" data-say="I find buttons by their names, like a person would.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Clicking, typing and reading</h2>
+  <p class="lead">Mint reads every control in the window, picks the one you meant, presses it like a person, and checks that something changed.</p>
+  <figure><video src="clips/click-type.mp4" poster="clips/click-type.jpg" preload="none" muted loop playsinline aria-label="A click lands (ripple and paw print), then typing goes into the outlined box."></video><figcaption>A click lands (ripple and paw print), then typing goes into the outlined box.</figcaption></figure>
+  <ul class="say">
+    <li><q>click Sign in</q></li><li><q>pick the second result</q></li><li><q>type “see you at six”</q></li><li><q>put it in the search box</q></li>
+    <li><q>read this page</q></li><li><q>what does the email say?</q></li><li><q>summarise this</q></li><li><q>look at my screen</q></li>
+    <li><q>what's under my mouse?</q></li><li><q>click this</q></li><li><q>press command shift T</q></li><li><q>scroll down</q></li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>You say</th><th>Tool</th><th>How</th></tr>
+    <tr><td>“click Sign in”</td><td><code>ui_act</code></td><td>Exact label first, then Jev chooses from the real list, then a vision model on a numbered screenshot. A real mouse press; the window is compared before and after.</td></tr>
+    <tr><td>“type …”</td><td><code>type_text</code></td><td>Into the focused box, or the box you name. With “and send”, it presses the chat's Send and checks it went.</td></tr>
+    <tr><td>“read this page”</td><td><code>read_window</code></td><td>All the text, including what is scrolled out of view</td></tr>
+    <tr><td>“summarise this”</td><td><code>get_selected_text</code></td><td>The text you selected</td></tr>
+    <tr><td>“what's under my mouse?”, “click this”</td><td><code>pointer</code></td><td>The control under your pointer; clicks right there</td></tr>
+    <tr><td>“look at my screen”</td><td><code>look</code>, <code>click_at</code></td><td>A screenshot for things with no labels; says what it hit, so a wrong point is noticed</td></tr>
+  </table></div>
+  <div class="note safe">Typing into a password field is refused: you type passwords. Send, Delete-type buttons need you to have asked.</div>
+</section>
+
+<section id="files" data-say="Files: find, read, write, move. Delete means Trash.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Files</h2>
+  <ul class="say">
+    <li><q>what did I download today?</q></li><li><q>find the PDF about the lease</q></li><li><q>what's in my Projects folder?</q></li>
+    <li><q>read notes.md on my desktop and summarise it</q></li><li><q>make a file called plan.md with…</q></li><li><q>add cheese to that list</q></li>
+    <li><q>change the deadline in plan.md to Friday</q></li><li><q>show it in Finder</q></li><li><q>how big is it?</q></li>
+    <li><q>move it to Archive</q></li><li><q>rename it to final.md</q></li><li><q>make a folder called Receipts</q></li><li><q>delete the old draft</q></li>
+  </ul>
+  <div class="table"><table>
+    <tr><th>Tool</th><th>Notes</th></tr>
+    <tr><td><code>find_files</code></td><td>Spotlight, by name and content, newest first. With no query: recent items on Desktop, Documents, Downloads. Kinds: pdf, image, doc, sheet, slides, code, video, audio, folder, app</td></tr>
+    <tr><td><code>read_file</code></td><td>Text, code, Markdown, CSV, JSON, PDF, Word, RTF, HTML; long files in parts</td></tr>
+    <tr><td><code>write_file</code></td><td>create, append, replace (the text must occur once), overwrite (the old version is backed up first). A bare name goes to <code>~/Documents/Mint</code></td></tr>
+    <tr><td><code>file_action</code></td><td>open, reveal, info, move, copy, rename, make_folder, trash. Never overwrites an existing file</td></tr>
+  </table></div>
+  <div class="note safe">Off limits: <code>~/.ssh</code>, <code>~/.aws</code>, keychains, cookies, Mail and Messages data, browser profiles, <code>.env</code> and credential files. “Delete” means the Trash, only when you asked. Text that looks like a password, key or card number is never written.</div>
+</section>
+
+<section id="web" data-say="Web search and page reading, no browser needed.">
+  <div class="eyebrow">Doing things</div>
+  <h2>The web</h2>
+  <ul class="say"><li><q>what's the latest version of Python?</q></li><li><q>search the web for flights to Goa</q></li><li><q>read that article</q></li><li><q>what does python.org/downloads say?</q></li></ul>
+  <p><code>web_search</code> returns titles, links and snippets (Exa or Tavily with a key, DuckDuckGo without). <code>read_url</code> fetches a page's readable text without opening anything on screen.</p>
+</section>
+
+<section id="browser" data-say="Tabs, forms, groups, extensions: the whole browser.">
+  <div class="eyebrow">Doing things</div>
+  <h2>The browser</h2>
+  <p class="lead">Full control of Chrome, Safari, Brave, Arc and Edge, including pages you are logged in to.</p>
+  <ul class="say">
+    <li><q>what tabs do I have open?</q></li><li><q>switch to my Gmail tab</q></li><li><q>open github.com in a new tab</q></li><li><q>go back</q></li><li><q>reload</q></li>
+    <li><q>is there a pricing section?</q></li><li><q>click Learn more</q></li><li><q>put my name in the Full name field</q></li><li><q>choose Blue in the colour list</q></li>
+    <li><q>scroll to the bottom</q></li><li><q>close the YouTube tab</q></li><li><q>put YouTube and anime in a group called Entertainment</q></li>
+    <li><q>open the KeepWatching extension</q></li><li><q>always open YouTube in Brave</q></li><li><q>which browser do you use for what?</q></li>
+  </ul>
+  <h3>Which browser it uses</h3>
+  <ol class="steps">
+    <li>A browser you name: “in Brave”, “on this Chrome only”.</li>
+    <li>Your browser rules: ones you set (“always use Brave for entertainment”) and remembered preferences. Topics cover their sites: entertainment is YouTube, Netflix, Twitch, Spotify, anime sites…</li>
+    <li>The one Gemini asked for; then the one in front; then the one Mint last used; then the Mac's default.</li>
+  </ol>
+  <p>A tab already showing the page is reused; a browser that isn't running is started first.</p>
+  <div class="note">Page actions are fastest with <b>View ▸ Developer ▸ Allow JavaScript from Apple Events</b> turned on in Chrome or Brave (Safari: Develop menu). Mint never turns it on itself; without it everything except raw JavaScript still works through Accessibility.</div>
+  <div class="note safe">Password and card fields are never filled. Send, Submit, Post, Buy, Pay, Delete and closing tabs need you to have asked. Page scripts cannot read cookies or storage, send data out, or submit forms.</div>
+</section>
+
+<section id="menus" data-say="Every command is in the menu bar.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Menus, scrolling and AppleScript</h2>
+  <ul class="say">
+    <li><q>in Finder go to Applications</q></li><li><q>export this as PDF</q></li><li><q>what's in the View menu?</q></li><li><q>what's the shortcut for…?</q></li>
+    <li><q>scroll to Privacy & Security</q></li><li><q>scroll the sidebar down</q></li><li><q>how much free space do I have?</q></li><li><q>how many tracks are in my Focus playlist?</q></li>
+  </ul>
+  <p><code>menu</code> reads the menu bar directly (no clicking) and reports shortcuts; it notices when an item already says “Hide Path Bar”. <code>scroll_to</code> scrolls the right pane until the thing appears, then highlights it. <code>run_applescript</code> covers scriptable apps (Finder, Music, Notes, Reminders, Calendar, Mail drafts, System Events). Quit, Close, Delete, Send and Empty Trash are refused unless you asked.</p>
+</section>
+
+<section id="screenshots" data-say="Screenshots and the clipboard.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Screenshots and the clipboard</h2>
+  <div class="cols">
+    <div><h3>Screenshots</h3>
+      <ul class="say"><li><q>take a screenshot</q></li><li><q>screenshot this window</q></li><li><q>screenshot the chart</q></li><li><q>take an 800x600 screenshot</q></li><li><q>let me pick the area</q></li><li><q>don't save it, just copy it</q></li></ul>
+      <p>Saved where macOS saves screenshots and copied to the clipboard. A window works even when covered. Mint's own orb and chat never appear in it.</p></div>
+    <div><h3>Clipboard</h3>
+      <ul class="say"><li><q>what's on my clipboard?</q></li><li><q>copy the path of this</q></li><li><q>copy this file</q></li><li><q>paste it</q></li><li><q>what did I copy before?</q></li><li><q>bring back the second one</q></li><li><q>clear the clipboard</q></li></ul>
+      <p>The last 30 copies are kept in memory only, never on disk. Hidden password-manager items and anything that looks like a secret are never kept.</p></div>
+  </div>
+</section>
+
+<section id="everyday" data-say="Timers, calendar, reminders, notes, email drafts.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Everyday Mac tasks</h2>
+  <ul class="say">
+    <li><q>set a ten minute timer for tea</q></li><li><q>what's on today?</q></li><li><q>remind me to call Sam at five</q></li><li><q>make a note: buy oat milk</q></li>
+    <li><q>draft an email to Priya saying I'll be late</q></li><li><q>what are my latest emails?</q></li><li><q>read the second one</q></li>
+    <li><q>volume 30</q></li><li><q>next track</q></li><li><q>dark mode on</q></li><li><q>lock the screen</q></li><li><q>what's the battery?</q></li>
+    <li><q>make a PDF of this summary</q></li><li><q>export this Google Doc as PDF</q></li><li><q>start work</q></li>
+  </ul>
+  <p>Emails are always drafts: Mint never sends one. “start work” runs a routine you define in <code>custom.json</code>.</p>
+</section>
+
+<section id="long" data-say="Long jobs: I plan, keep going, and report once.">
+  <div class="eyebrow">Doing things</div>
+  <h2>Long tasks across apps</h2>
+  <ul class="say">
+    <li><q>do all your tricks, then smile, then tell me the time</q></li>
+    <li><q>open ChatGPT, research honeybees with sources, give it to Codex to build a one-page site, open it on localhost and check it</q></li>
+    <li><q>open Notes, Calendar and Slack</q></li>
+  </ul>
+  <ul>
+    <li><b>All of it in one go.</b> Ask for a list and Mint does it back to back without waiting for “next”, then reports once. If it stops half way, it is nudged to carry on.</li>
+    <li><b>Waiting for apps.</b> <code>wait_until_done</code> watches ChatGPT (or any app) until the answer stops changing and no Stop button is left.</li>
+    <li><b>Showing what was built.</b> <code>preview_site</code> serves a folder on <code>localhost:8000</code>, opens it, and checks the title and missing files.</li>
+    <li><b>Sending safely.</b> A message is sent only when you asked, and never twice within two minutes.</li>
+  </ul>
+</section>
+<div class="next"><a href="orb.html"><span>Previous</span><b>The orb</b></a><a href="showing.html"><span>Next</span><b>Showing &amp; moving</b></a></div></main></div><footer>Hey Mint · an open-source voice assistant for macOS · <a href="https://github.com/shivatmax/hey-mint">GitHub</a> · GPL-3.0 · every clip here is the real Mint, recorded on a blank desktop.</footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<dialog class="lb" id="lb"><img alt=""><p></p></dialog>
+<script src="assets/search-index.js"></script><script src="assets/guide.js"></script>
+</body></html>

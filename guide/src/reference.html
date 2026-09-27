@@ -1,0 +1,80 @@
+<!--{"title": "Reference", "nav": "Reference", "eyebrow": "Reference", "lede": "Installing, where everything lives, fixing common problems, testing, and every tool Mint has.", "hello": "The nuts and bolts."}-->
+
+<section id="install" data-say="Three commands to install.">
+  <div class="eyebrow">Reference</div>
+  <h2>Installing</h2>
+<pre>./set-key.sh          # paste your Gemini key
+./install.sh          # builds ~/Applications/Mint.app
+open ~/Applications/Mint.app</pre>
+  <div class="cols">
+    <div><h3>Permissions</h3><p><b>Microphone</b> first. <b>Accessibility</b> from the menu bar icon (clicking, typing, menus, scrolling). <b>Screen Recording</b>, <b>Automation</b> (per app), <b>Calendars</b>, <b>Reminders</b> and <b>Files and Folders</b> are asked for the first time a tool needs them.</p></div>
+    <div><h3>Keys</h3><p>In <code>.env</code>, readable only by you: <code>GEMINI_API_KEY</code>, <code>TYPESAFE_API_KEY</code> (Jev), optionally <code>OPENAI_API_KEY</code> / <code>OPENROUTER_API_KEY</code> (agents) and <code>EXA_API_KEY</code> / <code>TAVILY_API_KEY</code> (web search).</p></div>
+  </div>
+  <p>The installed app runs from <code>~/Library/Application Support/Mint</code>; re-run <code>./install.sh</code> after changing code.</p>
+</section>
+
+<section id="models" data-say="Two models share the work.">
+  <div class="eyebrow">Reference</div>
+  <h2>What runs Mint</h2>
+  <div class="table"><table>
+    <tr><th>Model</th><th>What it does</th></tr>
+    <tr><td><b>Gemini Live</b></td><td>Listens, talks, reasons, plans, and calls the tools</td></tr>
+    <tr><td><b>Jev</b></td><td>Fast, careful choices from real lists: which button, which skill, which memories, which app you meant, whether you were talking to Mint</td></tr>
+    <tr><td><b>Gemini Flash</b></td><td>Background work: summaries, learning facts, writing skills, reading screenshots</td></tr>
+    <tr><td><b>GPT-6 Luna, Codex</b></td><td>The agents</td></tr>
+  </table></div>
+</section>
+
+<section id="files" data-say="Where everything lives.">
+  <div class="eyebrow">Reference</div>
+  <h2>Where everything lives</h2>
+  <div class="table"><table>
+    <tr><th>Where</th><th>What</th></tr>
+    <tr><td><code>.env</code></td><td>Keys and model settings</td></tr>
+    <tr><td><code>settings.json</code></td><td>Appearance, microphone, voice, shortcuts, stop words</td></tr>
+    <tr><td><code>custom.json</code></td><td>Accounts, workspaces, aliases, routines, instructions</td></tr>
+    <tr><td><code>agents.json</code></td><td>Agents</td></tr>
+    <tr><td><code>skills/</code></td><td>Skills by category; <code>_archive/</code> for removed ones</td></tr>
+    <tr><td><code>memory/bank.json</code>, <code>memory/MEMORY.md</code></td><td>Memories</td></tr>
+    <tr><td><code>history.jsonl</code>, <code>summary.md</code></td><td>Conversation log and running summary</td></tr>
+    <tr><td><code>~/Documents/Mint/</code></td><td>Files Mint makes: PDFs, notes, agent work</td></tr>
+    <tr><td><code>…/Mint/backups/</code></td><td>Earlier versions of files Mint overwrote</td></tr>
+    <tr><td><code>~/Library/Logs/Mint/mint.log</code></td><td>The log: every tool call and result</td></tr>
+  </table></div>
+</section>
+
+<section id="fixes" data-say="Something off? Look here.">
+  <div class="eyebrow">Reference</div>
+  <h2>Fixing common problems</h2>
+  <div class="table"><table>
+    <tr><th>Problem</th><th>Fix</th></tr>
+    <tr><td>“Mint lacks Accessibility permission”</td><td>Menu bar ▸ Grant Accessibility…, switch Mint on</td></tr>
+    <tr><td>“has not allowed Mint to control that app”</td><td>System Settings ▸ Privacy &amp; Security ▸ Automation ▸ Mint</td></tr>
+    <tr><td>Browser JavaScript from Apple Events is off</td><td>Reading and clicking still work. For raw JavaScript: Chrome ▸ View ▸ Developer</td></tr>
+    <tr><td>“macOS did not let Mint read it”</td><td>System Settings ▸ Privacy &amp; Security ▸ Files and Folders ▸ Mint</td></tr>
+    <tr><td>It hears the room</td><td>Train your voice, or turn the mic off and type (<kbd>⌘J</kbd>)</td></tr>
+    <tr><td>It mishears a name</td><td>Tell it once (see <a href="voice.html#hearing">Words it gets wrong</a>)</td></tr>
+    <tr><td>It hangs</td><td><code>kill -USR1 &lt;pid&gt;</code> writes every thread's stack to the log</td></tr>
+  </table></div>
+</section>
+
+<section id="testing" data-say="Testing it yourself.">
+  <div class="eyebrow">Reference</div>
+  <h2>Testing it yourself</h2>
+<pre>.venv/bin/python -m mint --demo                  # the animation tour
+.venv/bin/python -m mint --say "do a trick"      # talk to the running Mint by text
+.venv/bin/python bench/harness_bench.py          # files, guards, browser helpers, web
+.venv/bin/python guide/make_clips.py             # re-record this guide's clips (keep the screen quiet)
+.venv/bin/python guide/encode_clips.py && .venv/bin/python guide/build.py</pre>
+</section>
+
+<section id="tools" data-say="All 88 tools.">
+  <div class="eyebrow">Reference</div>
+  <h2>Every tool</h2>
+  <p class="lead">What Mint can call, with the first line of each description. You never need these names: just say what you want.</p>
+  <details open><summary>All tools</summary>
+  <div class="table"><table>
+    <tr><th>Tool</th><th>Arguments</th><th>What it does</th></tr>
+    {{tools}}
+  </table></div></details>
+</section>

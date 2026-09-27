@@ -1,0 +1,41 @@
+{
+  "about_me": "I'm Alex. I work at Acme. Keep spoken replies short.",
+  "accounts": {
+    "work": "alex@example.com",
+    "acme": "alex@example.com"
+  },
+  "slack_workspaces": {
+    "work": "Acme",
+    "acme": "Acme",
+    "experts": "Acme Experts",
+    "egocentric": "Egocentric Video Collection"
+  },
+  "aliases": {
+    "on call": "on-call",
+    "oncall": "on-call"
+  },
+  "routines": {
+    "start work": {
+      "description": "work Gmail in Chrome, then Slack at the on-call channel",
+      "steps": [
+        {
+          "tool": "open_chrome",
+          "account": "work",
+          "url": "mail.google.com"
+        },
+        {
+          "tool": "open_slack",
+          "workspace": "work",
+          "channel": "on-call"
+        }
+      ]
+    }
+  },
+  "instructions": "",
+  "slack_channels": {
+    "channel-name": {
+      "team": "T0000000000",
+      "id": "C0000000000"
+    }
+  }
+}

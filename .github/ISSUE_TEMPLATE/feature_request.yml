@@ -1,0 +1,12 @@
+name: Feature idea
+description: Something you'd like Mint to be able to do
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes: {label: What you'd say to Mint, placeholder: "“Hey Mint, …”"}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: What should happen}
+    validations: {required: true}
+  - type: textarea
+    attributes: {label: Anything else, description: Apps involved, how you do it by hand today.}

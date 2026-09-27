@@ -1,0 +1,59 @@
+<!--{"title": "Settings, sharing and safety", "nav": "Settings", "eyebrow": "Settings", "lede": "Every setting, where it lives, how to show Mint in a Google Meet share, how to quit it completely, and the rules it never breaks.", "hello": "You can change almost anything about me."}-->
+
+<section id="window" data-say="Settings: menu bar icon, or ⌘,.">
+  <div class="eyebrow">Settings</div>
+  <h2>The Settings window</h2>
+  <p class="lead">Open it from the menu bar icon ▸ <b>Settings…</b> (<kbd>⌘,</kbd>), the orb's right-click menu, or the chat's settings button. Or just ask Mint to change something.</p>
+  <div class="clips wide">
+    {{img settings-appearance.png | <b>Appearance.</b> Theme, position, spoken replies, face, effects, captions, listening while working, freeing memory while asleep.}}
+    {{img settings-mintvoice.png | <b>Mint's voice.</b> One of 30 voices, with a Listen button, and a speaking style.}}
+    {{img settings-audio.png | <b>Audio.</b> Microphone and speaker, echo cancellation, stepping aside for calls.}}
+  </div>
+  <div class="table"><table>
+    <tr><th>Tab</th><th>What is in it</th></tr>
+    <tr><td>You</td><td>The assistant's name (a new name gets its own wake word), your name, and “about you”, given to Mint at the start of every conversation</td></tr>
+    <tr><td>Your voice</td><td>Train, retrain, forget; voice lock; strictness; ignoring others</td></tr>
+    <tr><td>Mint's voice</td><td>Voice and speaking style</td></tr>
+    <tr><td>Audio</td><td>Devices, echo cancellation, calls</td></tr>
+    <tr><td>Appearance</td><td>Themes (Mint blue, Aurora, Sunset, Mint, Rose, Mono), position, face, captions, effects, free memory</td></tr>
+    <tr><td>Skills &amp; Memory</td><td>Opens the Skills &amp; Memory window</td></tr>
+  </table></div>
+  <h3>In the menu</h3>
+  <p>Face on the orb · Word-by-word captions · On-screen effects · Listen while working · <b>Cute critter helpers (sub-agents)</b> · <b>Cute action flourishes</b> · Visible in screen sharing · Position · Train my voice · Skills &amp; memory · Quit Mint.</p>
+  <h3>Files</h3>
+  <p><code>settings.json</code> applies within two seconds of an edit (shortcuts such as <code>"toggle": "cmd+j"</code>, stop words, vocabulary, <code>"wander": false</code>). <code>custom.json</code> holds accounts, Slack workspaces and channels, aliases, routines and standing instructions.</p>
+</section>
+
+<section id="share" data-say="Want me in your Google Meet share? Just say so.">
+  <div class="eyebrow">Settings</div>
+  <h2>Screen sharing</h2>
+  <p class="lead">By default Mint is invisible in screen shares and recordings: people in a Google Meet or Zoom share see your screen without it.</p>
+  <ul class="say"><li><q>Mint, be visible</q></li><li><q>show yourself on the screen share</q></li><li><q>hide from the share</q></li><li><q>go invisible</q></li></ul>
+  <p>Or use the eye button in the chat, or the menu. While Mint is visible, a small red dot pulses on the orb (you can see it in this guide's clips, which were recorded with Mint visible). Mint still hides itself for the split second it takes its own screenshots, so it never reads itself.</p>
+</section>
+
+<section id="quit" data-say="Quitting stops everything.">
+  <div class="eyebrow">Settings</div>
+  <h2>Quitting, and starting at login</h2>
+  <ul>
+    <li>Settings ▸ <b>Quit Mint</b> (bottom of every tab), the menu bar or orb menu ▸ <b>Quit Mint</b>, or say “quit Mint”.</li>
+    <li>This stops everything: agents, Codex runs, preview servers. “Quit Spotify” quits Spotify, never Mint.</li>
+    <li><b>Start Mint when I log in</b> sits next to the Quit button. Start it again from Spotlight: “Mint”.</li>
+  </ul>
+  <ul class="say"><li><q>quit Mint</q></li><li><q>go to sleep</q></li></ul>
+</section>
+
+<section id="safety" data-say="Some things I simply won't do.">
+  <div class="eyebrow">Settings</div>
+  <h2>Rules Mint never breaks</h2>
+  <div class="table"><table>
+    <tr><th></th><th>Rule</th></tr>
+    <tr><td>🔒</td><td>Never enters passwords or card numbers, never fills password fields, never writes secrets into files, skills or memories</td></tr>
+    <tr><td>✉️</td><td>Never sends an email: drafts only. A message, post or form goes out only when you asked, and never twice within two minutes</td></tr>
+    <tr><td>🗂️</td><td>Never quits your apps unless asked; “delete” means the Trash; never overwrites a file without a backup</td></tr>
+    <tr><td>🚫</td><td>Private folders (keys, keychains, browser profiles, Mail, Messages) are off limits</td></tr>
+    <tr><td>🧰</td><td>AppleScript can't run shell commands; shell access is off unless Mint is started with <code>MINT_ALLOW_SHELL=1</code></td></tr>
+    <tr><td>🌐</td><td>Browser scripts can't read cookies or storage, send data out, or submit forms</td></tr>
+    <tr><td>✋</td><td>“Stop” halts everything at once, including queued clicks and keys</td></tr>
+  </table></div>
+</section>

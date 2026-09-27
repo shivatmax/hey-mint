@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talking to Mint · Hey Mint, the open-source voice assistant for macOS</title><meta name="description" content="One continuous conversation, by voice or by typing. Follow-ups carry on the task you are in, and the last few turns survive a restart.">
+<link rel="canonical" href="https://shivatmax.github.io/hey-mint/talking.html"><meta name="theme-color" content="#2EC4B6">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Talking to Mint · Hey Mint, the open-source voice assistant for macOS"><meta property="og:description" content="One continuous conversation, by voice or by typing. Follow-ups carry on the task you are in, and the last few turns survive a restart.">
+<meta property="og:url" content="https://shivatmax.github.io/hey-mint/talking.html"><meta property="og:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Talking to Mint · Hey Mint, the open-source voice assistant for macOS">
+<meta name="twitter:description" content="One continuous conversation, by voice or by typing. Follow-ups carry on the task you are in, and the last few turns survive a restart."><meta name="twitter:image" content="https://shivatmax.github.io/hey-mint/assets/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/guide.css"></head>
+<body data-hello="This page is about talking to me. Scroll on.">
+<header class="top"><div class="top-in"><a class="brand" href="index.html"><span class="dot"></span>Hey Mint</a>
+<nav class="pages" aria-label="Guide pages"><a href="talking.html" class=on>Talking</a><a href="orb.html">The orb</a><a href="doing.html">Doing things</a><a href="showing.html">Showing &amp; moving</a><a href="personality.html">Expressions</a><a href="agents.html">Agents</a><a href="learning.html">Skills &amp; memory</a><a href="voice.html">Voice</a><a href="settings.html">Settings</a><a href="reference.html">Reference</a></nav></div></header>
+<div class="page-head"><div class="in"><div class="eyebrow">Basics</div><h1>Talking to Mint</h1><p class="lede">One continuous conversation, by voice or by typing. Follow-ups carry on the task you are in, and the last few turns survive a restart.</p></div></div><div class="wrap"><nav class="toc" aria-label="On this page"><h4>On this page</h4><a href="#wake">Waking Mint and asking</a><a href="#stop">Stopping it</a><a href="#chat">The chat window</a><a href="#change">Changing how Mint behaves</a><a href="#languages">Languages and names</a></nav><main>
+
+<section id="wake" data-say="Say “Hey Mint”, click me, or press ⌘J.">
+  <div class="eyebrow">Basics</div>
+  <h2>Waking Mint and asking</h2>
+  <p class="lead">Say “Hey Mint”, then ask in your own words. Your words appear in a caption beside the orb as you speak; Mint's reply is captioned the same way.</p>
+  <figure><video src="clips/talk.mp4" poster="clips/talk.jpg" preload="none" muted loop playsinline aria-label="A request from start to finish. Your words rise in word by word, the orb thinks (eyes up), turns into the Slack icon while opening it, shows a ✓, and captions its reply."></video><figcaption><b>A request from start to finish.</b> Your words rise in word by word, the orb thinks (eyes up), turns into the Slack icon while opening it, shows a ✓, and captions its reply.</figcaption></figure>
+  <div class="table"><table>
+    <tr><th>To do this</th><th>Do this</th></tr>
+    <tr><td>Wake it</td><td>“Hey Mint”, click the orb, or <kbd>⌘J</kbd> and type</td></tr>
+    <tr><td>Keep going</td><td>Just carry on talking; no need to say “Hey Mint” again while it is awake</td></tr>
+    <tr><td>Talk over it</td><td>Start talking while it speaks: it stops and listens (echo cancellation keeps its own voice out)</td></tr>
+    <tr><td>Send it to sleep</td><td>“bye”, “that's all”, “good night”, “chalo bye”; it also sleeps after 12 quiet seconds</td></tr>
+    <tr><td>From a script</td><td><code>.venv/bin/python -m mint --say "what's on my calendar today?"</code></td></tr>
+  </table></div>
+  <ul class="say">
+    <li><q>what's on my calendar today?</q></li><li><q>and what about tomorrow?</q></li><li><q>open Slack and go to the on-call channel</q></li>
+    <li><q>what was that date again?</q></li><li><q>bye</q></li>
+  </ul>
+  <div class="note tip">It is one conversation. “No, the other project” or “add cheese to that list” continue what you were doing. After a restart, the last few turns (within six hours) and a running summary carry over.</div>
+</section>
+
+<section id="stop" data-say="“Stop” halts everything at once.">
+  <div class="eyebrow">Basics</div>
+  <h2>Stopping it</h2>
+  <p class="lead">“Stop”, “cancel”, “never mind” or “hold on” halts everything at once, including clicks and keys already queued. The ■ button in the chat does the same.</p>
+  <figure><video src="clips/stop.mp4" poster="clips/stop.jpg" preload="none" muted loop playsinline aria-label="“Stop.” Mint was about to click Send; the orb flashes red and nothing more happens."></video><figcaption><b>“Stop.”</b> Mint was about to click Send; the orb flashes red and nothing more happens.</figcaption></figure>
+  <ul class="say"><li><q>stop</q></li><li><q>cancel that</q></li><li><q>never mind</q></li><li><q>hold on</q></li></ul>
+</section>
+
+<section id="chat" data-say="⌘J opens my chat.">
+  <div class="eyebrow">Basics</div>
+  <h2>The chat window</h2>
+  <p class="lead">Press <kbd>⌘J</kbd> (or click the orb) to open the chat. Everything said is there, every action with a ✓ or ✗, and a box to type in. Typing never turns the microphone on.</p>
+  <div class="cols">
+    <figure><video src="clips/chat.mp4" poster="clips/chat.jpg" preload="none" muted loop playsinline aria-label="The chat opening. The conversation, the list of actions, and the typing box."></video><figcaption><b>The chat opening.</b> The conversation, the list of actions, and the typing box.</figcaption></figure>
+    <div>
+      <h3>The buttons along the top</h3>
+      <div class="table"><table>
+        <tr><th>Button</th><th>What it does</th></tr>
+        <tr><td>👁 Eye</td><td>Show or hide Mint in screen sharing (red when visible)</td></tr>
+        <tr><td>⋯ More</td><td>Summarise and compact, clear the chat, start a new session</td></tr>
+        <tr><td>☾ Moon</td><td>Send Mint to sleep</td></tr>
+        <tr><td>🎙 Mic</td><td>Microphone on or off</td></tr>
+        <tr><td>🔊 Speaker</td><td>Spoken replies on or off</td></tr>
+        <tr><td>⚙ Settings</td><td>Settings, voice training, quitting</td></tr>
+        <tr><td>✕ Close</td><td>Close the chat (<kbd>Esc</kbd> works too)</td></tr>
+      </table></div>
+    </div>
+  </div>
+  <h3>Keeping it tidy</h3>
+  <ul class="say"><li><q>summarise and compact the session</q></li><li><q>clear the chat</q></li><li><q>start a new session</q></li></ul>
+  <p><b>Compact</b> writes a short summary and restarts Mint with just that as context. <b>Clear</b> empties the window but keeps memory. <b>New session</b> saves this conversation to memory and starts fresh.</p>
+</section>
+
+<section id="change" data-say="Tell me how to behave and I'll change.">
+  <div class="eyebrow">Basics</div>
+  <h2>Changing how Mint behaves</h2>
+  <p class="lead">Mint changes its own settings when you ask, and tells you what it changed.</p>
+  <div class="table"><table>
+    <tr><th>Say</th><th>What changes</th></tr>
+    <tr><td>“don't speak, just chat” / “you can speak again”</td><td>Spoken replies off / on</td></tr>
+    <tr><td>“turn off the mic”</td><td>Microphone off (then you type)</td></tr>
+    <tr><td>“make it pink”, “use the aurora theme”</td><td>Theme</td></tr>
+    <tr><td>“move to the top left”</td><td>Where the orb lives</td></tr>
+    <tr><td>“hide the face”</td><td>The orb's face</td></tr>
+    <tr><td>“use a deeper voice”, “talk slower”, “switch to Puck”</td><td>Voice and speaking style</td></tr>
+  </table></div>
+  <ul class="say"><li><q>don't speak, just chat</q></li><li><q>make it pink</q></li><li><q>move to the top left</q></li><li><q>use a deeper voice</q></li><li><q>talk slower</q></li></ul>
+</section>
+
+<section id="languages" data-say="English, Hindi, or both mixed.">
+  <div class="eyebrow">Basics</div>
+  <h2>Languages and names</h2>
+  <p>Mint understands English and Hindi, and the two mixed. Names from your accounts, Slack channels and routines are given to the transcriber as vocabulary, so it spells them right. When it mishears, tell it once (see <a href="voice.html#hearing">Words it gets wrong</a>).</p>
+</section>
+<div class="next"><a href="index.html"><span>Previous</span><b>Home</b></a><a href="orb.html"><span>Next</span><b>The orb</b></a></div></main></div><footer>Hey Mint · an open-source voice assistant for macOS · <a href="https://github.com/shivatmax/hey-mint">GitHub</a> · GPL-3.0 · every clip here is the real Mint, recorded on a blank desktop.</footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<dialog class="lb" id="lb"><img alt=""><p></p></dialog>
+<script src="assets/search-index.js"></script><script src="assets/guide.js"></script>
+</body></html>

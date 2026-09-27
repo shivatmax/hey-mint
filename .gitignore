@@ -1,0 +1,28 @@
+# Python and build output
+.venv/
+__pycache__/
+*.pyc
+build/
+.DS_Store
+
+# Keys and personal data: never commit these
+.env
+custom.json
+settings.json
+agents.json
+history.jsonl
+summary.md
+memory.md
+memories.md
+memory/
+voiceprint.json
+voice/
+skills/
+browser_rules.json
+made_files.json
+agents-experience.jsonl
+
+# Large or downloaded
+models/*.onnx
+bench/data/
+ref/
