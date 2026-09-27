@@ -299,6 +299,8 @@ def declarations() -> list[types.FunctionDeclaration]:
                 "work that has no better tool. Never run destructive commands without asking.",
                 {"command": {**STRING, "description": "The command to run."}}, ["command"])
         )
+    if not config.desktop_voice():
+        functions = [f for f in functions if f.name != "desktop"]
     return functions
 
 
@@ -473,10 +475,10 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:
 
     if name in {"scroll", "press_key", "media_key", "type_text", "get_selected_text"} \
             and not fastinput.has_accessibility():
-        goal = _fallback_goal(name, args or {})
+        goal = _fallback_goal(name, args or {}) if config.desktop_voice() else None
         if goal is None:
             return (f"Cannot {name.replace('_', ' ')} without Accessibility permission. "
-                    "Tell the user to run: ./run.sh --grant"), None
+                    "Tell the user to switch Mint on in System Settings > Privacy & Security > Accessibility."), None
         return await bridge.run_goal(goal), None
 
     if name == "open_slack":

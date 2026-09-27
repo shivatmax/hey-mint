@@ -68,6 +68,9 @@ class DesktopBridge:
 
     async def run_goal(self, goal: str, timeout: float | None = None) -> str:
         timeout = timeout or config.DESKTOP_TIMEOUT
+        if not config.desktop_voice():
+            return ("FAILED: the desktop tool is not available on this Mac (Desktop Voice is not "
+                    "installed). Do the same with ui_act, or click_text for a visible label.")
         async with self._lock:
             self.last_app, self.last_controls = "", -1
             try:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 
@@ -80,14 +79,13 @@ def preflight() -> list[str]:
             f"{API_KEY_ENV} is not set. Get a key at https://aistudio.google.com/apikey "
             f"and run: export {API_KEY_ENV}=..."
         )
-    if not JEV_APP.exists():
-        problems.append(
-            f"Desktop Voice is not installed at {JEV_APP}. Build it from the jev-use "
-            "checkout (https://github.com/savka777/jev-use): bash build.sh"
-        )
-    if shutil.which("log") is None and not Path("/usr/bin/log").exists():
-        problems.append("/usr/bin/log is missing; cannot read results back from Desktop Voice.")
     return problems
+
+
+def desktop_voice() -> bool:
+    """Desktop Voice (jev-use) is optional: with it, the `desktop` tool is offered and backs up
+    typing and scrolling when Accessibility is off; without it, ui_act does the same job."""
+    return JEV_APP.exists() and Path("/usr/bin/log").exists()
 
 
 SYSTEM_INSTRUCTION = """

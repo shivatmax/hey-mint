@@ -65,6 +65,19 @@ short clip of every feature and a live orb on the page that acts out the example
 
 ### Download the app (easiest)
 
+**What you need:** an Apple silicon Mac (M1 or later) on macOS 14.2+, an internet connection,
+and a free [Gemini API key](https://aistudio.google.com/apikey). That's all: the app carries its own
+Python, libraries and models, and nothing else has to be installed.
+
+Optional extras, each unlocking one thing:
+
+| Extra | Unlocks |
+|---|---|
+| OpenAI API key (asked for on first launch) | Background agents: research, documents, code |
+| The [ChatGPT app](https://openai.com/chatgpt/desktop/) (it brings Codex) | The agent that builds websites and code projects |
+| TypeSafe key (asked for on first launch) | Jev, surer picks of which button, skill or memory is meant |
+| [jev-use](https://github.com/savka777/jev-use) (Desktop Voice) | A second screen-control engine; Mint's own `ui_act` does this job without it |
+
 1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest)
    (Apple silicon Macs, macOS 14.2 or later). Everything it needs is inside: no Python, Homebrew or Xcode.
 2. Open the DMG and drag **Hey Mint** into **Applications**, then open it.
