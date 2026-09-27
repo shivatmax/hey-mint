@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A developer handbook ([docs/development.md](docs/development.md)): running from a checkout,
+  where new code goes, testing, building the Mac app and releasing.
+- `run.sh` no longer needs the optional Desktop Voice app.
+
 ## 0.1.1 (2026-09-28)
 
 - Fix: the voice package and the example skills were left out of the repository (and the

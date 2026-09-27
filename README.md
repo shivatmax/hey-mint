@@ -12,6 +12,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 [Install](#install) ·
 [What it can do](#what-it-can-do) ·
 [How it works](#how-it-works) ·
+[Development](#development) ·
 [Contributing](CONTRIBUTING.md)
 
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-2EC4B6)
@@ -134,7 +135,7 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
   by how often they work.
 
 How the pieces fit together is in [docs/architecture.md](docs/architecture.md); every command and
-tool is in [docs/usage.md](docs/usage.md).
+tool is in [docs/usage.md](docs/usage.md); working on Mint is in [docs/development.md](docs/development.md).
 
 ## Privacy and safety
 
@@ -160,8 +161,9 @@ mint/
   agents/      background agents, Codex, teams
   resources/   example skills
 launcher/      Mint.app's launcher and the low-memory Mint Ear (Swift)
+packaging/     building the downloadable app and DMG
 guide/         the illustrated guide (static site)
-docs/          architecture and usage reference
+docs/          architecture, usage and development handbook
 tests/         offline checks (pytest)
 scripts/       training the wake word model
 models/        the "Hey Mint" wake word model
@@ -169,19 +171,76 @@ models/        the "Hey Mint" wake word model
 
 ## Development
 
+The full handbook is **[docs/development.md](docs/development.md)**: running from a checkout,
+where new code goes, tests, the guide, building the Mac app, and releasing.
+
+### Get going
+
 ```sh
-make setup      # .venv with dependencies, pytest and ruff
+git clone https://github.com/shivatmax/hey-mint.git && cd hey-mint
+make setup      # .venv with the dependencies, pytest and ruff
+./set-key.sh    # your Gemini key, saved in .env (never committed)
 make demo       # the animation tour, no API key needed
-make run        # run from the checkout (hands-free)
-make test       # offline checks; make test-all adds network and AppleScript checks
-make install    # build and install ~/Applications/Mint.app
-make app        # build dist/Hey Mint.app and a DMG with everything bundled
+make run        # run Mint from the checkout, logs in the terminal
 ```
+
+Handy while working:
+
+```sh
+.venv/bin/python -m mint --tool get_status '{}'   # run one tool directly, no Gemini
+.venv/bin/python -m mint --text                   # type to Mint instead of speaking
+.venv/bin/python -m mint --say "open Notes"       # send a request to the running Mint
+tail -f ~/Library/Logs/Mint/mint.log              # what Mint is doing
+```
+
+From a checkout, macOS asks for Microphone and Accessibility on behalf of your terminal. To
+try your changes as the real menu bar app, run `./install.sh` and open `~/Applications/Mint.app`
+again after each change. It keeps its own data, so your everyday Mint is untouched.
+
+### Check your changes
+
+```sh
+make lint       # ruff (CI runs this)
+make test       # offline checks (CI runs this)
+make test-all   # also network, AppleScript and file checks
+```
+
+### Build the Mac app
+
+```sh
+make app        # dist/Hey Mint.app and dist/Hey-Mint-<version>-arm64.dmg
+```
+
+One command builds a self-contained app: a bundled Python, every library, the models and
+Mint's code. People who install the DMG need nothing else. It needs an Apple silicon Mac,
+the Xcode command line tools and `brew install portaudio`. Set `SIGN_IDENTITY` and
+`NOTARY_PROFILE` to sign with a Developer ID and notarize ([details](docs/development.md#signing-and-notarization)).
+
+### Release a version
+
+Bump `version` in `pyproject.toml`, add a `CHANGELOG.md` entry, then push a tag:
+
+```sh
+git commit -am "Release 0.2.0"
+git tag -a v0.2.0 -m "Hey Mint 0.2.0"
+git push origin main v0.2.0
+```
+
+GitHub Actions builds the app on an Apple silicon runner and publishes it on the
+[Releases](https://github.com/shivatmax/hey-mint/releases) page with install steps, in about
+five minutes.
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| [CI](.github/workflows/ci.yml) | every push and pull request | lint and offline tests on macOS |
+| [Release](.github/workflows/release.yml) | a `v*` tag | builds, signs (if set up) and publishes the DMG |
+| [Guide](.github/workflows/cloudflare.yml) | changes to `guide/` on `main` | deploys [hey-mint.pages.dev](https://hey-mint.pages.dev/) (needs the Cloudflare secrets) |
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and the
-[code of conduct](CODE_OF_CONDUCT.md). Security issues: [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/development.md](docs/development.md), and see the [code of conduct](CODE_OF_CONDUCT.md).
+Security issues: [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -28,7 +28,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-if ! pgrep -x JevDesktop >/dev/null; then
+if [[ -d "$HOME/Applications/Desktop Voice.app" ]] && ! pgrep -x JevDesktop >/dev/null; then
   echo "Starting Desktop Voice…"
   open "$HOME/Applications/Desktop Voice.app"
   sleep 4
