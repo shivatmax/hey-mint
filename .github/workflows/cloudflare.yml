@@ -1,0 +1,31 @@
+name: Guide
+# Deploys guide/ to Cloudflare Pages. Needs two repository secrets:
+# CLOUDFLARE_API_TOKEN (a token with "Cloudflare Pages: Edit") and CLOUDFLARE_ACCOUNT_ID.
+on:
+  push:
+    branches: [main]
+    paths: ["guide/**"]
+  workflow_dispatch:
+permissions: {contents: read, deployments: write}
+concurrency: {group: guide-deploy, cancel-in-progress: true}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the Cloudflare secrets are set
+        id: secrets
+        env: {TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}"}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "No CLOUDFLARE_API_TOKEN secret: skipping the deploy."; echo "ok=false" >> "$GITHUB_OUTPUT"
+          else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Collect the site (no build scripts or page sources)
+        if: steps.secrets.outputs.ok == 'true'
+        run: rsync -a --exclude '*.py' --exclude 'src/' --exclude '__pycache__/' guide/ site/
+      - name: Deploy to Cloudflare Pages (https://hey-mint.pages.dev)
+        if: steps.secrets.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=hey-mint --branch=main --commit-dirty=true

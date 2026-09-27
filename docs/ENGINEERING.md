@@ -1,6 +1,6 @@
 # Hey Mint: engineering notes
 
-How each part works, what was measured, and why. For what Mint can do and what to say, see the [README](../README.md) and the [guide](https://shivatmax.github.io/hey-mint/).
+How each part works, what was measured, and why. For what Mint can do and what to say, see the [README](../README.md) and the [guide](https://hey-mint.pages.dev/).
 
 **Illustrated guide:** [guide/index.html](guide/index.html), 11 pages with short clips of the real Mint, example things to say, and a page Mint that acts them out; to serve it, from this folder: `python3 -m http.server 8765 -d guide`, then open http://localhost:8765).
 

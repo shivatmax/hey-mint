@@ -8,7 +8,7 @@
 Say “Hey Mint” and it talks back, clicks and types in your apps, browses, manages files,
 marks things on your screen, and hands long jobs to a family of background agents.
 
-[**Illustrated guide**](https://shivatmax.github.io/hey-mint/) ·
+[**Illustrated guide**](https://hey-mint.pages.dev/) ·
 [Install](#install) ·
 [What it can do](#what-it-can-do) ·
 [How it works](#how-it-works) ·
@@ -57,7 +57,7 @@ asks you questions, calls teammates in, and hops back into the box when done.
   <img src="docs/media/showtime.gif" alt="The whole critter family performing a show" width="520">
 </p>
 
-Everything is in the **[illustrated guide](https://shivatmax.github.io/hey-mint/)**, with a
+Everything is in the **[illustrated guide](https://hey-mint.pages.dev/)**, with a
 short clip of every feature and a live orb on the page that acts out the examples.
 
 ## Install

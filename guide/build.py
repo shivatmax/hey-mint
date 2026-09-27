@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 
-SITE = "https://shivatmax.github.io/hey-mint/"          # where GitHub Pages serves the guide
+SITE = "https://hey-mint.pages.dev/"          # where Cloudflare Pages serves the guide (clean URLs: /agents)
 REPO = "https://github.com/shivatmax/hey-mint"
 NAME = "Hey Mint"
 PAGES = ["index", "talking", "orb", "doing", "showing", "personality", "agents", "learning", "voice",
@@ -108,7 +108,7 @@ def main():
                       for p in PAGES if p != "index")
         desc = re.sub("<[^>]+>", "", meta.get("description") or meta.get("lede", ""))
         full = meta.get("full_title") or f'{meta["title"]} · Hey Mint, the open-source voice assistant for macOS'
-        url = SITE if name == "index" else f"{SITE}{name}.html"
+        url = SITE if name == "index" else f"{SITE}{name}"
         jsonld = ""
         if name == "index":
             jsonld = ('<script type="application/ld+json">' + json.dumps({
@@ -144,7 +144,7 @@ def main():
             for q in re.findall(r"<q[^>]*>(.*?)</q>", sec, re.S):
                 index.append({"t": html.unescape(re.sub("<[^>]+>", "", q)), "w": title, "h": f"{name}.html#{sid}"})
     today = __import__("datetime").date.today().isoformat()
-    urls = "".join(f"<url><loc>{SITE if p == 'index' else SITE + p + '.html'}</loc><lastmod>{today}</lastmod></url>" for p in PAGES)
+    urls = "".join(f"<url><loc>{SITE if p == 'index' else SITE + p}</loc><lastmod>{today}</lastmod></url>" for p in PAGES)
     (HERE / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                                       + urls + "</urlset>\n")
     (HERE / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {SITE}sitemap.xml\n")
