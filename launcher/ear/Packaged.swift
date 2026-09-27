@@ -57,7 +57,7 @@ enum Packaged {
     static let keys: [(name: String, label: String, hint: String, required: Bool)] = [
         ("GEMINI_API_KEY", "Gemini API key", "Required. Free at aistudio.google.com/apikey", true),
         ("OPENAI_API_KEY", "OpenAI API key", "Optional: background agents", false),
-        ("TYPESAFE_API_KEY", "TypeSafe (Jev) key", "Optional: faster, surer choices", false),
+        ("TYPESAFE_API_KEY", "TypeSafe (Jev) key", "Optional: clicking and typing in any app, surer choices", false),
     ]
 
     static func readEnv() -> [String: String] {

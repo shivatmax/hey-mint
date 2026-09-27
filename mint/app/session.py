@@ -65,7 +65,7 @@ def _live_config() -> types.LiveConnectConfig:
     # but not the user's zone. Name it, and always answer in it.
     instruction = (f"{base}\n\nSession started: {now}, the user's local time, {zone}. Always give "
                    f"times and dates in {zone}, never UTC; for the time now, call get_status."
-                   + ("" if config.desktop_voice() else
+                   + ("" if config.desktop_engine() else
                       "\n\nThe desktop tool is not installed on this Mac: wherever these "
                       "instructions mention it, use ui_act (or click_text) instead.")
                    + (f"\n\n{personal}" if personal else "")

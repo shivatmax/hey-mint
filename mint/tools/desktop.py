@@ -68,9 +68,9 @@ class DesktopBridge:
 
     async def run_goal(self, goal: str, timeout: float | None = None) -> str:
         timeout = timeout or config.DESKTOP_TIMEOUT
-        if not config.desktop_voice():
-            return ("FAILED: the desktop tool is not available on this Mac (Desktop Voice is not "
-                    "installed). Do the same with ui_act, or click_text for a visible label.")
+        if not config.desktop_engine():
+            return ("FAILED: the desktop tool is not available here (it needs a TypeSafe key). "
+                    "Do the same with ui_act, or click_text for a visible label.")
         async with self._lock:
             self.last_app, self.last_controls = "", -1
             try:
@@ -96,10 +96,7 @@ class DesktopBridge:
 
     async def _run(self, goal: str) -> str:
         # Start the engine on first use only; it runs headless, with no UI of its own.
-        if not _engine_running() and config.JEV_APP.exists():
-            proc = await asyncio.create_subprocess_exec("open", "-g", str(config.JEV_APP))
-            await proc.wait()
-            await asyncio.sleep(2.5)
+        await _start_engine()
         # Start streaming before issuing the command so nothing is missed.
         stream = await asyncio.create_subprocess_exec(
             "/usr/bin/log", "stream",
@@ -212,9 +209,50 @@ class DesktopBridge:
         return _summarise(None, None, results, actions)
 
 
-def _engine_running() -> bool:
+def _running(name: str) -> bool:
     import subprocess
-    return subprocess.run(["pgrep", "-x", "JevDesktop"], capture_output=True).returncode == 0
+    return subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0
+
+
+_engine = None      # the MintEngine this process started
+
+
+async def _start_engine() -> None:
+    """One engine per Mac: every engine acts on every goal, so never start a second one."""
+    global _engine
+    found = config.engine()
+    if found is None:
+        return
+    kind, path = found
+    if kind == "app":
+        if not _running("JevDesktop"):
+            proc = await asyncio.create_subprocess_exec("open", "-g", str(path))
+            await proc.wait()
+            await asyncio.sleep(2.5)
+        return
+    if (_engine is not None and _engine.poll() is None) or _running(config.ENGINE_NAME):
+        return
+    import os
+    import subprocess
+    if _running("JevDesktop"):
+        # The separate Desktop Voice app listens for the same goals; the bundled engine replaces it.
+        subprocess.run(["pkill", "-x", "JevDesktop"], capture_output=True)
+        await asyncio.sleep(0.5)
+    # A child of Mint, so macOS counts it as Mint: it uses Mint's Accessibility permission.
+    # It quits by itself when this process ends (MINT_PARENT_PID).
+    env = dict(os.environ, MINT_PARENT_PID=str(os.getpid()), MINT_HOME=str(config.PROJECT_ROOT))
+    _engine = subprocess.Popen([str(path), "-Headless", "YES"], env=env, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log.info("started the screen-control engine (%s, pid %d)", path, _engine.pid)
+    await asyncio.sleep(1.0)
+
+
+def stop_engine() -> None:
+    """Quit the engine this process started (Mint quitting or handing over to Mint Ear)."""
+    global _engine
+    if _engine is not None and _engine.poll() is None:
+        _engine.terminate()
+    _engine = None
 
 
 def _post_command(goal: str) -> None:

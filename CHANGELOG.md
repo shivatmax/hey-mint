@@ -4,10 +4,14 @@
 
 - A developer handbook ([docs/development.md](docs/development.md)): running from a checkout,
   where new code goes, testing, building the Mac app and releasing.
-- Fix: Mint no longer refuses to start without Desktop Voice (jev-use). It is optional now: when it
-  is missing, the `desktop` tool is hidden and Mint uses its own `ui_act`. This made the 0.1.1 app
-  unusable on Macs without it.
-- `run.sh` no longer needs the optional Desktop Voice app.
+- One app: the screen-control engine behind the `desktop` tool (from jev-use / Desktop Voice) is
+  now built into Mint.app as `MintEngine`. It starts on demand as part of Mint, uses Mint's
+  Accessibility permission and quits with it. The separate Desktop Voice app is no longer needed.
+- Fix: Mint no longer refuses to start without Desktop Voice, which made the 0.1.1 app unusable on
+  other Macs. Without a TypeSafe key the `desktop` tool is hidden and Mint uses `ui_act`.
+- `install.sh` creates its own persistent signing identity, so macOS keeps Mint's permissions
+  across rebuilds without jev-use installed.
+- `run.sh` no longer needs the Desktop Voice app.
 
 ## 0.1.1 (2026-09-28)
 

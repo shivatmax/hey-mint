@@ -299,7 +299,7 @@ def declarations() -> list[types.FunctionDeclaration]:
                 "work that has no better tool. Never run destructive commands without asking.",
                 {"command": {**STRING, "description": "The command to run."}}, ["command"])
         )
-    if not config.desktop_voice():
+    if not config.desktop_engine():
         functions = [f for f in functions if f.name != "desktop"]
     return functions
 
@@ -475,7 +475,9 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:
 
     if name in {"scroll", "press_key", "media_key", "type_text", "get_selected_text"} \
             and not fastinput.has_accessibility():
-        goal = _fallback_goal(name, args or {}) if config.desktop_voice() else None
+        # Only a separate engine app holds its own Accessibility grant; the bundled one shares Mint's.
+        found = config.engine()
+        goal = _fallback_goal(name, args or {}) if found and found[0] == "app" else None
         if goal is None:
             return (f"Cannot {name.replace('_', ' ')} without Accessibility permission. "
                     "Tell the user to switch Mint on in System Settings > Privacy & Security > Accessibility."), None

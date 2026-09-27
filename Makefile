@@ -1,12 +1,16 @@
 PY ?= .venv/bin/python
 
-.PHONY: help setup app install run demo test test-all lint guide clean
+.PHONY: help setup engine app install run demo test test-all lint guide clean
 
 help:            ## Show the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
 
 setup:           ## Create .venv and install dependencies (plus pytest and ruff)
 	python3 -m venv .venv && $(PY) -m pip install -q -r requirements.txt pytest ruff
+
+engine:          ## Build the screen-control engine (the desktop tool) for make run: build/MintEngine
+	cd launcher/engine && xcrun swift build -c release
+	mkdir -p build && cp "$$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDesktop" build/MintEngine
 
 app:             ## Build dist/Hey Mint.app and a shareable DMG (Python and models bundled)
 	packaging/build_app.sh

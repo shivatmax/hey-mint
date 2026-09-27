@@ -53,8 +53,11 @@ CHUNK_SIZE = 1024
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 JEV_SUBSYSTEM = "local.jev-use"
-# Desktop Voice listens for goals on this distributed notification.
+# The screen-control engine listens for goals on this distributed notification.
 JEV_COMMAND_NOTIFICATION = "local.jev-use.command"
+# The engine ships inside Mint.app (built from launcher/engine). The separate Desktop Voice
+# app it came from (jev-use) still works when it is all there is.
+ENGINE_NAME = "MintEngine"
 JEV_APP = Path.home() / "Applications" / "Desktop Voice.app"
 
 # How long to wait for one `desktop` goal before giving up on the result.
@@ -82,10 +85,28 @@ def preflight() -> list[str]:
     return problems
 
 
-def desktop_voice() -> bool:
-    """Desktop Voice (jev-use) is optional: with it, the `desktop` tool is offered and backs up
-    typing and scrolling when Accessibility is off; without it, ui_act does the same job."""
-    return JEV_APP.exists() and Path("/usr/bin/log").exists()
+def engine() -> tuple[str, Path] | None:
+    """Where the screen-control engine is: ("bundled", binary) for the one inside Mint.app or
+    built in this checkout (`make engine`), ("app", Desktop Voice.app) for the separate app.
+    None when there is none, or no TypeSafe key for it to choose actions with."""
+    if not os.environ.get("TYPESAFE_API_KEY") or not Path("/usr/bin/log").exists():
+        return None
+    places = [os.environ.get("MINT_ENGINE", "")]
+    if os.environ.get("MINT_APP_PATH"):
+        places.append(str(Path(os.environ["MINT_APP_PATH"]) / "Contents" / "MacOS" / ENGINE_NAME))
+    places += [str(PROJECT_ROOT / "build" / ENGINE_NAME),
+               str(Path.home() / "Applications" / "Mint.app" / "Contents" / "MacOS" / ENGINE_NAME)]
+    for place in places:
+        if place and os.access(place, os.X_OK):
+            return "bundled", Path(place)
+    if JEV_APP.exists():
+        return "app", JEV_APP
+    return None
+
+
+def desktop_engine() -> bool:
+    """The `desktop` tool is offered only when the engine can run; ui_act covers the rest."""
+    return engine() is not None
 
 
 SYSTEM_INSTRUCTION = """

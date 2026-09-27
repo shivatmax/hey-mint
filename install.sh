@@ -20,6 +20,7 @@ RUNTIME="$HOME/Library/Application Support/Mint"
 
 remove() {
   pkill -x "$APP_NAME" 2>/dev/null || true
+  pkill -x MintEngine 2>/dev/null || true
   pkill -f "python -m mint" 2>/dev/null || true
   if [[ -f "$AGENT" ]]; then
     launchctl bootout "gui/$(id -u)" "$AGENT" 2>/dev/null || true
@@ -148,6 +149,15 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD/Contents/MacOS" "$BUILD/Contents/Resources"
 
 xcrun swiftc -O launcher/ear/*.swift -o "$BUILD/Contents/MacOS/$APP_NAME"   # Mint Ear + launcher (launcher/ear/main.swift)
+# The screen-control engine behind the `desktop` tool (launcher/engine, from jev-use).
+# Mint starts it on demand; without it (or without a TypeSafe key) Mint uses ui_act.
+echo "Building the screen-control engine…"
+if engine_log=$(cd launcher/engine && xcrun swift build -c release 2>&1); then
+  cp "$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDesktop" "$BUILD/Contents/MacOS/MintEngine"
+else
+  printf '%s\n' "$engine_log" | tail -15 >&2
+  echo "Warning: the screen-control engine did not build; Mint works without the desktop tool." >&2
+fi
 "$RUNTIME/.venv/bin/python" launcher/make_icon.py "$BUILD/Contents/Resources/$APP_NAME.icns" >/dev/null
 rm -f "$BUILD/Contents/Resources/$APP_NAME.png"
 
@@ -183,6 +193,12 @@ cat > "$BUILD/Contents/Info.plist" <<PLIST
   <string>Mint creates reminders when you ask it to.</string>
   <key>NSRemindersUsageDescription</key>
   <string>Mint creates reminders when you ask it to.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
 </dict>
 </plist>
 PLIST
@@ -195,6 +211,7 @@ codesign --verify --strict "$BUILD"
 
 # --- install -------------------------------------------------------------------------
 pkill -x "$APP_NAME" 2>/dev/null || true
+pkill -x MintEngine 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALL"
 ditto "$BUILD" "$INSTALL"

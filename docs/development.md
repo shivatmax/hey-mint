@@ -26,6 +26,7 @@ cd hey-mint
 make setup        # .venv with the dependencies, plus pytest and ruff
 ./set-key.sh      # paste your Gemini key; it is checked and saved in .env (mode 600)
 make demo         # the animation tour: a quick way to see the UI works (no key needed)
+make engine       # optional: the screen-control engine for the desktop tool (needs a TypeSafe key)
 ```
 
 `make help` lists every command.
@@ -95,7 +96,13 @@ only works on one person's setup.
 loop, `orchestrator.py` the tools Gemini uses to delegate.
 
 **The launcher and Mint Ear** (Swift) are in `launcher/`. `install.sh` and `make app` both
-compile them; there is no Xcode project. `launcher/ear/Packaged.swift` is the code that only
+compile them; there is no Xcode project.
+
+**The screen-control engine** behind the `desktop` tool is a Swift package in `launcher/engine`
+(adapted from jev-use; its [README](../launcher/engine/README.md) explains how Mint drives it).
+`install.sh` and `make app` build it into the app as `Contents/MacOS/MintEngine`. For `make run`
+from a checkout, build it once with `make engine` (it lands in `build/MintEngine`). It needs a
+`TYPESAFE_API_KEY`; without one, Mint hides the `desktop` tool and uses `ui_act`. `launcher/ear/Packaged.swift` is the code that only
 runs in the downloaded app (first-launch setup and the key dialog).
 
 **The wake word model** (`models/hey_mint*`) is trained with `scripts/train_hey_mint.py`.
@@ -151,9 +158,9 @@ What `packaging/build_app.sh` does:
 3. Fetches the wake word feature models and the voice lock model (checksum verified).
 4. Trims the runtime (tests, headers, pip, unused standard library).
 5. Copies `mint/`, the models and the example configs into `Contents/Resources/app`.
-6. Compiles the Swift launcher, draws the icon and writes `Info.plist` (with the permission
-   prompts' wording).
-7. Signs every binary, then the app, then makes the DMG.
+6. Compiles the Swift launcher and the screen-control engine, draws the icon and writes
+   `Info.plist` (with the permission prompts' wording).
+7. Signs every binary, then the engine, then the app, then makes the DMG.
 
 Build requirements: an Apple silicon Mac, `python3` 3.11+, the Xcode command line tools,
 `brew install portaudio`, and `git` (the build id comes from the current commit). The version

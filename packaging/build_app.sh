@@ -99,6 +99,10 @@ echo "$VERSION-$(git rev-parse --short HEAD 2>/dev/null || date +%s)" > "$RES/ap
 
 # --- the launcher, icon and Info.plist ------------------------------------------------------
 xcrun swiftc -O -target arm64-apple-macos14.2 launcher/ear/*.swift -o "$APP/Contents/MacOS/Mint"
+# The screen-control engine behind the `desktop` tool (launcher/engine), started by Mint on demand.
+echo "Building the screen-control engineâ€¦"
+(cd launcher/engine && xcrun swift build -c release >/dev/null)
+cp "$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDesktop" "$APP/Contents/MacOS/MintEngine"
 "$PY" launcher/make_icon.py "$RES/Mint.icns" >/dev/null
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -133,6 +137,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Mint creates reminders when you ask it to.</string>
   <key>NSRemindersUsageDescription</key>
   <string>Mint creates reminders when you ask it to.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Mint finds and opens the files and folders you ask for.</string>
 </dict>
 </plist>
 PLIST
@@ -148,6 +158,7 @@ echo "Signing ($([[ "$IDENTITY" == "-" ]] && echo ad-hoc || echo "$IDENTITY"))â€
 while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q "Mach-O"; then codesign "${sign_flags[@]}" "$file" 2>/dev/null; fi
 done < <(find "$RES" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -print0)
+codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintengine" "$APP/Contents/MacOS/MintEngine"
 codesign "${sign_flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 

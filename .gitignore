@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 /build/
 /dist/
+.build/
+.swiftpm/
 .pytest_cache/
 .ruff_cache/
 .DS_Store

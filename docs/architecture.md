@@ -35,7 +35,12 @@ to **agents** that run in the background and report back.
 | `mint.agents` | Background agents | `runtime` (the hub and each agent's tool loop), `registry` (agents.json), `providers` (OpenAI / OpenRouter), `codex` (OpenAI Codex runner), `team` (agents asking agents), `orchestrator` (the tools Gemini uses to delegate) |
 
 `launcher/` holds Mint.app's Swift launcher and **Mint Ear**, which keeps the wake word
-running in about 70 MB while the Python process is unloaded.
+running in about 70 MB while the Python process is unloaded, and the **screen-control engine**
+(`launcher/engine`, adapted from [jev-use](https://github.com/savka777/jev-use)). The engine
+ships inside Mint.app as `MintEngine`; `mint.tools.desktop` starts it as a child of Mint on the
+first `desktop` goal, so it shares Mint's Accessibility permission, and it quits with Mint.
+It reads the front app's Accessibility tree, lets Jev choose each action, performs it and
+checks the result, step by step until the goal is met.
 
 ## How a request flows
 

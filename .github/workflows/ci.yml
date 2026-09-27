@@ -15,6 +15,8 @@ jobs:
         run: |
           brew install portaudio
           python -m pip install -r requirements.txt pytest ruff
+      - name: Build the screen-control engine (Swift)
+        run: cd launcher/engine && swift build -c release
       - name: Lint (syntax errors, undefined names)
         run: ruff check mint tests
       - name: Offline checks

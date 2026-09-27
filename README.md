@@ -75,8 +75,7 @@ Optional extras, each unlocking one thing:
 |---|---|
 | OpenAI API key (asked for on first launch) | Background agents: research, documents, code |
 | The [ChatGPT app](https://openai.com/chatgpt/desktop/) (it brings Codex) | The agent that builds websites and code projects |
-| TypeSafe key (asked for on first launch) | Jev, surer picks of which button, skill or memory is meant |
-| [jev-use](https://github.com/savka777/jev-use) (Desktop Voice) | A second screen-control engine; Mint's own `ui_act` does this job without it |
+| TypeSafe key (asked for on first launch) | Jev: the `desktop` tool (multi-step clicking and typing in any app, by the engine built into Mint) and surer picks of which button, skill or memory is meant |
 
 1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest)
    (Apple silicon Macs, macOS 14.2 or later). Everything it needs is inside: no Python, Homebrew or Xcode.
@@ -111,7 +110,7 @@ Optional keys in `.env`:
 
 | Key | For |
 |---|---|
-| `TYPESAFE_API_KEY` | Jev, the fast chooser (which button, which skill, which memory) |
+| `TYPESAFE_API_KEY` | Jev, the fast chooser (which button, which skill, which memory), and the `desktop` tool |
 | `OPENAI_API_KEY` or `OPENROUTER_API_KEY` | Background agents (GPT-6 Luna) |
 | `EXA_API_KEY` or `TAVILY_API_KEY` | Better web search (DuckDuckGo is used without one) |
 
@@ -173,7 +172,7 @@ mint/
   ui/          the orb, chat, settings, marks, critters, effects
   agents/      background agents, Codex, teams
   resources/   example skills
-launcher/      Mint.app's launcher and the low-memory Mint Ear (Swift)
+launcher/      Mint.app's launcher, the low-memory Mint Ear, and the screen-control engine (Swift)
 packaging/     building the downloadable app and DMG
 guide/         the illustrated guide (static site)
 docs/          architecture, usage and development handbook
