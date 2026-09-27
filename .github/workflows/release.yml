@@ -12,15 +12,19 @@ on:
 permissions: {contents: write}
 jobs:
   app:
-    runs-on: macos-14
+    runs-on: macos-latest
     env:
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
-      - name: Tools
-        run: brew install portaudio
+      - name: Tools (the newest Xcode on the runner, portaudio)
+        run: |
+          newest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$newest"
+          echo "Using $newest"; xcrun swift --version; sw_vers
+          brew install portaudio
       - name: Import the signing certificate
         env:
           CERT: ${{ secrets.MACOS_CERT_P12 }}
