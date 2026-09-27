@@ -58,7 +58,7 @@ jobs:
           cat build.log
           if [[ $status -ne 0 ]]; then
             echo "::error title=build::exit $status after $(wc -l < build.log | tr -d ' ') lines of output"
-            tail -25 build.log | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error title=build::$line"; done
+            tail -25 build.log | sed 's/%/%25/g' | while IFS= read -r line || [[ -n "$line" ]]; do echo "::error title=build::$line"; done
           fi
           exit $status
       - name: Publish the release

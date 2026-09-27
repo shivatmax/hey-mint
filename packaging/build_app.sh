@@ -10,6 +10,7 @@
 # Needs on the build Mac: Xcode command line tools, python3 (3.11+), and Homebrew's
 # portaudio (PyAudio is compiled against it; the library is copied into the app).
 set -euo pipefail
+trap 'echo "build_app.sh failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
@@ -37,7 +38,7 @@ if [[ ! -f "$CACHE/$PY_FILE" ]]; then
   curl -fsSL -o "$CACHE/$PY_FILE.part" "$PY_URL"
   curl -fsSL -o "$CACHE/SHA256SUMS-$PY_RELEASE" \
     "https://github.com/astral-sh/python-build-standalone/releases/download/${PY_RELEASE}/SHA256SUMS"
-  want=$(grep " ${PY_FILE}\$" "$CACHE/SHA256SUMS-$PY_RELEASE" | cut -d' ' -f1)
+  want=$(awk -v f="$PY_FILE" '$2 == f {print $1}' "$CACHE/SHA256SUMS-$PY_RELEASE")
   have=$(shasum -a 256 "$CACHE/$PY_FILE.part" | cut -d' ' -f1)
   [[ -n "$want" && "$want" == "$have" ]] || { echo "Python download failed its checksum" >&2; exit 1; }
   mv "$CACHE/$PY_FILE.part" "$CACHE/$PY_FILE"
