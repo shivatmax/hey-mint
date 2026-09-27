@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 (2026-09-28)
+
+- Fix: the voice package and the example skills were left out of the repository (and the
+  0.1.0 app) by an over-broad `.gitignore`. Tests now import every module.
+
 ## 0.1.0 (2026-09-27)
 
 First public release.

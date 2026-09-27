@@ -2,33 +2,33 @@
 .venv/
 __pycache__/
 *.pyc
-build/
-dist/
+/build/
+/dist/
+.pytest_cache/
+.ruff_cache/
 .DS_Store
 
-# Keys and personal data: never commit these
-.env
-custom.json
-settings.json
-agents.json
-history.jsonl
-summary.md
-memory.md
-memories.md
-memory/
-voiceprint.json
-voice/
-skills/
-browser_rules.json
-made_files.json
-agents-experience.jsonl
+# Keys and personal data, at the top of a checkout or a runtime folder: never commit these.
+# (Anchored with "/" so they cannot match code folders such as mint/voice or mint/resources/skills.)
+/.env
+/custom.json
+/settings.json
+/agents.json
+/history.jsonl
+/summary.md
+/memory.md
+/memories.md
+/memory/
+/voiceprint.json
+/voice/
+/skills/
+/browser_rules.json
+/made_files.json
+/agents-experience.jsonl
 
 # Large or downloaded
-models/*.onnx
-bench/data/
-ref/
+/models/*.onnx
 
 # Cloudflare
 .wrangler/
-wrangler.jsonc
-site/
+/site/
