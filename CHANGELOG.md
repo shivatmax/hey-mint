@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-09-28)
 
 - A developer handbook ([docs/development.md](docs/development.md)): running from a checkout,
   where new code goes, testing, building the Mac app and releasing.
