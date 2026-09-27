@@ -24,7 +24,8 @@ from pathlib import Path
 log = logging.getLogger("mint.app.power")
 
 AGENT = Path.home() / "Library" / "LaunchAgents" / "local.mint.plist"
-APP = Path.home() / "Applications" / "Mint.app"
+# The app that is running (a downloaded release can live anywhere); install.sh puts it here.
+APP = Path(os.environ.get("MINT_APP_PATH") or Path.home() / "Applications" / "Mint.app")
 ENGINE = "local.jev-use"              # Desktop Voice, the hidden screen-control engine
 HARD_STOP = 15.0            # seconds before the process exits no matter what
 _quitting = threading.Event()

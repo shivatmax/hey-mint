@@ -30,6 +30,7 @@ from PyObjCTools import AppHelper
 from mint.ui import activity
 from mint.ui import effects
 from mint.ui import gfx
+from mint.ui import look
 from mint.core import prefs
 from mint.ui.chat import ChatPanel
 from mint.ui.chat import H as CHAT_H
@@ -172,7 +173,7 @@ def _panel(frame, click_through=True):
         | AppKit.NSWindowCollectionBehaviorIgnoresCycle)
     # Out of screenshots, so Mint never reads its own captions off the screen.
     panel.setSharingType_(effects.SHARING)
-    panel.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+    look.follow_system(panel)          # light or dark with the system, like any Apple panel
     return panel
 
 
@@ -211,22 +212,10 @@ class HUD:
 
         self._bubble = _panel(AppKit.NSMakeRect(0, 0, 120, 36))
         self._bubble.setHasShadow_(True)
-        blur = AppKit.NSVisualEffectView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 120, 36))
-        blur.setMaterial_(AppKit.NSVisualEffectMaterialHUDWindow)
-        blur.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
-        blur.setState_(AppKit.NSVisualEffectStateActive)
-        blur.setWantsLayer_(True)
-        blur.layer().setCornerRadius_(16)
-        blur.layer().setMasksToBounds_(True)
-        blur.layer().setBorderWidth_(0.5)
-        blur.layer().setBorderColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.14).CGColor())
-        blur.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
+        # System glass, rounded by a mask image (a layer cornerRadius left a square
+        # patch of blur round the card), light or dark with the system.
+        blur = look.glass(AppKit.NSMakeRect(0, 0, 120, 36), radius=16)
         self._bubble.setContentView_(blur)
-        tint = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 120, 36))
-        tint.setWantsLayer_(True)
-        tint.layer().setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(0.05, 0.55).CGColor())
-        tint.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
-        blur.addSubview_(tint)
         self._bubble_label = AppKit.NSTextField.wrappingLabelWithString_("")
         self._bubble_label.setFrame_(AppKit.NSMakeRect(12, 8, 96, 20))
         blur.addSubview_(self._bubble_label)
@@ -293,6 +282,7 @@ class HUD:
         y = cy - height / 2
         y = min(max(y, screen.origin.y + 4), screen.origin.y + screen.size.height - height - 4)
         self._bubble.setFrame_display_(AppKit.NSMakeRect(x, y, width, height), True)
+        self._bubble.invalidateShadow()          # the shadow follows the rounded glass, not a square
 
     def _orb_moved(self, final: bool) -> None:
         if self.chat.is_open:
@@ -549,6 +539,8 @@ class HUD:
         small = AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightRegular)
         moving = False
 
+        fg = look.rgb(AppKit.NSColor.labelColor(), self._bubble)     # black in light mode, white in dark
+
         def put(target, text, rgb, alpha, f=font, offset=0.0):
             target.appendAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(text, {
                 AppKit.NSFontAttributeName: f, AppKit.NSForegroundColorAttributeName: gfx.ns(rgb, alpha),
@@ -562,28 +554,29 @@ class HUD:
             words, prefix, accent = self._you, "You  ", gfx.state_rgb("awake")
         if status:
             for target in (shown, full):
-                put(target, status + ("\n" if words else ""), (1, 1, 1), 0.55, small)
+                put(target, status + ("\n" if words else ""), fg, 0.55, small)
         if words:
             if prefix:
                 bold = AppKit.NSFont.systemFontOfSize_weight_(13, AppKit.NSFontWeightSemibold)
                 for target in (shown, full):
-                    put(target, prefix, accent, 0.9, bold)
+                    put(target, prefix, look.ink(accent, self._bubble), 0.95, bold)
             tail = words.tail(120)
             if len(tail) < len(words.words):
                 for target in (shown, full):
-                    put(target, "… ", (1, 1, 1), 0.5)
+                    put(target, "… ", fg, 0.5)
             for text, at in tail:
-                put(full, text + " ", (1, 1, 1), 0.95)
+                put(full, text + " ", fg, 0.95)
                 age = now - at
                 if animate and age < 0:
                     moving = True
                     continue
                 if animate and age < WORD_IN:
                     e = 1 - (1 - age / WORD_IN) ** 3
-                    put(shown, text + " ", gfx.mix(gfx.light(accent), (1, 1, 1), e), 0.1 + 0.85 * e, offset=-4 * (1 - e))
+                    put(shown, text + " ", gfx.mix(look.ink(accent, self._bubble), fg, e), 0.1 + 0.85 * e,
+                        offset=-4 * (1 - e))
                     moving = True
                 else:
-                    put(shown, text + " ", (1, 1, 1), 0.95)
+                    put(shown, text + " ", fg, 0.95)
         return shown, full, moving
 
     def _render_bubble(self, now: float) -> None:

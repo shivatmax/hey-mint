@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 build/
+dist/
 .DS_Store
 
 # Keys and personal data: never commit these

@@ -62,6 +62,22 @@ short clip of every feature and a live orb on the page that acts out the example
 
 ## Install
 
+### Download the app (easiest)
+
+1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest)
+   (Apple silicon Macs, macOS 14.2 or later). Everything it needs is inside: no Python, Homebrew or Xcode.
+2. Open the DMG and drag **Hey Mint** into **Applications**, then open it.
+3. First time only: if macOS says it cannot check the app for malware, open **System Settings ▸ Privacy &
+   Security** and click **Open Anyway**. (Release builds are not notarized by Apple yet.)
+4. Paste your free [Gemini API key](https://aistudio.google.com/apikey); the OpenAI and Jev keys are optional.
+   Hold <kbd>⌥</kbd> while opening Hey Mint to change keys later.
+5. Allow the **Microphone**, and switch Hey Mint on under **Accessibility** when asked, so it can click and type.
+
+Your keys, settings, memory and skills live in `~/Library/Application Support/Hey Mint`. To update,
+replace the app with a newer one; your data stays.
+
+### Build from source
+
 Requirements: a recent macOS on Apple silicon or Intel, Python 3.11+ (`python3`), the Xcode command line tools
 (`xcode-select --install`), and a [Gemini API key](https://aistudio.google.com/apikey).
 
@@ -159,6 +175,7 @@ make demo       # the animation tour, no API key needed
 make run        # run from the checkout (hands-free)
 make test       # offline checks; make test-all adds network and AppleScript checks
 make install    # build and install ~/Applications/Mint.app
+make app        # build dist/Hey Mint.app and a DMG with everything bundled
 ```
 
 ## Contributing

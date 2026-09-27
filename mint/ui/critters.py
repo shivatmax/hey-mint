@@ -225,20 +225,19 @@ def _symbol_layer(name, size, rgb, outline=False):
 
 
 def _pill(text, rgb, size=10.0, second=""):
-    """A dark rounded name tag, optionally with a second, lighter line."""
-    top, m1 = _text_layer(text, size, gfx.light(rgb))
+    """An Apple capsule name tag (system background, light or dark), with an optional second line."""
+    from mint.ui import look
+    top, m1 = _text_layer(text, size, look.ink(rgb))
     lines = [top]
     width, height = m1.width, m1.height
     if second:
-        low, m2 = _text_layer(second, size - 1, (0.92, 0.92, 0.95), bold=False)
+        low, m2 = _text_layer(second, size - 1, look.text_rgb(secondary=True), bold=False)
         lines.append(low)
         width, height = max(width, m2.width), height + m2.height
     pill = Quartz.CALayer.layer()
     pill.setBounds_(Quartz.CGRectMake(0, 0, width + 14, height + 6))
     pill.setCornerRadius_(min(9.0, (height + 6) / 2))
-    pill.setBackgroundColor_(gfx.cg((0.08, 0.08, 0.11), 0.9))
-    pill.setBorderColor_(gfx.cg(rgb, 0.8))
-    pill.setBorderWidth_(1.0)
+    look.capsule(pill)
     y = height + 3
     for line in lines:
         b = line.bounds()

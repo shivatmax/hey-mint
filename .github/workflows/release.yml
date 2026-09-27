@@ -1,0 +1,67 @@
+name: Release
+# Push a tag like v0.1.0 to build Hey Mint.app on an Apple silicon runner and publish it
+# as a GitHub Release. With the optional signing secrets set, the app is signed with a
+# Developer ID and notarized, so it opens without any Gatekeeper prompt:
+#   MACOS_CERT_P12 (base64 of a Developer ID Application .p12), MACOS_CERT_PASSWORD,
+#   MACOS_SIGN_IDENTITY ("Developer ID Application: Name (TEAMID)"),
+#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password)
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  app:
+    runs-on: macos-14
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - name: Tools
+        run: brew install portaudio
+      - name: Import the signing certificate
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        if: env.HAS_CERT == 'true'
+        run: |
+          echo "$CERT" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm cert.p12
+      - name: Notary credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        if: env.HAS_NOTARY == 'true'
+        run: xcrun notarytool store-credentials heymint --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+      - name: Build the app and DMG
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_PROFILE: ${{ env.HAS_NOTARY == 'true' && 'heymint' || '' }}
+        run: |
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] && export VERSION="${GITHUB_REF_NAME#v}"
+          packaging/build_app.sh
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          generate_release_notes: true
+          body: |
+            ## Install
+            1. Download the **Hey-Mint-…-arm64.dmg** below (Apple silicon Macs, macOS 14.2 or later).
+            2. Open it and drag **Hey Mint** into Applications.
+            3. Open Hey Mint. If macOS says it can't check it for malware, open **System Settings ▸ Privacy & Security** and click **Open Anyway** (only once).
+            4. Paste your free [Gemini API key](https://aistudio.google.com/apikey) and click **Start Mint**.
+            5. Allow the Microphone, and turn on Hey Mint under **Accessibility** when asked.
+
+            Then say **“Hey Mint”**, or press ⌘J and type. The guide: https://hey-mint.pages.dev/

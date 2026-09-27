@@ -22,6 +22,7 @@ from PyObjCTools import AppHelper
 
 from mint.ui import effects
 from mint.ui import gfx
+from mint.ui import look
 from mint.core import prefs
 
 W, H = 360, 470
@@ -163,29 +164,21 @@ class ChatPanel:
             AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
             | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary)
         window.setSharingType_(effects.SHARING)
-        window.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+        look.follow_system(window)             # light or dark with the system
         window.setAlphaValue_(0.0)
         self._target = _Target.alloc().initWithOwner_(self)
 
-        blur = AppKit.NSVisualEffectView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))
-        blur.setMaterial_(AppKit.NSVisualEffectMaterialHUDWindow)
-        blur.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
-        blur.setState_(AppKit.NSVisualEffectStateActive)
+        # System glass rounded by a mask image: a layer cornerRadius left a square
+        # patch of blur showing round the card.
+        blur = look.glass(AppKit.NSMakeRect(0, 0, W, H), radius=20)
         blur.setWantsLayer_(True)
-        blur.layer().setCornerRadius_(20)
-        blur.layer().setMasksToBounds_(True)
-        blur.layer().setBorderWidth_(0.5)
-        blur.layer().setBorderColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.14).CGColor())
         window.setContentView_(blur)
-        tint = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))
-        tint.setWantsLayer_(True)
-        tint.layer().setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(0.05, 0.6).CGColor())
-        blur.addSubview_(tint)
 
         self._build_header(blur)
         self._build_body(blur)
         self._build_input(blur)
         self.window = window
+        look.on_theme_change(self._retheme)
         from mint.screen import ground
         ground.OWN_CHAT = self
         self._load_history()
@@ -195,11 +188,8 @@ class ChatPanel:
         button = AppKit.NSButton.buttonWithImage_target_action_(gfx.symbol(symbol, 12), self._target, action)
         button.setBordered_(False)
         button.setFrame_(AppKit.NSMakeRect(x, y, size, size))
-        button.setContentTintColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.82))
+        button.setContentTintColor_(AppKit.NSColor.secondaryLabelColor())     # plain toolbar symbol
         button.setToolTip_(tip)
-        button.setWantsLayer_(True)
-        button.layer().setCornerRadius_(size / 2)
-        button.layer().setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.08).CGColor())
         parent.addSubview_(button)
         return button
 
@@ -215,7 +205,7 @@ class ChatPanel:
         parent.addSubview_(title)
         self._status = AppKit.NSTextField.labelWithString_("")
         self._status.setFont_(_font(11))
-        self._status.setTextColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.55))
+        self._status.setTextColor_(AppKit.NSColor.secondaryLabelColor())
         self._status.setFrame_(AppKit.NSMakeRect(PAD + 18, top + 9, 80, 15))    # clear of the header buttons
         self._status.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
         parent.addSubview_(self._status)
@@ -231,13 +221,13 @@ class ChatPanel:
         self._eye = self._button(parent, "eye.slash", "eye:", x - 180, top + 14,
                                  "Visible in screen sharing - click to show or hide Mint in Meet/Zoom")
         self._stop = self._button(parent, "stop.fill", "stop:", x - 210, top + 14, "Stop everything")
-        self._stop.setContentTintColor_(gfx.ns(gfx.RED))
+        self._stop.setContentTintColor_(AppKit.NSColor.systemRedColor())
         self._stop.setHidden_(True)
         # A thin progress bar under the header for long tasks.
         self._track = Quartz.CALayer.layer()
         self._track.setFrame_(Quartz.CGRectMake(PAD, top, W - 2 * PAD, 2.5))
         self._track.setCornerRadius_(1.25)
-        self._track.setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.1).CGColor())
+        self._track.setBackgroundColor_(look.cg(AppKit.NSColor.quaternaryLabelColor(), parent))
         self._track.setOpacity_(0)
         parent.layer().addSublayer_(self._track)
         self._fill = Quartz.CALayer.layer()
@@ -249,7 +239,7 @@ class ChatPanel:
         parent.layer().addSublayer_(self._fill)
         line = AppKit.NSBox.alloc().initWithFrame_(AppKit.NSMakeRect(0, top - 1, W, 1))
         line.setBoxType_(AppKit.NSBoxSeparator)
-        line.setAlphaValue_(0.4)
+        line.setAlphaValue_(0.6)
         parent.addSubview_(line)
 
     def _build_body(self, parent) -> None:
@@ -267,7 +257,7 @@ class ChatPanel:
             "Say “Hey Mint”, or type below.\nSay “stop” any time to stop everything.")
         self._empty.setFont_(_font(12))
         self._empty.setAlignment_(AppKit.NSTextAlignmentCenter)
-        self._empty.setTextColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.4))
+        self._empty.setTextColor_(AppKit.NSColor.tertiaryLabelColor())
         self._empty.setFrame_(AppKit.NSMakeRect(20, (H - HEADER - INPUT) / 2 - 10, W - 40, 36))
         parent.addSubview_(self._empty)
 
@@ -275,8 +265,7 @@ class ChatPanel:
         box = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(PAD, 11, W - 2 * PAD, 34))
         box.setWantsLayer_(True)
         box.layer().setCornerRadius_(17)
-        box.layer().setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.08).CGColor())
-        box.layer().setBorderWidth_(1)
+        box.layer().setBorderWidth_(0.5)
         parent.addSubview_(box)
         self._box = box
         field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(14, 7, W - 2 * PAD - 54, 20))
@@ -286,11 +275,11 @@ class ChatPanel:
         field.setSelectable_(True)
         field.setFocusRingType_(AppKit.NSFocusRingTypeNone)
         field.setFont_(_font(13))
-        field.setTextColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.95))
+        field.setTextColor_(AppKit.NSColor.labelColor())
         field.cell().setUsesSingleLineMode_(True)
         field.cell().setScrollable_(True)
         field.setPlaceholderAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            f"Message {prefs.name()}…", {AppKit.NSForegroundColorAttributeName: AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.38),
+            f"Message {prefs.name()}…", {AppKit.NSForegroundColorAttributeName: AppKit.NSColor.placeholderTextColor(),
                                 AppKit.NSFontAttributeName: _font(13)}))
         field.setDelegate_(self._target)
         box.addSubview_(field)
@@ -299,8 +288,24 @@ class ChatPanel:
             gfx.symbol("arrow.up.circle.fill", 20), self._target, "send:")
         send.setBordered_(False)
         send.setToolTip_("Send")
+        send.setContentTintColor_(AppKit.NSColor.controlAccentColor())
         send.setFrame_(AppKit.NSMakeRect(W - 2 * PAD - 32, 3, 28, 28))
         box.addSubview_(send)
+        self._paint_box()
+
+    def _paint_box(self) -> None:
+        """The message field: a soft system fill with a hairline, like Messages."""
+        fill = getattr(AppKit.NSColor, "quaternarySystemFillColor", AppKit.NSColor.quaternaryLabelColor)()
+        self._box.layer().setBackgroundColor_(look.cg(fill, self._box))
+        self._box.layer().setBorderColor_(look.cg(AppKit.NSColor.separatorColor(), self._box))
+
+    def _retheme(self) -> None:
+        """Light/dark switched: layer colours are baked, so paint them again."""
+        if self.window is None:
+            return
+        self._paint_box()
+        self._track.setBackgroundColor_(look.cg(AppKit.NSColor.quaternaryLabelColor(), self.window.contentView()))
+        self._layout(0)
 
     # --- rows ---------------------------------------------------------------------
 
@@ -340,18 +345,18 @@ class ChatPanel:
         if kind == "mint":
             return AppKit.NSAttributedString.alloc().initWithString_attributes_(text, {
                 AppKit.NSFontAttributeName: _font(13),
-                AppKit.NSForegroundColorAttributeName: AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.93)})
+                AppKit.NSForegroundColorAttributeName: AppKit.NSColor.labelColor()})
         if kind == "summary":
             out = AppKit.NSMutableAttributedString.alloc().init()
             out.appendAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
                 "Summary\n", {AppKit.NSFontAttributeName: _font(11, AppKit.NSFontWeightSemibold),
-                               AppKit.NSForegroundColorAttributeName: gfx.ns(gfx.accent(), 0.95)}))
+                               AppKit.NSForegroundColorAttributeName: gfx.ns(look.ink(gfx.accent(), self.window))}))
             out.appendAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(text, {
                 AppKit.NSFontAttributeName: _font(12.5),
-                AppKit.NSForegroundColorAttributeName: AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.93)}))
+                AppKit.NSForegroundColorAttributeName: AppKit.NSColor.labelColor()}))
             return out
-        color = {"ok": gfx.ns(gfx.GREEN, 0.9), "fail": gfx.ns(gfx.RED, 0.9)}.get(
-            kind, AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.5))
+        color = {"ok": AppKit.NSColor.systemGreenColor(), "fail": AppKit.NSColor.systemRedColor()}.get(
+            kind, AppKit.NSColor.secondaryLabelColor())
         return AppKit.NSAttributedString.alloc().initWithString_attributes_(text, {
             AppKit.NSFontAttributeName: _font(11.5), AppKit.NSForegroundColorAttributeName: color})
 
@@ -383,6 +388,7 @@ class ChatPanel:
     def _layout(self, start: int) -> None:
         y = PAD if start == 0 else self._rows[start - 1]["bottom"] + 8
         accent = gfx.state_rgb("awake")
+        user_fill = tuple(c * 0.82 for c in accent)      # deep enough for white text
         for row in self._rows[start:]:
             kind = row["kind"]
             attributed = self._attributed(kind if kind in ("user", "mint", "ok", "fail", "summary") else "note",
@@ -400,13 +406,15 @@ class ChatPanel:
                 x = W - PAD - bw if kind == "user" else PAD
                 view.setFrame_(AppKit.NSMakeRect(x, y, bw, bh))
                 label.setFrame_(AppKit.NSMakeRect(11, 7, tw, th))
-                view.layer().setCornerRadius_(min(16, bh / 2))
+                view.layer().setCornerRadius_(min(17, bh / 2))
+                # Like Messages: your words in a solid accent bubble, Mint's in a soft
+                # system grey, both borderless, readable in light and dark.
+                grey = getattr(AppKit.NSColor, "tertiarySystemFillColor", AppKit.NSColor.quaternaryLabelColor)()
                 view.layer().setBackgroundColor_(
-                    gfx.cg(accent, 0.55) if kind == "user" else
-                    gfx.cg(gfx.accent(), 0.14) if kind == "summary" else
-                    AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.1).CGColor())
-                view.layer().setBorderWidth_(1.0 if kind == "summary" else 0.0)
-                view.layer().setBorderColor_(gfx.cg(gfx.accent(), 0.6))
+                    gfx.cg(user_fill) if kind == "user" else
+                    gfx.cg(gfx.accent(), 0.16) if kind == "summary" else
+                    look.cg(grey, self.window))
+                view.layer().setBorderWidth_(0.0)
                 row["bottom"] = y + bh
             else:
                 x = (W - tw) / 2 if kind == "note" else PAD + 4
@@ -551,7 +559,7 @@ class ChatPanel:
         self._dot.setBackgroundColor_(gfx.cg(gfx.state_rgb(state)))
         self._status.setStringValue_(text)
         self._stop.setHidden_(not busy)
-        self._box.layer().setBorderColor_(gfx.cg(gfx.state_rgb(state), 0.45))
+        # (The state shows in the header dot; the field keeps its hairline, as in Messages.)
 
     def progress(self, done: int, total: int, label: str = "") -> None:
         visible = total > 0
@@ -570,13 +578,13 @@ class ChatPanel:
         mic, voice = bool(prefs.get("mic")), bool(prefs.get("voice"))
         self._mic.setImage_(gfx.symbol("mic.fill" if mic else "mic.slash.fill", 12))
         self._voice.setImage_(gfx.symbol("speaker.wave.2.fill" if voice else "speaker.slash.fill", 12))
-        on, off = AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.82), gfx.ns(gfx.RED, 0.95)
+        on, off = AppKit.NSColor.secondaryLabelColor(), AppKit.NSColor.systemRedColor()
         self._mic.setContentTintColor_(on if mic else off)
         self._voice.setContentTintColor_(on if voice else off)
         from mint.ui import sharing
         shown = sharing.visible()
         self._eye.setImage_(gfx.symbol("eye.fill" if shown else "eye.slash", 12))
-        self._eye.setContentTintColor_(gfx.ns((1.0, 0.35, 0.4)) if shown else on)
+        self._eye.setContentTintColor_(AppKit.NSColor.systemRedColor() if shown else on)
         self._eye.setToolTip_("Mint is VISIBLE in screen sharing - click to hide it" if shown
                               else "Mint is hidden from screen sharing - click to show it")
         self._layout(0)
@@ -608,6 +616,7 @@ class ChatPanel:
             self.window.animator().setAlphaValue_(1.0)
             self.window.animator().setFrame_display_(frame, True)
             AppKit.NSAnimationContext.endGrouping()
+            AppHelper.callLater(0.3, self.window.invalidateShadow)   # shadow round the rounded glass
             self._scroll_to_end()
         self._take_keyboard()
 
@@ -630,6 +639,9 @@ class ChatPanel:
                 pass
         self.window.makeKeyAndOrderFront_(None)
         self.window.makeFirstResponder_(self._field)
+        editor = self.window.fieldEditor_forObject_(False, self._field)
+        if editor is not None:
+            editor.setDrawsBackground_(False)     # else a solid black/white slab covers the glass field
         if self.is_open and attempt < 3 and not app.isActive():
             AppHelper.callLater(0.08, lambda: self._take_keyboard(attempt + 1))
 

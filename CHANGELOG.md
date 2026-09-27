@@ -11,3 +11,4 @@ First public release.
 - Skills learned from experience and a searchable memory, both editable.
 - Background agents (research, code, documents, Codex builds) shown as critters, with teams.
 - Illustrated guide at https://hey-mint.pages.dev/.
+- A downloadable app (DMG) with Python, libraries and models bundled, and a first-run window for the API keys.

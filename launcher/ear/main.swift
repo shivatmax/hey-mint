@@ -21,7 +21,11 @@ import Foundation
 
 enum Bundled {
     static let info = Bundle.main.infoDictionary ?? [:]
-    static let root = info["MintProjectRoot"] as? String ?? ""
+    /// install.sh writes MintProjectRoot; a downloaded release works it out itself (Packaged.swift).
+    static let root: String = {
+        if let root = info["MintProjectRoot"] as? String, !root.isEmpty { return root }
+        return Packaged.isPackaged ? Packaged.root : ""
+    }()
     static let arguments = info["MintArguments"] as? [String] ?? ["--hands-free"]
 }
 let unloadedCode: Int32 = 75
@@ -84,6 +88,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         environment["PYTHONUNBUFFERED"] = "1"
         environment["MINT_EAR_SOCKET"] = Bundled.root + "/ear.sock"
         environment["MINT_EAR_REASON"] = reason
+        environment["MINT_APP_PATH"] = Bundle.main.bundlePath      // for "start at login"
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
         process.terminationHandler = { [weak self] done in
@@ -256,6 +261,18 @@ if CommandLine.arguments.contains("--ear-helper") {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+if Packaged.isPackaged {
+    do {
+        try Packaged.prepare()
+    } catch {
+        let alert = NSAlert()
+        alert.messageText = "Hey Mint could not set itself up"
+        alert.informativeText = "\(error.localizedDescription)\n\nFolder: \(Packaged.root)"
+        alert.runModal()
+        exit(1)
+    }
+    if !Packaged.ensureKeys() { exit(0) }
+}
 let controller = Controller()
 app.delegate = controller
 
