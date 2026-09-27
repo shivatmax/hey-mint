@@ -20,7 +20,16 @@ def test_autopilot():
     run("autopilot")
 
 
-@pytest.mark.skipif(importlib.util.find_spec("openwakeword") is None, reason="openwakeword not installed")
+def _wake_models() -> bool:
+    """openWakeWord's feature models are downloaded by install.sh, not by pip."""
+    spec = importlib.util.find_spec("openwakeword")
+    if spec is None or not spec.origin:
+        return False
+    models = Path(spec.origin).parent / "resources" / "models"
+    return (models / "melspectrogram.onnx").exists() and (models / "embedding_model.onnx").exists()
+
+
+@pytest.mark.skipif(not _wake_models(), reason="openWakeWord feature models not downloaded (./install.sh fetches them)")
 def test_wake_word_features():
     """The light-weight wake word features match openWakeWord exactly."""
     run("wake_features")
