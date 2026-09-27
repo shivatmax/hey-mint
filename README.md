@@ -16,7 +16,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-2EC4B6)
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-172033)
-![Python](https://img.shields.io/badge/python-3.10%2B-8B7CFF)
+![Python](https://img.shields.io/badge/python-3.11%2B-8B7CFF)
 ![Voice: Gemini Live](https://img.shields.io/badge/voice-Gemini%20Live-FFB547)
 
 </div>
@@ -62,7 +62,7 @@ short clip of every feature and a live orb on the page that acts out the example
 
 ## Install
 
-Requirements: a recent macOS on Apple silicon or Intel, Python 3.10+ (`python3`), the Xcode command line tools
+Requirements: a recent macOS on Apple silicon or Intel, Python 3.11+ (`python3`), the Xcode command line tools
 (`xcode-select --install`), and a [Gemini API key](https://aistudio.google.com/apikey).
 
 ```sh
@@ -117,8 +117,8 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
 - **Learns.** Tasks that took many steps or needed your correction become skills, ranked
   by how often they work.
 
-The engineering notes, measurements and design decisions behind each part are in
-[docs/ENGINEERING.md](docs/ENGINEERING.md); the full command reference is in [GUIDE.md](GUIDE.md).
+How the pieces fit together is in [docs/architecture.md](docs/architecture.md); every command and
+tool is in [docs/usage.md](docs/usage.md).
 
 ## Privacy and safety
 
@@ -132,17 +132,34 @@ The engineering notes, measurements and design decisions behind each part are in
 
 ## Project layout
 
-| Path | What |
-|---|---|
-| `mint/` | The assistant (Python, PyObjC): session, tools, orb and UI, agents, voice |
-| `mint/agents/` | Background agents, the Codex runner, teams |
-| `launcher/` | Mint.app's launcher and the low-memory “Mint Ear” (Swift) |
-| `guide/` | The illustrated guide (static site, deployed to GitHub Pages) |
-| `bench/` | Benchmarks and live tests |
-| `models/` | The “Hey Mint” wake word model |
+```
+mint/
+  app/         startup, the Gemini Live session, lifecycle
+  core/        configuration, preferences, Jev, shortcuts
+  voice/       audio engine, wake word, voice lock, enrolment
+  knowledge/   conversation, memory, learned skills
+  tools/       everything Gemini can call (apps, files, web, browser, clipboard…)
+  screen/      accessibility, grounding, text recognition, vision
+  ui/          the orb, chat, settings, marks, critters, effects
+  agents/      background agents, Codex, teams
+  resources/   example skills
+launcher/      Mint.app's launcher and the low-memory Mint Ear (Swift)
+guide/         the illustrated guide (static site)
+docs/          architecture and usage reference
+tests/         offline checks (pytest)
+scripts/       training the wake word model
+models/        the "Hey Mint" wake word model
+```
 
-Development: `.venv/bin/python -m mint --demo` plays the animation tour;
-`--say "do a trick"` talks to the running app by text; re-run `./install.sh` after changes.
+## Development
+
+```sh
+make setup      # .venv with dependencies, pytest and ruff
+make demo       # the animation tour, no API key needed
+make run        # run from the checkout (hands-free)
+make test       # offline checks; make test-all adds network and AppleScript checks
+make install    # build and install ~/Applications/Mint.app
+```
 
 ## Contributing
 

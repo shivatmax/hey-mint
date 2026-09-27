@@ -1,6 +1,6 @@
 /* The guide's own Mint: a small orb in the corner that behaves like the real one.
    It follows the pointer with its eyes, announces sections, and acts out examples:
-   expressions, tricks (the same paths as mint/motion.py), moving on command, and
+   expressions, tricks (the same paths as mint/ui/motion.py), moving on command, and
    marking words on the page (box, underline, highlight, circle, arrow). */
 (() => {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -71,7 +71,7 @@
     o._emoteT = setTimeout(() => o.classList.remove('e-' + name), EMOTES[name]);
   }
 
-  // ---------- flight (the same shapes as mint/motion.py, in screen pixels, y down) ----------
+  // ---------- flight (the same shapes as mint/ui/motion.py, in screen pixels, y down) ----------
   const E = {
     linear: t => t, inOut: t => t < .5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2,
     outQuad: t => 1 - (1 - t) ** 2, inQuad: t => t * t,

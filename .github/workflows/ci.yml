@@ -2,14 +2,20 @@ name: CI
 on: [push, pull_request]
 permissions: {contents: read}
 jobs:
-  compile:
+  test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - name: Byte-compile everything
-        run: python -m compileall -q mint bench guide launcher
+        with: {python-version: "3.12", cache: pip}
       - name: No secrets or personal files
         run: |
-          ! git ls-files | grep -E '(^|/)(\.env|custom\.json|settings\.json|history\.jsonl|memory\.md)$'
+          ! git ls-files | grep -E '(^|/)(\.env|custom\.json|settings\.json|agents\.json|history\.jsonl|memory\.md)$'
+      - name: Install
+        run: |
+          brew install portaudio
+          python -m pip install -r requirements.txt pytest ruff
+      - name: Lint (syntax errors, undefined names)
+        run: ruff check mint tests
+      - name: Offline checks
+        run: pytest

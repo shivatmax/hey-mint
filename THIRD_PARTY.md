@@ -15,4 +15,4 @@ its own license, which you should review before redistributing a build:
 
 `models/hey_mint.json` and `models/hey_mint_data.npz` were trained for this project from
 synthetic “Hey Mint” phrases (macOS system voices) and public speech (LibriSpeech, CC BY 4.0)
-features; see `bench/train_hey_mint.py`.
+features; see `scripts/train_hey_mint.py`.

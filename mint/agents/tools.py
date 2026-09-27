@@ -112,11 +112,11 @@ def run(name: str, args: dict, workspace: Path, team_root: Path | None = None) -
                                 + "\n".join(team_files[:200]))
             return listing
         if name == "create_pdf":
-            from .. import documents
+            from mint.tools import documents
             return documents.create_pdf(str(args.get("title", "Document")), str(args.get("content", "")),
                                         open_after=False)
         if name == "classify":
-            from .. import jev
+            from mint.core import jev
             options = [str(o) for o in args.get("options") or []]
             pick = jev.choose(str(args.get("question", "")), {str(i): o for i, o in enumerate(options)})
             if pick is None:

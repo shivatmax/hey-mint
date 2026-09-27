@@ -3,7 +3,7 @@
 // Mint (the Python app, ~260 MB) runs as a CHILD of this process, so macOS
 // attributes its privacy requests (microphone, Accessibility, Calendars) to
 // Mint.app. When Mint has been asleep and idle for a while it unloads itself
-// (exit code 75, mint/ear.py). Mint Ear then stands in for it:
+// (exit code 75, mint/app/ear.py). Mint Ear then stands in for it:
 //
 // * this process (~8 MB): the same menu-bar glyph, the orb as Mint left it, ⌘J,
 //   and `mint --say`; any of them starts Mint again;

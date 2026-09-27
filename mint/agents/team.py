@@ -36,7 +36,7 @@ import threading
 import time
 from pathlib import Path
 
-from .. import config
+from mint.core import config
 
 log = logging.getLogger("mint.agents")
 
@@ -216,7 +216,7 @@ def recall(task: str, limit: int = 3) -> str:
         text += ("\n\nEarlier work by the team that may help (may be outdated - check before relying on it):\n"
                  + "\n".join(parts))
     try:
-        from .. import membank
+        from mint.knowledge import memory as membank
         facts = [b.get("text", "") for b in membank.relevant(task, limit=4)]
         facts = [f for f in facts if f]
         if facts:

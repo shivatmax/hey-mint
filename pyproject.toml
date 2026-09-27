@@ -1,0 +1,69 @@
+[project]
+name = "hey-mint"
+version = "0.1.0"
+description = "Hey Mint: an open-source, Jarvis-style voice assistant for macOS"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "shivatmax" }]
+keywords = ["voice assistant", "macos", "jarvis", "gemini", "ai agents", "accessibility", "desktop automation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: MacOS X :: Cocoa",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Desktop Environment",
+]
+dependencies = [
+  "google-genai>=1.20.0",
+  "pyaudio>=0.2.14",
+  "pillow>=10.0.0",
+  "mss>=9.0.1",
+  "numpy>=1.26",
+  "onnxruntime>=1.17",
+  "openwakeword>=0.6.0",
+  "kaldi-native-fbank>=1.20",
+  "pyobjc-framework-Cocoa>=10.0",
+  "pyobjc-framework-Quartz>=10.0",
+  "pyobjc-framework-ApplicationServices>=10.0",
+  "pyobjc-framework-EventKit>=10.0",
+  "pyobjc-framework-Vision>=10.0",
+  "pyobjc-framework-AVFoundation>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+mint = "mint.app.main:main"
+
+[project.urls]
+Homepage = "https://hey-mint.pages.dev/"
+Documentation = "https://hey-mint.pages.dev/"
+Repository = "https://github.com/shivatmax/hey-mint"
+Issues = "https://github.com/shivatmax/hey-mint/issues"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mint*"]
+
+[tool.setuptools.package-data]
+mint = ["resources/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["guide", "scripts"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]      # syntax errors and undefined names; style is left to review

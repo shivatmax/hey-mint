@@ -13,9 +13,10 @@ from pathlib import Path
 os.environ["MINT_CAPTURE"] = "1"
 import make_shots as ms                       # backdrop, labels, patches (⌘J, chat history)
 from PyObjCTools import AppHelper
-from mint import ui, demo
-from mint.activity import phrase
-from mint import motion as _motion
+from mint.ui import presence as ui
+from mint.app import demo
+from mint.ui.activity import phrase
+from mint.ui import motion as _motion
 _motion.Motion.start = lambda self: None          # no idle tricks in the middle of a clip
 
 RAW = Path("/tmp/mint-guide-clips")
@@ -50,11 +51,11 @@ def clip(name, region, seconds, action):
 
 def tour(p):
     time.sleep(1.8)
-    from mint.effects import fx
-    from mint.emotes import emotes
-    from mint.motion import motion
-    from mint.marks import marks
-    from mint.critters import stage
+    from mint.ui.effects import fx
+    from mint.ui.emotes import emotes
+    from mint.ui.motion import motion
+    from mint.ui.marks import marks
+    from mint.ui.critters import stage
     say = demo._say
     p.set_state("awake"); time.sleep(1.2)
 
@@ -201,7 +202,7 @@ def tour(p):
         ms.main_sync(lambda: motion._fly([motion._swoop(motion._center(), motion._home())]))
     clip("nudge", R["trick"], 5, nudge)
     time.sleep(1.5)
-    from mint import prefs
+    from mint.core import prefs
     prefs.set("origin", None); prefs.set("position", "bottom-right")
 
     print("  [done]", flush=True)

@@ -12,7 +12,11 @@ os.environ["MINT_DEMO_SHOTS"] = str(OUT)
 
 import AppKit, Quartz
 from PyObjCTools import AppHelper
-from mint import hotkeys, chat, ui, demo, gfx
+from mint.core import hotkeys
+from mint.ui import chat
+from mint.ui import presence as ui
+from mint.app import demo
+from mint.ui import gfx
 
 hotkeys.HotKeys.register = lambda self, *a, **k: False          # the real Mint owns ⌘J
 chat.ChatPanel._load_history = lambda self: None                  # no real conversation in shots
@@ -97,11 +101,11 @@ def tour(presence):
     time.sleep(1.5)
     demo.run(presence, quit_after=False)          # 01-listening … 16-asleep
     p = presence
-    from mint.emotes import emotes
-    from mint.motion import motion
-    from mint.marks import marks
-    from mint.critters import stage
-    from mint.effects import fx
+    from mint.ui.emotes import emotes
+    from mint.ui.motion import motion
+    from mint.ui.marks import marks
+    from mint.ui.critters import stage
+    from mint.ui.effects import fx
     p.set_state("awake"); time.sleep(1.0)
 
     # Expressions on the orb
@@ -149,7 +153,7 @@ def tour(presence):
     time.sleep(8)
 
     # Windows: Settings (safe tabs) and Skills
-    from mint.settings_window import SettingsWindow
+    from mint.ui.settings import SettingsWindow
     sw = main_sync(lambda: SettingsWindow({"train_voice": lambda: None, "forget_voice": lambda: None,
                                           "audio_status": lambda: "MacBook Air Microphone · echo cancellation on"}))
     main_sync(sw.show); time.sleep(1.0)
@@ -158,7 +162,7 @@ def tour(presence):
         main_sync(lambda ident=ident: sw.tabs.selectTabViewItemWithIdentifier_(ident)); time.sleep(0.6)
         shot(name, window=main_sync(lambda: sw.window.windowNumber()))
     main_sync(lambda: sw.window.orderOut_(None))
-    from mint import brain_window
+    from mint.ui import brain as brain_window
     brain_window.open_window("skills"); time.sleep(2.5)
     win = main_sync(lambda: brain_window._window.window.windowNumber())
     shot("brain-skills", window=win)
@@ -172,10 +176,10 @@ def retake(presence):
     """Only the frames that caught something else on screen."""
     time.sleep(1.5)
     p = presence
-    from mint.emotes import emotes
-    from mint.motion import motion
-    from mint.marks import marks
-    from mint.activity import phrase
+    from mint.ui.emotes import emotes
+    from mint.ui.motion import motion
+    from mint.ui.marks import marks
+    from mint.ui.activity import phrase
     p.set_state("awake"); time.sleep(1.0)
     for name, args, shot_name in (("open_app", {"name": "Slack"}, "03-opening-morph"),
                                   ("menu", {"path": "Go > Applications"}, "10d-orb-menu")):

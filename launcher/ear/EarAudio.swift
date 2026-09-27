@@ -136,7 +136,7 @@ final class EarAudio {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.start() }
     }
 
-    /// Channel 0 to 16 kHz int16, the way mint/audio_vp.py does it (_resample):
+    /// Channel 0 to 16 kHz int16, the way mint/voice/engine.py does it (_resample):
     /// an integer ratio averages each group then decimates; otherwise linear
     /// interpolation.
     private func convert(_ buffer: AVAudioPCMBuffer) {

@@ -5,7 +5,7 @@ Shortcuts inside pages:
   {{clip NAME | caption}}   a looping video from clips/NAME.mp4 (poster clips/NAME.jpg)
   {{img FILE | caption}}    a screenshot from shots/FILE
   {{orb}}                   the orb's face markup (eyes, mouth, cheeks, brows, shades, hands)
-  {{voices}} {{tools}}      the 30 voices and the 88-tool table, from the code and GUIDE.md
+  {{voices}} {{tools}}      the 30 voices and the 88-tool table, from the code and docs/usage.md
 """
 import html
 import json
@@ -30,14 +30,14 @@ ORB = ('<span class="face"><span class="eyes"><span class="eye"></span><span cla
 
 
 def voices():
-    from mint.extra_tools import VOICES
-    from mint.voices import GENDER
+    from mint.tools.extra import VOICES
+    from mint.voice.voices import GENDER
     return "".join(f"<span>{v} <i>{html.escape(GENDER.get(v, ''))} · {html.escape(d)}</i></span>" for v, d in VOICES.items())
 
 
 def tools():
     rows = []
-    for line in (ROOT / "GUIDE.md").read_text().splitlines():
+    for line in (ROOT / "docs" / "usage.md").read_text().splitlines():
         m = re.match(r"\| `(\w+)` \| ([^|]*) \| (.*) \|$", line)
         if m:
             name, args, what = m.groups()

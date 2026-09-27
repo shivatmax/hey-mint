@@ -1,8 +1,8 @@
-// "Hey Mint" in Swift: the same detector as mint/wake.py's MintWake, so Mint
+// "Hey Mint" in Swift: the same detector as mint/voice/wake.py's MintWake, so Mint
 // Ear can listen while the Python app is not loaded.
 //
 // Features: openWakeWord's two ONNX models (mel spectrogram, speech embedding)
-// streamed exactly as mint/oww_lite.py streams them, one 80 ms frame at a time.
+// streamed exactly as mint/voice/features.py streams them, one 80 ms frame at a time.
 // Classifier: the logistic regression in hey_<name>[_personal].json over the last
 // 16 embeddings. Checked against the Python detector on the user's recordings
 // (launcher/ear_check.swift via `Mint --ear-check`).

@@ -30,7 +30,7 @@ import re
 import threading
 from pathlib import Path
 
-from .. import config
+from mint.core import config
 
 log = logging.getLogger("mint.agents")
 

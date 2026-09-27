@@ -1,3 +1,3 @@
-from .main import main
+from mint.app.main import main
 
 raise SystemExit(main())

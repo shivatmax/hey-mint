@@ -109,7 +109,7 @@ def route(agent: dict) -> tuple[str, list[str], str]:
     """-> (provider, models, note). Falls back when the agent's provider has no key."""
     provider, models = agent.get("provider", "gemini"), list(agent.get("models") or [])
     if provider == "codex":
-        from . import codex
+        from mint.agents import codex
         if codex.problem():
             raise NoProvider(codex.problem())
         return "codex", models, ""
@@ -124,7 +124,7 @@ def route(agent: dict) -> tuple[str, list[str], str]:
     fallback = agent.get("fallback") or {"provider": "gemini", "models": []}
     fb_provider = fallback.get("provider", "gemini")
     if available(fb_provider):
-        from .registry import GEMINI_FAST
+        from mint.agents.registry import GEMINI_FAST
         return (fb_provider, list(fallback.get("models") or GEMINI_FAST),
                 f"{provider} has no API key yet (add {provider.upper()}_API_KEY to .env); using {fb_provider}")
     raise NoProvider(f"No API key for {provider} or {fb_provider}.")

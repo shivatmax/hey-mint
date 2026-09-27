@@ -27,7 +27,10 @@ import logging
 import time
 from pathlib import Path
 
-from . import providers, registry, team, tools as agent_tools
+from mint.agents import providers
+from mint.agents import registry
+from mint.agents import team
+from mint.agents import tools as agent_tools
 
 log = logging.getLogger("mint.agents")
 
@@ -140,7 +143,7 @@ class Hub:
             print(f"  [agents: provider keys {result}]", flush=True)
         threading.Thread(target=keys, daemon=True, name="agent-key-check").start()
         try:                                   # the orbs and chat lines, when there is a UI
-            from .. import agent_view
+            from mint.ui import agent_view
             agent_view.attach(self)
         except Exception:
             log.debug("no agent view", exc_info=True)
@@ -219,7 +222,7 @@ class Hub:
             run.agent = dict(agent, workspace=str(Path(folder).expanduser()))
         elif codex_run:
             # Every build gets its own project folder, named after the task.
-            from . import codex
+            from mint.agents import codex
             run.agent = dict(agent, workspace=str(codex.project_folder(
                 Path(agent["workspace"]).expanduser(), task, run.id)))
         elif busy:
@@ -355,7 +358,7 @@ class Hub:
                 + team.team_prompt(run, registry.load()))
 
     async def _run_codex(self, run: Run, follow_up: bool = False) -> None:
-        from . import codex
+        from mint.agents import codex
         run.status = "working"
         # A follow-up starts again (its orb had flown home), showing the change.
         self.emit("start", run, run.inbox[-1] if follow_up and run.inbox else run.task)
@@ -568,7 +571,7 @@ class Hub:
         where = (f" Files are in {run.agent['workspace']}: {', '.join(run.files[-6:])}."
                  if run.files and run.agent.get("runner") != "codex" else "")
         try:
-            from ..memory import memory
+            from mint.knowledge.conversation import memory
             memory.add("agent", f"{run.name} ({status}) task: {run.task[:200]} -> {result[:600]}{where}")
         except Exception:
             pass

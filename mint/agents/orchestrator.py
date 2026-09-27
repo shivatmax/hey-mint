@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from google.genai import types
 
-from . import registry
-from .runtime import hub
+from mint.agents import registry
+from mint.agents.runtime import hub
 
 STRING = {"type": types.Type.STRING}
 
@@ -135,7 +135,7 @@ def _with_window(args: dict) -> str:
     context = str(args.get("context", "") or "")
     if not args.get("attach_window"):
         return context
-    from .. import documents
+    from mint.tools import documents
     text = documents.read_window(max_chars=40000, with_links=True)
     if text.startswith("FAILED"):
         return context + f"\n\n(The window's text could not be read: {text})"

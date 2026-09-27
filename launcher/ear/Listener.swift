@@ -12,7 +12,7 @@
 //   helper -> parent   WAKE                the wake word fired; the hand-over is armed
 //                      READY               Mint's orb and menu are up
 //                      STOP                Mint's microphone runs; this process exits
-// and to Mint over the Unix socket in Handoff (see mint/ear.py).
+// and to Mint over the Unix socket in Handoff (see mint/app/ear.py).
 
 import AVFoundation
 import Foundation
@@ -295,7 +295,7 @@ enum Settings {
     }
 }
 
-// Same list as mint/session.py CALL_APPS.
+// Same list as mint/app/session.py CALL_APPS.
 let callApps = [
     "us.zoom", "com.microsoft.teams", "com.apple.facetime", "com.apple.avconferenced", "com.cisco.webex",
     "cisco-systems.spark", "com.tinyspeck.slackmacgap", "com.google.chrome", "com.apple.safari",
