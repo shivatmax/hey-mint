@@ -50,12 +50,17 @@ jobs:
           SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           NOTARY_PROFILE: ${{ env.HAS_NOTARY == 'true' && 'heymint' || '' }}
         run: |
+          set +e
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then export VERSION="${GITHUB_REF_NAME#v}"; fi
-          set -o pipefail
-          bash packaging/build_app.sh 2>&1 | tee build.log || {
+          echo "::notice title=build::macOS $(sw_vers -productVersion) $(uname -m), $(xcrun swift --version 2>&1 | head -1), python3 $(python3 --version 2>&1)"
+          bash packaging/build_app.sh > build.log 2>&1
+          status=$?
+          cat build.log
+          if [[ $status -ne 0 ]]; then
+            echo "::error title=build::exit $status after $(wc -l < build.log | tr -d ' ') lines of output"
             tail -25 build.log | sed 's/%/%25/g' | while IFS= read -r line; do echo "::error title=build::$line"; done
-            exit 1
-          }
+          fi
+          exit $status
       - name: Publish the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
