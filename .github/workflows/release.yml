@@ -57,7 +57,7 @@ jobs:
           status=$?
           cat build.log
           if [[ $status -ne 0 ]]; then
-            echo "::error title=build::exit $status after $(wc -l < build.log | tr -d ' ') lines of output"
+            echo "::error title=build::exit $status after $(wc -l < build.log | tr -d ' ') lines: $(tail -c 600 build.log | tr '\n\r' '  ' | sed 's/%/%25/g; s/::/: :/g')"
             tail -25 build.log | sed 's/%/%25/g' | while IFS= read -r line || [[ -n "$line" ]]; do echo "::error title=build::$line"; done
           fi
           exit $status
