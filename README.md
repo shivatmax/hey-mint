@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="guide/assets/og.png" alt="Hey Mint — a Jarvis-style voice assistant for macOS" width="720">
+<a href="https://youtu.be/mWFT-IIiCaI"><img src="docs/media/launch-film.jpg" alt="Watch the 1-minute Hey Mint launch film on YouTube" width="720"></a>
 
 # Hey Mint
 
