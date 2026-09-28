@@ -1,62 +1,110 @@
-<!--{"title": "Say “Hey Mint”", "full_title": "Hey Mint — an open-source Jarvis-style voice assistant for macOS", "description": "Hey Mint is a free, open-source Jarvis for your Mac: say “Hey Mint” and it clicks, types, browses, manages files, runs agents and talks back. Guide with real clips of every feature.", "nav": "Home", "lede": "Everything Mint can do on your Mac: what to say, and what you will see.", "hello": "Hi! I'm the page's Mint. Poke me, or try a ▶ example."}-->
+<!--{"title": "Say “Hey Mint”", "full_title": "Hey Mint · the open-source voice assistant for your Mac", "description": "Hey Mint is a free, open-source Jarvis for macOS. Say “Hey Mint” and it talks back, clicks and types in your apps, finds things on screen, and hands big jobs to little agents.", "nav": "Home", "hello": "Hi! I'm the page's Mint. Poke me."}-->
 <header class="hero">
-  <div class="hero-grid">
+  <div class="hero-in">
     <div>
-      <div class="eyebrow">Open-source voice assistant for macOS</div>
-      <h1>Say <span class="quote">“Hey&nbsp;Mint.”</span></h1>
-      <p class="lede">Mint lives on your Mac. It listens, talks back, and does the thing on your screen. Every clip in this guide is the real Mint.</p>
-      <div class="ask">
-        <label for="q">What do you want Mint to do?</label>
-        <input id="q" type="search" placeholder="Try “pdf”, “tab group”, “dance”, “remember”…" autocomplete="off">
-        <ul class="results" id="results" aria-label="Matching things to say"></ul>
+      <div class="eyebrow">Voice assistant for macOS · free and open source</div>
+      <h1>Say <span class="q">“<i>Hey</i>&nbsp;<i>Mint</i>.”</span></h1>
+      <p class="sub">It listens, talks back, and does the thing on your screen. Opens apps, clicks and types, finds what you're looking for, and hands big jobs to little agents.</p>
+      <div class="ctas">
+        <a class="btn primary" href="{{download}}"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.8-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.6-1-2.6-4.1zM13.9 5c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.2 1.1.1 2.3-.6 3-1.5z"/></svg>Download for Mac</a>
+        <a class="btn ghost" href="docs">Read the docs</a>
       </div>
+      <div class="meta">Apple silicon · macOS 14.2+ · needs a free Gemini key</div>
     </div>
-    <div class="stage">
-      <button class="orb" aria-label="Mint's orb. Poke it.">{{orb}}</button>
-      <img class="critter-strip" src="shots/hero-critters.png" alt="The critter family lined up beside Mint's toy box" width="748" height="251">
+
+    <div class="player" data-player>
+      <div class="screen">
+        {{scene talk}}{{scene mark-box}}{{scene agent}}{{scene show}}
+        <span class="tag" data-for="agent">Real agent run · middle {{agent_speed}}× faster</span>
+      </div>
+      <ul class="phrases" role="tablist" aria-label="Things you can say">
+        <li><button role="tab" data-v="talk"><small>Open an app</small>open Slack and go to the on-call channel</button></li>
+        <li><button role="tab" data-v="mark-box"><small>Find it on screen</small>where's the deadline?</button></li>
+        <li><button role="tab" data-v="agent"><small>Hand off a big job</small>have Astra research keyboards and write a brief</button></li>
+        <li><button role="tab" data-v="show"><small>Just for fun</small>put on a show</button></li>
+      </ul>
     </div>
   </div>
 </header>
 
-<main>
-<div class="section-title"><div class="eyebrow">Try it right here</div>
-  <p class="lead" style="margin-top:10px">The little Mint in the corner of every page acts out the examples marked <b>▶ try</b>. Click one:</p>
-  <ul class="say">
-    <li><q data-try="emote:love">show me a heart</q></li><li><q data-try="trick:loop">do a loop the loop</q></li>
-    <li><q data-try="trick:chase">chase a star</q></li><li><q data-try="emote:cool">put your sunglasses on</q></li>
-    <li><q data-try="move:up">go a little up</q></li><li><q data-try="move:back">go back</q></li>
-  </ul>
-</div>
+<section class="band">
+  <div class="band-in">
+    <div class="eyebrow rise">How it goes</div>
+    <h2 class="rise">Talk to it like a person.</h2>
+    <p class="intro rise">No commands to learn. Mint works out how to do it with your Mac's own controls, and shows you each step.</p>
+    <ol class="flow">
+      <li class="rise"><span class="orb listen" aria-hidden="true">{{orb}}</span><h3>Say “Hey Mint”</h3>
+        <p>The wake word is heard on your Mac. Nothing leaves it until you say it, and only your voice counts.</p></li>
+      <li class="rise"><span class="orb think" aria-hidden="true">{{orb}}</span><h3>Ask your way</h3>
+        <p>Talk, or press <kbd>⌘J</kbd> and type. Keep going without the wake word; it's one conversation.</p></li>
+      <li class="rise"><span class="orb happy" aria-hidden="true">{{orb}}<span class="tick">✓</span></span><h3>Watch it happen</h3>
+        <p>The orb turns into what it's doing and shows a ✓. Say “stop” and everything halts.</p></li>
+    </ol>
+  </div>
+</section>
 
-<div class="cards">
-  <a class="card" href="talking.html"><video src="clips/talk.mp4" poster="clips/talk.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Basics</div><h3>Talking to Mint</h3><p>Wake it, talk over it, stop it, type to it. Captions, the chat, and changing how it behaves.</p></div></a>
-  <a class="card" href="orb.html"><video src="clips/morphs.mp4" poster="clips/morphs.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Basics</div><h3>The orb at work</h3><p>The orb turns into whatever it is doing, then shows a ✓ or ✗. What every animation means.</p></div></a>
-  <a class="card" href="doing.html"><video src="clips/click-type.mp4" poster="clips/click-type.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Doing things</div><h3>Apps, files, web, browser</h3><p>Clicking and typing, files, web search, full browser control, menus, screenshots, the clipboard, long tasks.</p></div></a>
-  <a class="card" href="showing.html"><video src="clips/mark-box.mp4" poster="clips/mark-box.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Showing and moving</div><h3>Showing you things, and tricks</h3><p>Boxes, underlines and arrows on anything on screen. Moving on command, and eight tricks.</p></div></a>
-  <a class="card" href="personality.html"><video src="clips/emote-love.mp4" poster="clips/emote-love.jpg" preload="none" muted loop playsinline style="object-fit:contain"></video>
-    <div class="in"><div class="eyebrow">Personality</div><h3>Expressions and voices</h3><p>Fourteen expressions, teasing, and thirty voices with any speaking style.</p></div></a>
-  <a class="card" href="agents.html"><video src="clips/agent-life.mp4" poster="clips/agent-life.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Personality</div><h3>Agents and critters</h3><p>Background helpers that pop out of a toy box, ask you questions, team up, and put on a show.</p></div></a>
-  <a class="card" href="learning.html"><video src="clips/flourishes.mp4" poster="clips/flourishes.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Learning</div><h3>Skills and memory</h3><p>How-tos Mint learns and ranks, and the facts it remembers about you.</p></div></a>
-  <a class="card" href="voice.html"><video src="clips/stop.mp4" poster="clips/stop.jpg" preload="none" muted loop playsinline></video>
-    <div class="in"><div class="eyebrow">Voice</div><h3>Your voice</h3><p>The wake word, training your voice, the voice lock, and words it gets wrong.</p></div></a>
-  <a class="card" href="settings.html"><video src="clips/chat.mp4" poster="clips/chat.jpg" preload="none" muted loop playsinline style="object-fit:contain"></video>
-    <div class="in"><div class="eyebrow">Settings</div><h3>Settings, sharing, safety</h3><p>Every setting, being visible in Google Meet, quitting, and the rules Mint never breaks.</p></div></a>
-</div>
+<section class="band" style="padding-top:0">
+  <div class="band-in">
+    <div class="eyebrow rise">What it can do</div>
+    <h2 class="rise">Most of what you do with a mouse.</h2>
+    <p class="intro rise">More than 80 tools across your apps, files, browser and day. A few of them:</p>
+    <div class="can rise">
+      <a href="docs#doing"><h3><span>🪟</span>Apps and windows</h3><p>Opens, switches, and finds the tab that's already open.</p><q>switch to the Jira tab</q></a>
+      <a href="docs#doing"><h3><span>👆</span>Clicks and types</h3><p>Finds controls by name, presses them, checks it worked.</p><q>click Sign in</q></a>
+      <a href="docs#files"><h3><span>📄</span>Files and PDFs</h3><p>Searches, reads, writes and tidies, with backups.</p><q>find the PDF about the lease</q></a>
+      <a href="docs#browser"><h3><span>🌐</span>Browser and web</h3><p>Tabs, forms, tab groups, in Chrome, Safari, Arc, Brave, Edge.</p><q>group my YouTube tabs</q></a>
+      <a href="docs#showing"><h3><span>🔎</span>Shows you where</h3><p>Boxes, underlines or points at things on screen.</p><q>where's the total?</q></a>
+      <a href="docs#memory"><h3><span>🧠</span>Remembers you</h3><p>Facts about you, and skills it learns from doing things.</p><q>remember my manager is Meera</q></a>
+    </div>
+  </div>
+</section>
 
-<div class="section-title" style="margin-bottom:80px">
-  <div class="eyebrow">Start here</div>
-  <ol class="steps">
-    <li><b>Install.</b> <code>./set-key.sh</code> (your Gemini key), <code>./install.sh</code>, then <code>open ~/Applications/Mint.app</code>. Details on the <a href="reference.html#install">Reference</a> page.</li>
-    <li><b>Allow it.</b> Microphone first, then Accessibility from the menu bar icon, so Mint can click and type.</li>
-    <li><b>Say “Hey Mint”</b>, or press <kbd>⌘J</kbd> and type. Ask for anything below.</li>
-    <li><b>Train your voice</b> (menu bar ▸ Train my voice…, two minutes) so only you can wake it.</li>
-  </ol>
-  <p><a href="reference.html#tools">See all 88 tools</a> · <a href="agents.html">Meet the critters</a></p>
-</div>
-</main>
+<section class="band agents-band">
+  <div class="band-in agents-grid">
+    <div>
+      <div class="eyebrow rise">Agents</div>
+      <h2 class="rise">Big jobs go to little agents.</h2>
+      <p class="intro rise" style="margin-bottom:26px">Research, reports, code and whole websites run in the background while you keep talking to Mint. Each one pops out of a toy box, works, asks if it needs you, and hops back in.</p>
+      <ul class="crew rise">
+        <li><span class="who" style="--c:#A99CFF"></span><div><b>Astra</b> <span>researches and writes sourced briefs</span></div></li>
+        <li><span class="who" style="--c:#5FE0CF"></span><div><b>Luna</b> <span>writes code you can run</span></div></li>
+        <li><span class="who" style="--c:#FFC870"></span><div><b>Sage</b> <span>turns notes into reports and PDFs</span></div></li>
+        <li><span class="who" style="--c:#58C79E"></span><div><b>Codex</b> <span>builds websites and apps</span></div></li>
+      </ul>
+      <a class="btn ghost rise" href="docs#agents">How agents work</a>
+    </div>
+    <figure class="clip rise" style="margin:0">{{video agent}}
+      <figcaption><span class="stamp">A real run: Astra searching, reading and writing the brief (middle {{agent_speed}}× faster)</span></figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band-in">
+    <div class="eyebrow rise">Safe by design</div>
+    <h2 class="rise">It asks before anything you can't undo.</h2>
+    <div class="promises" style="margin-top:36px">
+      <div class="rise"><h3>Only your voice</h3><p>Train it once and nobody else can wake it or talk over it.</p></div>
+      <div class="rise"><h3>No passwords</h3><p>It never types a password or card number, and never saves one.</p></div>
+      <div class="rise"><h3>Asks first</h3><p>Emails stay drafts. Messages and forms go out only when you said so.</p></div>
+      <div class="rise"><h3>Trash, not delete</h3><p>“Delete” means the Trash, and files are backed up before Mint changes them.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="get" style="padding-top:0">
+  <div class="band-in">
+    <div class="get rise">
+      <div>
+        <h2>Get Mint.</h2>
+        <p class="intro">One app with everything inside. No Python, Homebrew or Terminal.</p>
+        <a class="btn primary" href="{{download}}">Download for Mac</a>
+        <p class="alt">Prefer the source? <a href="docs#install">Build it yourself</a> · <a href="{{repo}}">GitHub</a></p>
+      </div>
+      <ol>
+        <li><div><b>Drag it to Applications</b><span>Open it. The first time, click Open Anyway in System Settings ▸ Privacy &amp; Security.</span></div></li>
+        <li><div><b>Paste your Gemini key</b><span>Free from Google AI Studio. It stays on your Mac.</span></div></li>
+        <li><div><b>Say “Hey Mint”</b><span>Allow the microphone and Accessibility when asked. That's it.</span></div></li>
+      </ol>
+    </div>
+  </div>
+</section>

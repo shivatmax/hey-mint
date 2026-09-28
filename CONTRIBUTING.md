@@ -38,7 +38,7 @@ way to try a tool you are working on.
 - Keep changes focused; one feature or fix per PR.
 - Match the surrounding style: plain names, short docstrings that say *why*.
 - If you change what users see, update `docs/usage.md` and the guide (`guide/src/*.html`, then
-  `make guide`). New clips: `guide/make_clips.py` + `guide/encode_clips.py`.
+  `make guide`). New videos: `guide/make_scenes.py` records them, `guide/encode_scenes.py` cuts them.
 - If you touch packaging or the launcher, check `make app` still builds and the app opens.
 - Add a line under "Unreleased" in `CHANGELOG.md` for anything users will notice.
 - Never commit keys, `.env`, `custom.json`, `settings.json`, memory, voice recordings or logs.

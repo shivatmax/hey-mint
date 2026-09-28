@@ -126,11 +126,13 @@ The illustrated guide at [hey-mint.pages.dev](https://hey-mint.pages.dev/) is pl
 
 ```sh
 make guide                                  # rebuilds guide/*.html, the sitemap and the search index
-python3 -m http.server -d guide 8765        # preview at http://localhost:8765
+python3 guide/serve.py                      # preview at http://localhost:8765
 ```
 
-The feature clips are recorded from the real app: `guide/make_clips.py` records them and
-`guide/encode_clips.py` turns them into small MP4s and posters (needs `ffmpeg`).
+The videos are recorded from the real app: `guide/make_scenes.py` plays each scene on a blank
+desktop and records the whole screen at full resolution (the agent scene is a real agent run), and
+`guide/encode_scenes.py` cuts sharp crops out of those recordings into `guide/media/` (needs `ffmpeg`).
+`python3 guide/serve.py` previews the site with the same clean URLs as Cloudflare.
 
 Changes to `guide/` on `main` are deployed to Cloudflare Pages by
 `.github/workflows/cloudflare.yml` when the repository has the `CLOUDFLARE_API_TOKEN` and

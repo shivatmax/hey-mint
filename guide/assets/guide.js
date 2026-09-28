@@ -274,48 +274,84 @@
   }
 
   // ---------- page furniture ----------
-  const links = $$('.toc a'); let current = null;
-  const io = new IntersectionObserver(entries => {
-    for (const e of entries) if (e.isIntersecting && e.target.id !== current) {
-      current = e.target.id;
-      links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + current));
-      if (e.target.dataset.say) say(e.target.dataset.say);
-    }
-  }, {rootMargin: '-35% 0px -60% 0px'});
-  $$('main section[id]').forEach(s => io.observe(s));
+  const top = $('.top');
+  addEventListener('scroll', () => top?.classList.toggle('scrolled', scrollY > 8), {passive: true});
 
-  // Videos play only while on screen.
+  // Things rise into view once.
+  const rio = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); rio.unobserve(e.target); } }),
+    {rootMargin: '0px 0px -8% 0px'});
+  $$('.rise').forEach((el, i) => { el.style.transitionDelay = (i % 4) * 70 + 'ms'; rio.observe(el); });
+
+  // The landing player: each phrase is a tab that plays the clip of Mint doing it.
+  const player = $('[data-player]');
+  if (player) {
+    const tabs = $$('.phrases button', player), vids = $$('.screen video', player), tags = $$('.screen .tag', player);
+    let at = 0, auto = true, visible = true, raf;
+    const vid = name => vids.find(v => v.dataset.v === name);
+    function tick() {
+      const v = vid(tabs[at].dataset.v);
+      if (v && v.duration) tabs[at].style.setProperty('--p', (v.currentTime / v.duration).toFixed(4));
+      raf = requestAnimationFrame(tick);
+    }
+    function show(i, user) {
+      if (user) auto = false;
+      at = (i + tabs.length) % tabs.length;
+      const name = tabs[at].dataset.v;
+      tabs.forEach((t, k) => { t.classList.toggle('on', k === at); t.setAttribute('aria-selected', k === at); t.style.setProperty('--p', 0); });
+      tags.forEach(t => t.classList.toggle('on', t.dataset.for === name));
+      vids.forEach(v => { const on = v.dataset.v === name; v.classList.toggle('on', on); if (!on) v.pause(); });
+      const v = vid(name);
+      if (v && visible && !reduce) { if (v.currentTime) v.currentTime = 0; v.play().catch(() => {}); }
+      const row = tabs[at].closest('.phrases');                       // on phones the phrases scroll sideways
+      if (row && row.scrollWidth > row.clientWidth) row.scrollTo({left: tabs[at].parentElement.offsetLeft - row.offsetLeft, behavior: reduce ? 'auto' : 'smooth'});
+      if (user) say(`“${tabs[at].lastChild.textContent.trim()}”`, 'You', 2600);
+    }
+    vids.forEach(v => v.addEventListener('ended', () => { if (auto) show(at + 1); else { v.currentTime = 0; v.play().catch(() => {}); } }));
+    tabs.forEach((t, i) => t.addEventListener('click', () => show(i, true)));
+    new IntersectionObserver(es => es.forEach(e => {
+      visible = e.isIntersecting;
+      const v = vid(tabs[at].dataset.v);
+      if (!v || reduce) return;
+      visible ? v.play().catch(() => {}) : v.pause();
+    }), {threshold: .3}).observe(player);
+    const resume = () => { const v = vid(tabs[at].dataset.v); if (v && visible && !reduce && !document.hidden && v.paused) v.play().catch(() => {}); };
+    document.addEventListener('visibilitychange', resume);
+    vids.forEach(v => v.addEventListener('loadeddata', resume));
+    show(0);
+    if (!reduce) tick();
+  }
+
+  // Docs: the side menu follows the section you are reading.
+  const links = $$('.side nav a');
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id));
+  }, {rootMargin: '-30% 0px -65% 0px'});
+  $$('article section[id]').forEach(s => io.observe(s));
+
+  // Other clips play only while on screen.
   const vio = new IntersectionObserver(entries => {
     for (const e of entries) { const v = e.target; if (e.isIntersecting && !reduce) { v.preload = 'auto'; v.play().catch(() => {}); } else v.pause(); }
   }, {threshold: .25});
-  $$('video').forEach(v => { v.muted = true; v.loop = true; v.playsInline = true; vio.observe(v); });
+  $$('video').filter(v => !v.closest('[data-player]')).forEach(v => { v.muted = true; v.loop = true; v.playsInline = true; vio.observe(v); });
 
-  // Screenshots open large.
-  const lb = $('#lb');
-  if (lb) {
-    $$('figure img').forEach(img => img.addEventListener('click', () => {
-      $('img', lb).src = img.src; $('img', lb).alt = img.alt;
-      $('p', lb).textContent = img.closest('figure').querySelector('figcaption')?.textContent || '';
-      lb.showModal();
-    }));
-    lb.addEventListener('click', () => lb.close());
-  }
-
-  // Search every example in the guide (index built by build.py).
-  const input = $('#q'), list = $('#results');
+  // Docs search: sections and every example.
+  const input = $('#find'), hits = $('#hits');
   if (input && window.MINT_INDEX) {
     input.addEventListener('input', () => {
       const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-      if (!words.length) { list.classList.remove('open'); return; }
-      const hits = MINT_INDEX.filter(x => words.every(w => (x.t + ' ' + x.w).toLowerCase().includes(w))).slice(0, 14);
-      list.innerHTML = hits.length ? hits.map(h => `<li><a href="${h.h}"><span>“${h.t}”</span><span class="where">${h.w}</span></a></li>`).join('')
-        : '<li class="empty">Not in the guide yet. Just ask Mint: it tries the Mac\'s own tools before saying no.</li>';
-      list.classList.add('open');
+      if (!words.length) { hits.innerHTML = ''; return; }
+      const found = MINT_INDEX.filter(x => words.every(w => (x.t + ' ' + (x.w || '')).toLowerCase().includes(w))).slice(0, 8);
+      hits.innerHTML = found.length ? found.map(h => h.k === 'section' ? `<a href="#${h.h}"><b>${h.t}</b></a>`
+        : `<a href="#${h.h}"><b>“${h.t}”</b> · ${h.w}</a>`).join('')
+        : '<div class="none">Not here yet. Just ask Mint: it tries before it says no.</div>';
     });
-    input.addEventListener('keydown', e => { if (e.key === 'Escape') { input.value = ''; list.classList.remove('open'); } });
-    document.addEventListener('click', e => { if (!e.target.closest('.ask')) list.classList.remove('open'); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { input.value = ''; hits.innerHTML = ''; }
+      if (e.key === 'Enter') hits.querySelector('a')?.click();
+    });
+    addEventListener('keydown', e => { if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); } });
   }
 
   window.PageMint = {say, emote, trick, move, mark, clearMarks};
-  setTimeout(() => say(document.body.dataset.hello || 'Hi! I\'m Mint. Click a ▶ example and I\'ll do it.'), 900);
+  setTimeout(() => say(document.body.dataset.hello || 'Hi! I\'m Mint.'), 1200);
 })();

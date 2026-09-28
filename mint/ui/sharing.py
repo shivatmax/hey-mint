@@ -119,6 +119,8 @@ _dot = None
 def _indicator(on: bool) -> None:
     """A small red dot on the orb while Mint is visible to screen sharing."""
     global _dot
+    if os.environ.get("MINT_CAPTURE_CLEAN"):       # the guide's recordings: visible, without the dot
+        on = False
     try:
         from mint.ui.emotes import emotes
         orb = emotes.orb

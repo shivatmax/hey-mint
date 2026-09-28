@@ -1,0 +1,224 @@
+<!--{"title": "Docs", "full_title": "Hey Mint docs · everything the Mac voice assistant can do", "description": "How to install Hey Mint and use every feature: talking, clicking and typing, files, browser, marking things on screen, agents and critters, memory, skills, your voice, settings and safety.", "nav": "Docs", "hello": "Click a ▶ example and I'll act it out."}-->
+<div class="doc-head">
+  <div class="eyebrow">Documentation</div>
+  <h1>Everything Mint can do.</h1>
+  <p>Ask in your own words; you never need a tool's name. Tap a <b>▶</b> example and the little Mint in the corner acts it out.</p>
+</div>
+
+<section id="install" data-group="Start">
+  <h2>Install</h2>
+  <p class="lead">One download with everything inside: Python, libraries and models. Apple silicon Macs on macOS 14.2 or later.</p>
+  <ol class="steps">
+    <li>Download <b>Hey-Mint-…-arm64.dmg</b> from <a href="{{download}}">the latest release</a> and drag Hey Mint into Applications.</li>
+    <li>Open it. The first time, macOS may say it can't check it: open <b>System Settings ▸ Privacy &amp; Security</b> and click <b>Open Anyway</b>.</li>
+    <li>Paste a free <a href="https://aistudio.google.com/apikey">Gemini API key</a>. Hold <kbd>⌥</kbd> while opening Mint to change keys later.</li>
+    <li>Allow the <b>Microphone</b>, then switch Mint on under <b>Accessibility</b> so it can click and type.</li>
+  </ol>
+  <details><summary>Optional keys, and what they unlock</summary>
+    <div class="table"><table><tr><th>Key</th><th>Unlocks</th></tr>
+      <tr><td>OpenAI or OpenRouter</td><td>Agents: research, reports, code</td></tr>
+      <tr><td>TypeSafe (Jev)</td><td>The <code>desktop</code> tool for multi-step clicking in any app, and surer picks of buttons, skills and memories</td></tr>
+      <tr><td>Exa or Tavily</td><td>Better web search (DuckDuckGo otherwise)</td></tr>
+      <tr><td>ChatGPT app</td><td>Codex, the agent that builds websites and apps</td></tr></table></div>
+  </details>
+  <details><summary>Build from source instead</summary>
+<pre>git clone {{repo}}.git && cd hey-mint
+./set-key.sh      # your Gemini key, saved in .env
+./install.sh      # builds ~/Applications/Mint.app
+open ~/Applications/Mint.app</pre>
+    <p>Developing Mint? See the <a href="{{repo}}/blob/main/docs/development.md">developer handbook</a>.</p>
+  </details>
+</section>
+
+<section id="talking" data-group="Start">
+  <h2>Talking to Mint</h2>
+  <p class="lead">Say “Hey Mint”, then ask. Your words and Mint's reply appear as captions beside the orb. Keep talking without the wake word: it's one conversation.</p>
+  {{video talk | <b>A request, start to finish.</b> Your words, the orb thinking, turning into Slack while it opens it, a ✓, the reply.}}
+  <ul class="say"><li><q>what's on my calendar today?</q></li><li><q>and tomorrow?</q></li><li><q>stop</q></li><li><q>bye</q></li></ul>
+  <div class="table"><table><tr><th>To</th><th>Do this</th></tr>
+    <tr><td>Wake it</td><td>“Hey Mint”, click the orb, or <kbd>⌘J</kbd> and type</td></tr>
+    <tr><td>Interrupt</td><td>Just talk while it speaks; it stops and listens</td></tr>
+    <tr><td>Stop everything</td><td>“stop”, “cancel”, “never mind”: queued clicks and keys too</td></tr>
+    <tr><td>Send it to sleep</td><td>“bye”, “that's all”; or 12 quiet seconds</td></tr></table></div>
+  <details><summary>The chat window</summary>
+    {{video chat 320 | <kbd>⌘J</kbd> opens the chat: the conversation, every action with a ✓ or ✗, and a box to type in.}}
+    <p>The buttons along the top show or hide Mint in screen sharing, compact or clear the chat, send Mint to sleep, turn the mic or spoken replies off, and open Settings. Typing never turns the microphone on.</p>
+  </details>
+</section>
+
+<section id="orb" data-group="Start">
+  <h2>Reading the orb</h2>
+  <p class="lead">The orb turns into whatever it's doing, with a caption, then shows a ✓ or ✗. Long tasks get a plan, a progress ring and confetti.</p>
+  {{video work | Searching, reading a file, a menu command, reading the window; a failed step (✗ and a tiny rain cloud); then a three-step plan.}}
+  <div class="table"><table><tr><th>You see</th><th>It means</th></tr>
+    <tr><td>Eyes following your pointer</td><td>Awake and listening</td></tr>
+    <tr><td>Eyes up, swirl turning</td><td>Thinking</td></tr>
+    <tr><td>A symbol with a caption</td><td>Working: a magnifier is searching, a hand is clicking, a cursor is typing</td></tr>
+    <tr><td>Dimmed, eyes closed</td><td>Asleep; only “Hey Mint” wakes it</td></tr></table></div>
+</section>
+
+<section id="doing" data-group="Using Mint">
+  <h2>Apps, clicking and typing</h2>
+  <p class="lead">Mint reads every control in the window, presses the one you meant like a person would, and checks something changed. Menus and app scripting come first; the pointer moves only when nothing else can do it.</p>
+  {{video doing | A click on “Design review” (a ripple and a paw print) and typing into the outlined box.}}
+  <ul class="say"><li><q>open Figma</q></li><li><q>switch to the Jira tab</q></li><li><q>click Sign in</q></li><li><q>type see you at six</q></li>
+    <li><q>read this page</q></li><li><q>summarise this</q></li><li><q>in Finder go to Applications</q></li><li><q>scroll to Privacy &amp; Security</q></li></ul>
+  <p class="note warn">Mint never types into a password field, and presses Send, Delete, Buy and the like only when you asked.</p>
+</section>
+
+<section id="files" data-group="Using Mint">
+  <h2>Files</h2>
+  <p class="lead">Spotlight search by name and content; reads text, PDFs, Word, CSV and more; writes and edits with a backup of the old version.</p>
+  <ul class="say"><li><q>what did I download today?</q></li><li><q>find the PDF about the lease</q></li><li><q>make a file called plan.md with…</q></li>
+    <li><q>change the deadline in plan.md to Friday</q></li><li><q>move it to Archive</q></li><li><q>show it in Finder</q></li></ul>
+  <p class="note">“Delete” means the Trash. Keys, keychains, browser profiles, Mail and Messages are off limits.</p>
+</section>
+
+<section id="browser" data-group="Using Mint">
+  <h2>Browser and web</h2>
+  <p class="lead">Full control of Chrome, Safari, Brave, Arc and Edge, including sites you're signed in to. Web search and page reading happen in the background.</p>
+  <ul class="say"><li><q>what tabs do I have open?</q></li><li><q>put my name in the Full name field</q></li><li><q>put YouTube and anime in a group called Entertainment</q></li>
+    <li><q>always open YouTube in Brave</q></li><li><q>what's the latest version of Python?</q></li><li><q>read that article</q></li></ul>
+  <details><summary>Which browser it uses</summary>
+    <p>The one you name; then your rules (“entertainment in Brave”); then the one in front; then the Mac's default. A tab already showing the page is reused. Page actions are fastest with <b>Allow JavaScript from Apple Events</b> on (Chrome ▸ View ▸ Developer); Mint never switches it on itself.</p>
+  </details>
+</section>
+
+<section id="showing" data-group="Using Mint">
+  <h2>Showing you where</h2>
+  <p class="lead">Ask where something is, in any app. Mint finds the words on screen, scrolls to them, marks them, and flies over to look.</p>
+  {{video marks | Box, highlight and arrow, each with a note. The orb swoops over beside each mark.}}
+  <ul class="say"><li><q data-try="mark:#m-deadline:box:the deadline">where's the deadline?</q></li><li><q data-try="mark:#m-owner:underline">underline who owns the notes</q></li>
+    <li><q data-try="mark:#m-budget:highlight:budget cap">highlight the budget</q></li><li><q data-try="mark:#m-risk:circle">circle the biggest risk</q></li><li><q data-try="clear">clear the marks</q></li></ul>
+  <div class="sample"><h4>Launch plan</h4>
+    <p>We ship the new voice experience next week. <span id="m-deadline">The deadline is Friday, 3 October.</span></p>
+    <p><span id="m-owner">Priya handles the release notes</span> and the demo. <span id="m-budget">Budget stays under $4,000.</span></p>
+    <p><span id="m-risk">Biggest risk: the wake word on older Macs.</span></p></div>
+</section>
+
+<section id="tasks" data-group="Using Mint">
+  <h2>Everyday and long tasks</h2>
+  <p class="lead">Calendar, reminders, notes, timers, email drafts, volume and media. Ask for a list of things and Mint does them back to back, then reports once.</p>
+  <ul class="say"><li><q>remind me to call Sam at five</q></li><li><q>set a ten minute timer for tea</q></li><li><q>draft an email to Priya saying I'll be late</q></li>
+    <li><q>take a screenshot of this window</q></li><li><q>open Notes, Calendar and Slack</q></li><li><q>what did I copy before?</q></li></ul>
+  <p class="note">Emails are always drafts: Mint never sends one. A message goes out only when you asked, and never twice within two minutes.</p>
+</section>
+
+<section id="agents" data-group="Agents">
+  <h2>Agents</h2>
+  <p class="lead">For big jobs (research, long documents, code, websites) Mint hands the work to an agent and keeps talking with you. You hear back when it's done.</p>
+  {{video agent | <b>A real run.</b> Astra pops out of the box, searches, reads pages, writes the brief, and hops back in. Middle {{agent_speed}}× faster.}}
+  <div class="cards">
+    <div style="--c:#A99CFF"><b>Astra</b><span>Research: searches, reads, cross-checks, writes a sourced brief</span></div>
+    <div style="--c:#5FE0CF"><b>Luna</b><span>Code: plans and writes complete, runnable files</span></div>
+    <div style="--c:#FFC870"><b>Sage</b><span>Writing: long documents, reports and PDFs</span></div>
+    <div style="--c:#58C79E"><b>Codex</b><span>Builds websites and apps in OpenAI Codex, and checks them</span></div>
+  </div>
+  <ul class="say"><li><q>have Astra research the best mechanical keyboards</q></li><li><q>ask Codex to make a tiny hello-world page</q></li>
+    <li><q>how's Luna doing?</q></li><li><q>tell Luna to use pytest</q></li><li><q>stop all agents</q></li><li><q>create an agent called Nova that writes tweets</q></li></ul>
+  <details><summary>Teams, folders and limits</summary>
+    <p>An agent can bring in teammates when their specialty helps (Sage asks Astra for research) and reports back for all of them. Each works in its own folder under <code>~/Documents/Mint/agents</code>. Up to six at once; stopping the lead stops its helpers. Finished work goes into Mint's memory.</p>
+  </details>
+</section>
+
+<section id="critters" data-group="Agents">
+  <h2>The critters</h2>
+  <p class="lead">Each agent is a little critter that lives in a toy box beside the orb. What it does tells you what the agent is doing.</p>
+  {{video moods | Sage calls Astra in to help; then Luna fails (a rain cloud and a tear) and Codex is stopped (a startled dash home).}}
+  <div class="table"><table><tr><th>The critter</th><th>Means</th></tr>
+    <tr><td>Pops out with sparkles</td><td>An agent started</td></tr>
+    <tr><td>A “…” or a tool in its bubble</td><td>Thinking, or searching, reading, writing</td></tr>
+    <tr><td>A “?” and a hop</td><td>It has a question: click it</td></tr>
+    <tr><td>A somersault and confetti</td><td>Finished; it hops back into the box</td></tr>
+    <tr><td>A rain cloud, or a startled “!”</td><td>Failed, or stopped</td></tr></table></div>
+  <p>Hover to see what one is doing, click for a reaction, right-click to stop it. Say <q class="inline">put on a show</q> and the whole family performs:</p>
+  {{video show | Showtime: the critters pop out, do a stadium wave, a solo each and a dance, then bow.}}
+</section>
+
+<section id="personality" data-group="Personality">
+  <h2>Expressions and tricks</h2>
+  <p class="lead">Fourteen expressions and eight tricks, each a real 60 fps animation. Mint uses them sparingly on its own, and whenever you ask.</p>
+  <div class="pair">
+    {{video faces | Love, laugh, cool, surprised, cry, sleepy, dance, wave.}}
+    {{video tricks | A loop, a figure eight, chasing a star, a bee's zigzag, a spin.}}
+  </div>
+  <div class="faces">
+    <button data-emote="love">♥ love</button><button data-emote="laugh">laugh</button><button data-emote="cool">cool</button><button data-emote="surprised">surprised</button>
+    <button data-emote="cry">cry</button><button data-emote="sleepy">sleepy</button><button data-emote="dizzy">dizzy</button><button data-emote="dance">dance</button><button data-emote="wave">wave</button>
+  </div>
+  <ul class="say"><li><q data-try="trick:loop">do a loop the loop</q></li><li><q data-try="trick:figure8">a figure eight</q></li><li><q data-try="trick:chase">chase a star</q></li>
+    <li><q data-try="trick:bounce">bounce like a ball</q></li><li><q data-try="move:up">go a little up</q></li><li><q data-try="move:back">go back</q></li></ul>
+</section>
+
+<section id="voices" data-group="Personality">
+  <h2>Voices</h2>
+  <p class="lead">Any of Gemini's 30 voices, in any speaking style you describe. It switches between turns and keeps the conversation.</p>
+  <ul class="say"><li><q>use a deeper voice</q></li><li><q>sound more cheerful</q></li><li><q>talk slower</q></li><li><q>use Puck</q></li></ul>
+  <details><summary>All 30 voices</summary><div class="voices">{{voices}}</div></details>
+</section>
+
+<section id="memory" data-group="Learning">
+  <h2>Memory</h2>
+  <p class="lead">Mint remembers facts about you, one per note, and looks up only what matters to the question.</p>
+  <ul class="say"><li><q>remember my manager is Meera</q></li><li><q>my manager is now Rahul</q></li><li><q>who's my boss?</q></li>
+    <li><q>forget my old address</q></li><li><q>what do you remember about me?</q></li></ul>
+  <p>Read and edit every fact in the Skills &amp; Memory window. Passwords, keys and card numbers are refused.</p>
+</section>
+
+<section id="skills" data-group="Learning">
+  <h2>Skills</h2>
+  <p class="lead">A skill is a short how-to. When a task took many steps or needed your correction, Mint writes it up, then ranks it by how often it works.</p>
+  <ul class="say"><li><q>save how to do that as a skill</q></li><li><q>next time use the sidebar</q></li><li><q>what skills do you have?</q></li><li><q>delete that skill</q></li></ul>
+</section>
+
+<section id="voice" data-group="Your voice">
+  <h2>Wake word and voice lock</h2>
+  <p class="lead">“Hey Mint” is detected on your Mac. Train your voice once (menu bar ▸ Train my voice…, two minutes) and only you can wake it, talk to it, or talk over it.</p>
+  <div class="table"><table><tr><th>Setting</th><th>Use it when</th></tr>
+    <tr><td>Relaxed</td><td>It sometimes misses you (a noisy room, a cold)</td></tr>
+    <tr><td>Balanced</td><td>Most of the time (the default)</td></tr>
+    <tr><td>Strict</td><td>Someone with a similar voice is around</td></tr></table></div>
+  <ul class="say"><li><q>you heard cube con, I said KubeCon</q></li><li><q>it's GitHub, one word</q></li></ul>
+  <p>Mint steps aside during Zoom, Meet or FaceTime calls, and ignores talk that isn't meant for it. Rename it in Settings ▸ You and it builds a new wake word.</p>
+</section>
+
+<section id="settings" data-group="Settings">
+  <h2>Settings</h2>
+  <p class="lead">Open Settings from the menu bar icon (<kbd>⌘,</kbd>), or just ask Mint to change something.</p>
+  <ul class="say"><li><q>don't speak, just chat</q></li><li><q>make it pink</q></li><li><q>move to the top left</q></li><li><q>Mint, be visible</q></li><li><q>quit Mint</q></li></ul>
+  <div class="table"><table><tr><th>Tab</th><th>What's in it</th></tr>
+    <tr><td>You</td><td>The assistant's name, your name, and what Mint should know about you</td></tr>
+    <tr><td>Your voice</td><td>Training, the voice lock and its strictness</td></tr>
+    <tr><td>Mint's voice</td><td>Voice and speaking style</td></tr>
+    <tr><td>Audio</td><td>Microphone, speaker, echo cancellation, calls</td></tr>
+    <tr><td>Appearance</td><td>Theme, position, face, captions, effects</td></tr></table></div>
+  <p>Mint is invisible in screen shares by default; “be visible” shows it in a Google Meet or Zoom share.</p>
+</section>
+
+<section id="safety" data-group="Settings">
+  <h2>Privacy and safety</h2>
+  <div class="table"><table>
+    <tr><td>🎙️</td><td>Nothing leaves your Mac while Mint is asleep. The wake word and voice lock run on the Mac.</td></tr>
+    <tr><td>🔒</td><td>Never enters passwords or card numbers, and never saves secrets in files, skills or memory.</td></tr>
+    <tr><td>✉️</td><td>Never sends email; messages and forms go out only when you asked.</td></tr>
+    <tr><td>🗂️</td><td>“Delete” means the Trash; files are backed up before they're changed; private folders are off limits.</td></tr>
+    <tr><td>✋</td><td>“Stop” halts everything at once, including queued clicks and keys.</td></tr></table></div>
+</section>
+
+<section id="help" data-group="Help">
+  <h2>Troubleshooting</h2>
+  <div class="table"><table><tr><th>Problem</th><th>Fix</th></tr>
+    <tr><td>Can't click or type</td><td>System Settings ▸ Privacy &amp; Security ▸ Accessibility: switch Mint on (off and on again after an update)</td></tr>
+    <tr><td>“not allowed to control that app”</td><td>Privacy &amp; Security ▸ Automation ▸ Mint</td></tr>
+    <tr><td>It hears the room</td><td>Train your voice, or turn the mic off and type (<kbd>⌘J</kbd>)</td></tr>
+    <tr><td>It mishears a name</td><td>Tell it once: “you heard X, I said Y”</td></tr>
+    <tr><td>An agent seems stuck</td><td>“how's Astra doing?”, then “stop Astra”</td></tr>
+    <tr><td>The app won't open</td><td>Privacy &amp; Security ▸ Open Anyway (the app isn't notarized yet)</td></tr></table></div>
+  <p>The log is at <code>~/Library/Logs/Mint/mint.log</code>. Report bugs on <a href="{{repo}}/issues">GitHub</a>.</p>
+</section>
+
+<section id="tools" data-group="Help">
+  <h2>Every tool</h2>
+  <p class="lead">What Mint can call, for the curious. You never need these names.</p>
+  <details><summary>Show all tools</summary><div class="table"><table><tr><th>Tool</th><th>What it does</th></tr>{{tools}}</table></div></details>
+</section>
