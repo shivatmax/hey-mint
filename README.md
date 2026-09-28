@@ -1,7 +1,5 @@
 <div align="center">
 
-<a href="https://youtu.be/mWFT-IIiCaI"><img src="docs/media/launch-film.jpg" alt="Watch the 1-minute Hey Mint launch film on YouTube" width="720"></a>
-
 # Hey Mint
 
 **An open-source, Jarvis-style voice assistant for macOS.**
@@ -22,11 +20,15 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 </div>
 
-
+<br>
 
 https://github.com/user-attachments/assets/26b80d2a-2451-4fef-a194-42d6552577b5
 
+<p align="center">
+  <sub>▶ <b>The 1-minute film</b> · unmute for sound · also on <a href="https://youtu.be/mWFT-IIiCaI">YouTube</a></sub>
+</p>
 
+<br>
 
 <p align="center">
   <img src="docs/media/talk.gif" alt="Asking Mint to open Slack: captions, the orb turning into the Slack icon, a check mark, and the spoken reply" width="560">
