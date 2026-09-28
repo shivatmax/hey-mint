@@ -168,7 +168,7 @@
 
   // ---------- one critter ----------
   class Critter {
-    constructor(info, row) {
+    constructor(info, parent) {
       Object.assign(this, info);
       this.el = document.createElement('button');
       this.el.className = 'critter';
@@ -180,7 +180,7 @@
       this.tag.className = 'c-tag';
       this.tag.innerHTML = `<b>${info.name}</b> ${info.job}`;
       this.el.appendChild(this.tag);
-      row.appendChild(this.el);
+      parent.appendChild(this.el);
       this.pokes = [];
       this.mood('normal');
       this.drawing.body.style.animationDelay = (-Math.random() * 3).toFixed(2) + 's';
@@ -211,8 +211,10 @@
     say(text, ms = 1600) {
       const b = document.createElement('span');
       b.className = 'c-say'; b.textContent = text;
-      this.el.appendChild(b);
+      this.el.appendChild(b); this.el.classList.add('saying');
+      clearTimeout(this._sayT);
       setTimeout(() => b.remove(), ms);
+      this._sayT = setTimeout(() => this.el.classList.remove('saying'), ms);
     }
     float(chars, n = 3, color) {
       for (let i = 0; i < n; i++) {
@@ -294,52 +296,171 @@
     }
   }
 
-  // ---------- the stage ----------
-  const row = document.createElement('div'); row.className = 'crew-row';
+  // ---------- the stage: Mint in the middle, the crew hiding in the gift box ----------
+  // Where each critter stands once out: feet at (x% of the width, y% of the height), around Mint.
+  const SPOTS = [[15, 31], [6, 60], [16, 88], [31, 99], [69, 99], [84, 88], [94, 60], [85, 31]];
+  const mint = stage.querySelector('.big-orb');
   const box = document.createElement('button');
-  box.type = 'button'; box.className = 'toybox'; box.setAttribute('aria-label', 'The toy box. Click it and everyone waves.');
-  box.innerHTML = `<svg viewBox="0 0 60 64" aria-hidden="true">
-    <g class="lid"><rect x="7" y="14" width="46" height="11" rx="3" fill="#BDF5E3" stroke="#5FB39A" stroke-width="1.6"/>
-      <rect x="26.5" y="14" width="7" height="11" fill="#F06C9B"/>
-      <path d="M30 14 C22 3 13 8 21 13 Z M30 14 C38 3 47 8 39 13 Z" fill="#F7A3C0" stroke="#D65384" stroke-width="1.4" stroke-linejoin="round"/></g>
+  box.type = 'button'; box.className = 'toybox';
+  box.setAttribute('aria-label', 'The gift box. The crew is inside: click to let them out.');
+  box.innerHTML = `<span class="peek-clip"><span class="peeker"></span></span>
+    <svg viewBox="0 0 60 64" aria-hidden="true">
+    <ellipse cx="30" cy="61" rx="22" ry="2.8" fill="rgba(40,50,90,.13)"/>
     <rect x="10" y="25" width="40" height="33" rx="4" fill="#A7EDD6" stroke="#5FB39A" stroke-width="1.6"/>
     <rect x="26.5" y="25" width="7" height="33" fill="#F06C9B"/>
-    <circle cx="20" cy="41" r="1.8" fill="#16202E"/><circle cx="40" cy="41" r="1.8" fill="#16202E"/>
+    <circle class="bx-eye" cx="20" cy="41" r="1.8" fill="#16202E"/><circle class="bx-eye" cx="40" cy="41" r="1.8" fill="#16202E"/>
     <path d="M18 46 q2 2 4 0" stroke="#FF8FB8" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-    <ellipse cx="30" cy="61" rx="21" ry="2.6" fill="rgba(40,50,90,.12)"/></svg>`;
-  const mint = stage.querySelector('.big-orb');
-  stage.insertBefore(row, stage.firstChild);
-  row.after(box);
-  const crew = CREW.map(info => new Critter(info, row));
+    <g class="lid"><rect x="7" y="14" width="46" height="11" rx="3" fill="#BDF5E3" stroke="#5FB39A" stroke-width="1.6"/>
+      <rect x="26.5" y="14" width="7" height="11" fill="#F06C9B"/>
+      <path d="M30 14 C22 3 13 8 21 13 Z M30 14 C38 3 47 8 39 13 Z" fill="#F7A3C0" stroke="#D65384" stroke-width="1.4" stroke-linejoin="round"/></g></svg>
+    <span class="box-hint">click me!</span>`;
+  stage.appendChild(box);
+  const lid = box.querySelector('.lid'), peeker = box.querySelector('.peeker'), hint = box.querySelector('.box-hint');
+  const note = document.querySelector('.play-hint');
+  const setNote = text => { if (note) note.textContent = text; };
+  const crew = CREW.map((info, i) => {
+    const c = new Critter(info, stage);
+    const [x, y] = SPOTS[i];
+    c.el.style.setProperty('--x', x); c.el.style.setProperty('--y', y);
+    if (x < 25) c.el.classList.add('edge-l'); else if (x > 75) c.el.classList.add('edge-r');
+    c.el.classList.add('inside');
+    c.peek = drawCritter(info.s, info.c);            // its head, for peeking out of the box
+    c.peek.svg.classList.add('peek-svg');
+    peeker.appendChild(c.peek.svg);
+    return c;
+  });
+  let state = 'in', busy = false;
+  const wait = ms => new Promise(r => setTimeout(r, reduce ? 0 : ms));
+  const emote = name => mint ? window.PageMint?.emote(name, mint) : window.PageMint?.emote(name);
+  const say = text => window.PageMint?.say(text);
+  const play = (el, frames, ms, opts = {}) => reduce ? null : el.animate(frames, {duration: ms, easing: 'cubic-bezier(.3,.7,.3,1)', fill: 'both', ...opts});
+  const lidTo = (open, ms = 260) => play(lid, [{transform: lid.style.transform || 'none'},
+    {transform: open === 'wide' ? 'translate(-6px,-26px) rotate(-38deg)' : open ? 'translate(-2px,-5px) rotate(-24deg)' : 'none'}],
+    ms, {easing: open ? 'cubic-bezier(.3,1.5,.5,1)' : 'cubic-bezier(.5,0,.3,1.4)'})
+    ?.finished.then(() => { lid.style.transform = open === 'wide' ? 'translate(-6px,-26px) rotate(-38deg)' : open ? 'translate(-2px,-5px) rotate(-24deg)' : ''; });
 
   addEventListener('pointermove', e => {
     for (const c of crew) {
+      if (state !== 'out') break;
       const r = c.el.getBoundingClientRect();
       c.look(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height * .45));
     }
   }, {passive: true});
-  if (!reduce) {
-    setInterval(() => { const c = crew[Math.random() * crew.length | 0]; Math.random() < .5 ? c.blink() : c.fidget(); }, 1300);
+  if (!reduce) setInterval(() => {
+    if (state !== 'out') return;
+    const c = crew[Math.random() * crew.length | 0];
+    Math.random() < .5 ? c.blink() : c.fidget();
+  }, 1300);
+
+  // While they are inside, one of them keeps peeking out.
+  let peekAnims = [];
+  const track = a => { if (a) peekAnims.push(a); return a; };
+  function stopPeeking() {
+    for (const a of peekAnims) a.cancel();
+    for (const a of [...peeker.getAnimations(), ...lid.getAnimations()]) a.cancel();
+    peekAnims = []; busy = false;
   }
+  async function peekOnce() {
+    if (state !== 'in' || busy || reduce) return;
+    const c = crew[Math.random() * crew.length | 0];
+    for (const other of crew) other.peek.svg.classList.toggle('on', other === c);
+    busy = true;
+    try {
+      track(play(lid, [{transform: 'none'}, {transform: 'translate(-2px,-5px) rotate(-24deg)'}], 260, {easing: 'cubic-bezier(.3,1.5,.5,1)'}));
+      await wait(120);
+      if (state !== 'in') return;
+      await track(play(peeker, [{transform: 'translateY(100%)'}, {transform: 'translateY(40%)'}], 380, {easing: 'cubic-bezier(.3,1.6,.5,1)'}))?.finished;
+      const glance = Math.random() < .5 ? 1 : -1;
+      track(play(c.peek.eyes, [{translate: '0 0'}, {translate: `${glance * 1.6}px 0`, offset: .25}, {translate: `${glance * 1.6}px 0`, offset: .45},
+        {translate: `${-glance * 1.6}px 0`, offset: .7}, {translate: '0 0'}], 1100, {fill: 'none'}));
+      if (Math.random() < .45) { const f = document.createElement('span'); f.className = 'box-float'; f.textContent = ['?', '!', '♪', '…', '♥'][Math.random() * 5 | 0];
+        f.style.color = c.c; box.appendChild(f); setTimeout(() => f.remove(), 1300); }
+      await wait(1150);
+      if (state !== 'in') return;
+      await track(play(peeker, [{transform: 'translateY(40%)'}, {transform: 'translateY(100%)'}], 230, {easing: 'ease-in'}))?.finished;
+      await track(play(lid, [{transform: 'translate(-2px,-5px) rotate(-24deg)'}, {transform: 'none'}], 220, {easing: 'cubic-bezier(.5,0,.3,1.4)'}))?.finished;
+      if (Math.random() < .35) play(box, [{rotate: '0deg'}, {rotate: '-4deg'}, {rotate: '4deg'}, {rotate: '-2deg'}, {rotate: '0deg'}], 420, {fill: 'none'});
+      for (const a of peekAnims) a.cancel();
+      peekAnims = [];
+    } catch (e) { /* interrupted by a click */ }
+    finally { if (state === 'in') busy = false; }
+  }
+  (function loop() { peekOnce(); setTimeout(loop, 1700 + Math.random() * 1600); })();
 
-  const emote = name => mint ? window.PageMint?.emote(name, mint) : window.PageMint?.emote(name);
-  const say = text => window.PageMint?.say(text);
-
-  box.addEventListener('click', () => {
-    if (!reduce) box.querySelector('.lid').animate([{transform: 'translateY(0) rotate(0)'}, {transform: 'translateY(-12px) rotate(-10deg)', offset: .4},
-      {transform: 'translateY(0) rotate(0)'}], {duration: 700, easing: 'cubic-bezier(.3,1.5,.5,1)'});
-    crew.forEach((c, i) => setTimeout(() => { c.mood('happy', 1500); c.hop(16, 460); c.fidget(); }, i * 70));
-    emote('wave'); say('Everyone says hi!');
-  });
+  function offsetToBox(c) {
+    const b = box.getBoundingClientRect(), r = c.el.getBoundingClientRect();
+    return [b.left + b.width / 2 - (r.left + r.width / 2), b.top + b.height * .35 - (r.top + r.height * .6)];
+  }
+  function sparkle(n = 10) {
+    for (let i = 0; i < n; i++) {
+      const s = document.createElement('span'); s.className = 'box-spark'; s.textContent = ['✦', '✧', '★', '•'][i % 4];
+      s.style.color = ['#FFC83D', '#FF8FB8', '#5FE0CF', '#A99CFF'][i % 4];
+      const a = -Math.PI * (.1 + .8 * Math.random()), d = 40 + Math.random() * 60;
+      s.style.setProperty('--dx', Math.cos(a) * d + 'px'); s.style.setProperty('--dy', Math.sin(a) * d + 'px');
+      box.appendChild(s); setTimeout(() => s.remove(), 900);
+    }
+  }
+  async function letOut() {
+    if (state !== 'in') return;
+    state = 'moving'; hint.remove();
+    stopPeeking();
+    stage.classList.add('open');
+    play(box, [{scale: '1 1'}, {scale: '1.12 .84', offset: .35}, {scale: '.94 1.08', offset: .7}, {scale: '1 1'}], 420, {fill: 'none'});
+    lidTo('wide', 380); sparkle(12); emote('surprised');
+    crew.forEach((c, i) => {
+      const [dx, dy] = offsetToBox(c), dir = c.el.style.getPropertyValue('--x') < 50 ? 1 : -1, lift = 110 + Math.random() * 50;
+      setTimeout(() => {
+        c.el.classList.remove('inside');
+        const fly = play(c.el, [
+          {transform: `translate(${dx}px,${dy}px) scale(.2) rotate(0deg)`, opacity: 0},
+          {transform: `translate(${dx * .9}px,${dy * .9 - 30}px) scale(.55) rotate(${-dir * 60}deg)`, opacity: 1, offset: .14},
+          {transform: `translate(${dx * .45}px,${dy * .45 - lift}px) scale(1.08) rotate(${-dir * 220}deg)`, offset: .55},
+          {transform: 'translate(0,0) scale(1) rotate(' + (-dir * 360) + 'deg)'}], 820, {easing: 'cubic-bezier(.25,.6,.35,1)', fill: 'none'});
+        (fly ? fly.finished : Promise.resolve()).then(() => {
+          c.hop(0, 10); c.mood('happy', 1300);
+          play(c.drawing.body, [{scale: '1 1'}, {scale: '1.18 .8', offset: .3}, {scale: '.94 1.06', offset: .65}, {scale: '1 1'}], 420, {fill: 'none', composite: 'replace'});
+          c.say(c.name, 900);
+        });
+      }, i * 120);
+    });
+    await wait(crew.length * 120 + 600);
+    lidTo(false, 380);
+    await wait(300);
+    emote('laugh'); say('Say hi to the crew! Click the box to send them home.');
+    box.setAttribute('aria-label', 'The gift box. Click to send the crew back in.');
+    setNote('Hover a critter to meet it, click for its trick. Click the box to send them home.');
+    state = 'out';
+  }
+  async function callBack() {
+    if (state !== 'out') return;
+    state = 'moving'; emote('wave');
+    lidTo('wide', 320);
+    [...crew].reverse().forEach((c, i) => setTimeout(() => {
+      const [dx, dy] = offsetToBox(c), dir = c.el.style.getPropertyValue('--x') < 50 ? 1 : -1;
+      const fly = play(c.el, [{transform: 'translate(0,0) scale(1) rotate(0deg)', opacity: 1},
+        {transform: `translate(${dx * .5}px,${dy * .5 - 90}px) scale(.9) rotate(${dir * 180}deg)`, offset: .5},
+        {transform: `translate(${dx}px,${dy}px) scale(.2) rotate(${dir * 360}deg)`, opacity: 0}], 620, {easing: 'cubic-bezier(.4,0,.6,1)', fill: 'none'});
+      (fly ? fly.finished : Promise.resolve()).then(() => c.el.classList.add('inside'));
+    }, i * 90));
+    await wait(crew.length * 90 + 700);
+    await lidTo(false, 320);
+    play(box, [{scale: '1 1'}, {scale: '1.08 .9'}, {scale: '1 1'}], 300, {fill: 'none'});
+    stage.classList.remove('open');
+    box.setAttribute('aria-label', 'The gift box. The crew is inside: click to let them out.');
+    setNote('Poke Mint. The crew is in the gift box: click it to let them out.');
+    state = 'in';
+  }
+  box.addEventListener('click', () => state === 'in' ? letOut() : state === 'out' ? callBack() : null);
 
   // The show: a stadium wave, a solo each, a dance, a bow. Mint claps along.
   let showing = false;
   async function show() {
     if (showing) return;
-    showing = true; stage.classList.add('showtime');
-    const wait = ms => new Promise(r => setTimeout(r, reduce ? 0 : ms));
+    if (state === 'in') await letOut();
+    while (state !== 'out') await wait(100);
+    showing = true;
     say('Showtime!'); emote('smile');
-    for (let k = 0; k < 2; k++) for (const [i, c] of crew.entries()) setTimeout(() => { c.mood('happy', 700); c.hop(20, 420); }, (k * crew.length + i) * 90);
+    for (let k = 0; k < 2; k++) crew.forEach((c, i) => setTimeout(() => { c.mood('happy', 700); c.hop(22, 420); }, (k * crew.length + i) * 90));
     await wait(crew.length * 180 + 500);
     for (const c of crew) { c.say(c.signature(), 1300); c.mood('happy', 1200); await wait(900); }
     emote('dance');
@@ -354,13 +475,14 @@
     crew.forEach((c, i) => setTimeout(() => c.float(['✦', '★'], 3, '#FFC83D'), i * 60));
     say('Ta-da! 🎉');
     await wait(900);
-    showing = false; stage.classList.remove('showtime');
+    showing = false;
   }
   document.querySelectorAll('[data-show]').forEach(b => b.addEventListener('click', show));
   document.querySelectorAll('[data-big-emote]').forEach(b => b.addEventListener('click', () => {
     emote(b.dataset.bigEmote);
+    if (state !== 'out') return;
     if (['love', 'laugh', 'dance'].includes(b.dataset.bigEmote)) crew.forEach((c, i) => setTimeout(() => { c.mood('happy', 1200); c.hop(8, 360); }, i * 60));
     if (b.dataset.bigEmote === 'surprised') crew.forEach(c => c.mood('surprised', 1200));
-    if (b.dataset.bigEmote === 'cry') crew.forEach(c => c.mood('sad', 2200));
+    if (b.dataset.bigEmote === 'sleepy') crew.forEach(c => c.mood('sad', 1600));
   }));
 })();

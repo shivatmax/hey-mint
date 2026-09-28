@@ -318,25 +318,21 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
 .rise{opacity:0;transform:translateY(18px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .rise.in{opacity:1;transform:none}
 
-/* ---------- playground: the big Mint and the critters ---------- */
-.play{padding-top:24px}
-.play-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px 40px;flex-wrap:wrap;margin-bottom:26px}
-.play-head .intro{margin-bottom:0}
-.play-actions{display:flex;flex-wrap:wrap;gap:8px;max-width:470px;justify-content:flex-end}
+/* ---------- the hero stage: Mint in the middle, the crew around it (or in the gift box) ---------- */
+.hero-stage{min-width:0}
+.play-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px}
 .chip{all:unset;box-sizing:border-box;cursor:pointer;font:600 13.5px var(--mono);padding:8px 14px;border-radius:999px;background:var(--paper);
   border:1px solid var(--line);transition:transform .2s var(--spring),border-color .2s,background .2s}
 .chip:hover{transform:translateY(-2px);border-color:var(--mint)}
 .chip.go{background:var(--ink);color:#fff;border-color:transparent}
 .chip.go:hover{background:#26324A}
-.playground{position:relative;display:flex;align-items:flex-end;justify-content:center;gap:1cqw;min-height:260px;container-type:inline-size;
-  padding:64px clamp(16px,3vw,40px) 58px;border-radius:32px;overflow:hidden;
-  background:radial-gradient(420px 220px at 82% 30%,rgba(255,255,255,.55),transparent 70%),linear-gradient(135deg,#DBEBF2,#E8E3FA 55%,#F7E6ED);
-  box-shadow:0 0 0 1px rgba(22,32,46,.05),0 40px 80px -50px rgba(40,50,90,.5)}
-.playground::after{content:"";position:absolute;left:6%;right:6%;bottom:52px;height:14px;border-radius:50%;background:rgba(40,50,90,.08);filter:blur(6px);z-index:0}
-.playground > *{position:relative;z-index:1}
-.playground > .crew-row{z-index:3}
-.crew-row{display:flex;align-items:flex-end;gap:0}
-.critter{all:unset;box-sizing:border-box;cursor:pointer;position:relative;display:block;width:12.4cqw;margin:0 -2.4cqw;transform-origin:50% 100%;-webkit-tap-highlight-color:transparent}
+.play-hint{font:13px var(--mono);color:var(--slate);margin:12px 0 0;text-align:center}
+.playground{position:relative;width:100%;max-width:600px;margin:0 auto;aspect-ratio:1/.9;container-type:inline-size}
+.playground .big-orb{position:absolute;left:50%;top:44%;--s:35cqw;margin:calc(var(--s) / -2) 0 0 calc(var(--s) / -2);z-index:1}
+.critter{all:unset;box-sizing:border-box;cursor:pointer;position:absolute;display:block;width:17cqw;z-index:3;
+  left:calc(var(--x) * 1% - 8.5cqw);top:calc(var(--y) * 1% - 16.5cqw);transform-origin:50% 80%;-webkit-tap-highlight-color:transparent}
+.critter.inside{visibility:hidden;pointer-events:none}
+.critter:hover{z-index:5}
 .critter-svg{display:block;width:100%;height:auto;overflow:visible}
 .critter-svg g{transform-box:view-box}
 .critter-svg .c-body{animation:cbob 3s ease-in-out infinite}
@@ -345,46 +341,42 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
 .critter-svg .c-happy,.critter-svg .c-dizzy{display:none}
 .critter-svg.happy .c-happy,.critter-svg.dizzy .c-dizzy{display:inline}
 .critter-svg.happy .c-eyes,.critter-svg.dizzy .c-eyes,.critter-svg.beaky .c-mouth{display:none}
-.c-tag{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);white-space:nowrap;font:12.5px/1.2 var(--body);background:var(--caption);color:#F4F4F8;
-  padding:5px 10px;border-radius:10px;opacity:0;transition:opacity .2s,transform .25s var(--spring);pointer-events:none;z-index:3}
+/* name tags sit above the head, and stay on screen at the edges */
+.c-tag{position:absolute;left:50%;bottom:78%;transform:translate(-50%,4px);white-space:nowrap;font:12.5px/1.2 var(--body);background:var(--caption);color:#F4F4F8;
+  padding:5px 10px;border-radius:10px;opacity:0;transition:opacity .2s,transform .25s var(--spring);pointer-events:none;z-index:6}
 .c-tag b{color:var(--glow);font-weight:700}
-.critter:hover .c-tag,.critter:focus-visible .c-tag{opacity:1;transform:translate(-50%,12px)}
-.c-say{position:absolute;left:50%;bottom:100%;translate:-50% -6px;white-space:nowrap;font:700 14.5px/1 var(--body);background:#fff;color:var(--ink);
-  padding:7px 11px;border-radius:13px;box-shadow:0 10px 20px -12px rgba(40,50,90,.55);pointer-events:none;z-index:4;animation:cpop .3s var(--spring)}
+.critter:hover .c-tag,.critter:focus-visible .c-tag{opacity:1;transform:translate(-50%,-6px)}
+.critter.edge-l .c-tag{left:8%;transform:translate(0,4px)}.critter.edge-l:hover .c-tag,.critter.edge-l:focus-visible .c-tag{transform:translate(0,-6px)}
+.critter.edge-r .c-tag{left:auto;right:8%;transform:translate(0,4px)}.critter.edge-r:hover .c-tag,.critter.edge-r:focus-visible .c-tag{transform:translate(0,-6px)}
+.critter.saying .c-tag{opacity:0}
+.c-say{position:absolute;left:50%;bottom:80%;translate:-50% -6px;white-space:nowrap;font:700 14.5px/1 var(--body);background:#fff;color:var(--ink);
+  padding:7px 11px;border-radius:13px;box-shadow:0 10px 20px -12px rgba(40,50,90,.55);pointer-events:none;z-index:7;animation:cpop .3s var(--spring)}
+.critter.edge-l .c-say{left:6%;translate:0 -6px}.critter.edge-r .c-say{left:auto;right:6%;translate:0 -6px}
 .c-say::after{content:"";position:absolute;left:50%;top:100%;translate:-50% -1px;border:6px solid transparent;border-top-color:#fff}
 @keyframes cpop{from{scale:.3;opacity:0}}
-.c-float{position:absolute;bottom:78%;font:700 17px/1 var(--body);pointer-events:none;animation:float 1.4s ease-out forwards;z-index:4}
+.c-float{position:absolute;bottom:70%;font:700 17px/1 var(--body);pointer-events:none;animation:float 1.4s ease-out forwards;z-index:4}
 .c-flame{position:absolute;left:78%;top:38%;font-size:clamp(16px,2vw,24px);pointer-events:none;animation:flame .75s ease-out forwards;z-index:4}
+.critter.edge-r .c-flame{left:auto;right:78%;transform:scaleX(-1)}
 @keyframes flame{from{transform:translateX(0) scale(.3);opacity:0}40%{opacity:1;transform:translateX(16px) scale(1.2)}to{opacity:0;transform:translateX(42px) scale(.6)}}
-.toybox{all:unset;box-sizing:border-box;cursor:pointer;display:block;width:7.4cqw;margin:0 1.8cqw 0 1cqw}
-.toybox svg{display:block;width:100%;overflow:visible}
-.toybox .lid{transform-box:view-box;transform-origin:30px 25px}
-.toybox:hover svg{animation:boxwiggle .5s ease-in-out}
-@keyframes boxwiggle{25%{rotate:-5deg}75%{rotate:5deg}}
-.big-orb{--s:16.5cqw;margin-bottom:2px}
+/* the gift box, under Mint; the crew peeks out of it */
+.toybox{all:unset;box-sizing:border-box;cursor:pointer;position:absolute;left:50%;bottom:0;width:21cqw;margin-left:-10.5cqw;z-index:2;-webkit-tap-highlight-color:transparent}
+.toybox > svg{display:block;width:100%;overflow:visible;position:relative;z-index:2}
+.toybox .lid{transform-box:view-box;transform-origin:7px 25px}
+.toybox:hover > svg{animation:boxwiggle .5s ease-in-out}
+@keyframes boxwiggle{25%{rotate:-4deg}75%{rotate:4deg}}
+.peek-clip{position:absolute;left:15%;right:15%;bottom:61%;height:90%;overflow:hidden;z-index:1;pointer-events:none}
+.peeker{position:absolute;left:0;right:0;bottom:0;transform:translateY(100%)}
+.peek-svg{display:none;width:100%;height:auto;overflow:visible}
+.peek-svg.on{display:block}
+.box-hint{position:absolute;left:50%;bottom:104%;translate:-50% 0;white-space:nowrap;font:700 12px var(--mono);color:var(--ink);background:#fff;padding:5px 10px;
+  border-radius:999px;box-shadow:0 8px 18px -10px rgba(40,50,90,.5);animation:hint 2.4s ease-in-out infinite;z-index:3;pointer-events:none}
+@keyframes hint{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.playground.open .box-hint{display:none}
+.box-float{position:absolute;left:50%;bottom:100%;font:800 18px/1 var(--body);pointer-events:none;animation:float 1.3s ease-out forwards;z-index:3}
+.box-spark{position:absolute;left:50%;top:30%;font:700 16px/1 var(--body);pointer-events:none;z-index:3;animation:spark .8s ease-out forwards}
+@keyframes spark{from{transform:translate(0,0) scale(.4);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(1.1);opacity:0}}
 .critter:focus-visible,.toybox:focus-visible,.chip:focus-visible,.big-orb:focus-visible{outline:3px solid var(--lilac);outline-offset:4px;border-radius:14px}
-@media (max-width:760px){
-  .playground{flex-wrap:wrap;padding:56px 14px 40px;row-gap:34px}
-  .crew-row{width:100%;flex-wrap:wrap;justify-content:center;row-gap:30px}
-  .critter{width:27%;margin:0 -1.5%}
-  .toybox{width:16cqw}
-  .big-orb{--s:34cqw}
-  .hero-stage .big-orb{--s:38cqw}
-  .play-actions{justify-content:flex-start}
-  .playground::after{display:none}
-}
 
-/* the playground as the hero */
-.hero-stage{min-width:0}
-.hero-stage .playground{display:grid;grid-template-columns:1fr auto 1fr;grid-template-areas:". orb box" "row row row";align-items:end;
-  gap:0;min-height:0;padding:28px 16px 40px}
-.hero-stage .playground::after{bottom:34px}
-.hero-stage .big-orb{grid-area:orb;justify-self:center;--s:31cqw;margin:0 0 4px}
-.hero-stage .toybox{grid-area:box;justify-self:start;width:12.5cqw;margin:0 0 6px 5cqw}
-.hero-stage .crew-row{grid-area:row;flex-wrap:wrap;justify-content:center;justify-self:center;max-width:74cqw;margin-top:-1cqw}
-.hero-stage .critter{width:25cqw;margin:0 -3.4cqw -4.5cqw}
-.hero-stage .play-actions{justify-content:flex-start;max-width:none;margin-top:16px}
-.play-hint{font:13px var(--mono);color:var(--slate);margin:12px 2px 0}
 .watch-grid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:56px;align-items:center}
 .watch .phrases{grid-template-columns:1fr;margin-top:28px}
 .watch .intro{margin-bottom:0}
@@ -402,6 +394,7 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
   .get{padding:36px 28px}
 }
 @media (max-width:620px){
+  body[data-page=index] .buddy,body[data-page=index] .bubble{display:none}
   .flow,.can,.promises,.cards{grid-template-columns:1fr}
   .phrases{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}
   .phrases::-webkit-scrollbar{display:none}
