@@ -22,6 +22,12 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 </div>
 
+
+
+https://github.com/user-attachments/assets/26b80d2a-2451-4fef-a194-42d6552577b5
+
+
+
 <p align="center">
   <img src="docs/media/talk.gif" alt="Asking Mint to open Slack: captions, the orb turning into the Slack icon, a check mark, and the spoken reply" width="560">
 </p>
