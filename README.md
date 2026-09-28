@@ -23,7 +23,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 </div>
 
 <p align="center">
-  <img src="docs/media/talk.gif" alt="Asking Mint to open Slack: captions, the orb turning into the Slack icon, a check mark, and the spoken reply" width="640">
+  <img src="docs/media/talk.gif" alt="Asking Mint to open Slack: captions, the orb turning into the Slack icon, a check mark, and the spoken reply" width="560">
 </p>
 
 ## What it can do
@@ -54,7 +54,7 @@ Each shows up as a little critter beside the orb: it thinks, shows what tool it 
 asks you questions, calls teammates in, and hops back into the box when done.
 
 <p align="center">
-  <img src="docs/media/agent-life.gif" alt="An agent critter popping out of a gift box, working, asking a question, finishing and hopping back in" width="480">
+  <img src="docs/media/agent-life.gif" alt="A real agent run: Astra pops out of the toy box beside the orb and starts researching while Mint replies" width="480">
   <img src="docs/media/showtime.gif" alt="The whole critter family performing a show" width="520">
 </p>
 
