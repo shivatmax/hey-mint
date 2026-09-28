@@ -69,7 +69,6 @@ class Orb:
         self._next_whimsy = time.monotonic() + 9.0
         self._happy_until = 0.0
         self._hover = 0.0
-        self._leaf_droop = 0.0
         self._next_z = 0.0
         self._yawn_until = 0.0
         self._look_around_until = 0.0
@@ -304,7 +303,6 @@ class Orb:
         picture.setContentsGravity_(Quartz.kCAGravityResizeAspect)
         badge.addSublayer_(picture)
         self.badge, self.badge_icon, self.badge_mask, self.badge_picture = badge, icon, mask, picture
-        self._build_leaf(body, bc, d)
 
         emitter = Quartz.CAEmitterLayer.layer()
         emitter.setFrame_(self.root.bounds())
@@ -319,85 +317,6 @@ class Orb:
         self._dot_image = gfx.cg_image(gfx.symbol("circle.fill", 10, white=True))
         self._star_image = gfx.cg_image(gfx.symbol("sparkle", 14, white=True))
         self.apply_state("starting")
-
-    def _build_leaf(self, body, bc, d) -> None:
-        """A little mint sprout on top: two leaves on a stem. It sways, perks up when the
-        pointer is near, wiggles when happy and droops while asleep."""
-        s = d / 44.0
-        w, h = 30 * s, 22 * s
-        sprout = Quartz.CALayer.layer()
-        sprout.setBounds_(Quartz.CGRectMake(0, 0, w, h))
-        sprout.setAnchorPoint_(Quartz.CGPointMake(0.5, 0.0))
-        sprout.setPosition_(Quartz.CGPointMake(bc[0], bc[1] + d / 2 - 2.5 * s))
-        body.addSublayer_(sprout)
-        green, deep, vein = (0.55, 0.9, 0.62), (0.2, 0.55, 0.34), (0.3, 0.68, 0.45)
-        stem = Quartz.CAShapeLayer.layer()
-        path = Quartz.CGPathCreateMutable()
-        Quartz.CGPathMoveToPoint(path, None, 15 * s, 0)
-        Quartz.CGPathAddQuadCurveToPoint(path, None, 14 * s, 3.5 * s, 15 * s, 6.5 * s)
-        stem.setPath_(path)
-        stem.setFillColor_(None)
-        stem.setStrokeColor_(gfx.cg(deep))
-        stem.setLineWidth_(1.4 * s)
-        stem.setLineCap_(Quartz.kCALineCapRound)
-        sprout.addSublayer_(stem)
-        self.leaves = []
-        for side, size in ((-1, 1.0), (1, 1.12)):
-            bx, by = 15 * s, 6.5 * s
-            tip = (15 + side * 11 * size, 6.5 + 8.5 * size)
-            leaf = Quartz.CAShapeLayer.layer()
-            leaf.setBounds_(Quartz.CGRectMake(0, 0, w, h))
-            leaf.setAnchorPoint_(Quartz.CGPointMake(bx / w, by / h))
-            leaf.setPosition_(Quartz.CGPointMake(bx, by))
-            outline = Quartz.CGPathCreateMutable()
-            Quartz.CGPathMoveToPoint(outline, None, bx, by)
-            Quartz.CGPathAddCurveToPoint(outline, None, (15 + side * 4 * size) * s, (6.5 - 1.5 * size) * s,
-                                         (15 + side * 11 * size) * s, (6.5 + 2 * size) * s, tip[0] * s, tip[1] * s)
-            Quartz.CGPathAddCurveToPoint(outline, None, (15 + side * 7 * size) * s, (6.5 + 10 * size) * s,
-                                         (15 + side * 1 * size) * s, (6.5 + 6 * size) * s, bx, by)
-            leaf.setPath_(outline)
-            leaf.setFillColor_(gfx.cg(green))
-            leaf.setStrokeColor_(gfx.cg(deep))
-            leaf.setLineWidth_(0.9 * s)
-            leaf.setLineJoin_(Quartz.kCALineJoinRound)
-            rib = Quartz.CAShapeLayer.layer()
-            rib.setFrame_(Quartz.CGRectMake(0, 0, w, h))
-            line = Quartz.CGPathCreateMutable()
-            Quartz.CGPathMoveToPoint(line, None, bx, by)
-            Quartz.CGPathAddQuadCurveToPoint(line, None, (15 + side * 6 * size) * s, (6.5 + 3 * size) * s,
-                                             (15 + side * 8.5 * size) * s, (6.5 + 6.2 * size) * s)
-            rib.setPath_(line)
-            rib.setFillColor_(None)
-            rib.setStrokeColor_(gfx.cg(vein))
-            rib.setLineWidth_(0.7 * s)
-            rib.setLineCap_(Quartz.kCALineCapRound)
-            leaf.addSublayer_(rib)
-            sprout.addSublayer_(leaf)
-            self.leaves.append((leaf, side))
-        sway = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.rotation.z")
-        sway.setValues_([0.0, 0.09, 0.0, -0.09, 0.0])
-        sway.setDuration_(3.4)
-        sway.setRepeatCount_(float("inf"))
-        sway.setAdditive_(True)
-        sway.setCalculationMode_(Quartz.kCAAnimationCubic)
-        sprout.addAnimation_forKey_(sway, "sway")
-        self.sprout = sprout
-
-    def leaf_wiggle(self) -> None:
-        """The leaves flutter (happy, poked, or just because)."""
-        for leaf, side in getattr(self, "leaves", []):
-            wiggle = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.rotation.z")
-            wiggle.setValues_([0, side * 0.35, -side * 0.15, side * 0.25, 0])
-            wiggle.setDuration_(0.6)
-            wiggle.setAdditive_(True)
-            leaf.addAnimation_forKey_(wiggle, "wiggle")
-
-    def leaf_twirl(self) -> None:
-        spin = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.rotation.y")
-        spin.setValues_([0, 2 * math.pi])
-        spin.setDuration_(0.8)
-        spin.setTimingFunction_(_ease())
-        self.sprout.addAnimation_forKey_(spin, "twirl")
 
     def _snooze(self) -> None:
         """A small 'z' drifts up while asleep."""
@@ -762,13 +681,6 @@ class Orb:
         self.glow.setOpacity_((0.18 if asleep else 0.35) + level * 0.5 + 0.15 * self._hover)
         g = 1.0 + level * 0.7
         self.glow.setAffineTransform_(Quartz.CGAffineTransformMakeScale(g, g))
-        # The sprout: droops while asleep, perks up when the pointer comes close.
-        self._leaf_droop += ((0.6 if asleep else 0.0) - self._leaf_droop) * 0.06
-        for leaf, side in getattr(self, "leaves", []):
-            leaf.setAffineTransform_(Quartz.CGAffineTransformMakeRotation(-side * self._leaf_droop))
-        perk = 1.0 + 0.2 * self._hover
-        if hasattr(self, "sprout"):
-            self.sprout.setAffineTransform_(Quartz.CGAffineTransformMakeScale(perk, perk))
         Quartz.CATransaction.commit()
         if asleep and prefs.get("face") and now >= self._next_z:
             self._next_z = now + random.uniform(1.6, 2.6)
@@ -778,14 +690,9 @@ class Orb:
             self._face(now, level, look)
         if not asleep and not visible_work and now >= self._next_whimsy:
             self._next_whimsy = now + random.uniform(8.0, 15.0)
-            choice = random.choice(("hop", "wink", "sparkle", "wiggle", "leaf", "twirl", "look", "yawn"))
+            choice = random.choice(("hop", "wink", "sparkle", "wiggle", "look", "yawn"))
             if choice == "hop":
                 self.hop()
-                self.leaf_wiggle()
-            elif choice == "leaf":
-                self.leaf_wiggle()
-            elif choice == "twirl":
-                self.leaf_twirl()
             elif choice == "look" and prefs.get("face"):
                 self._look_around_until = now + 2.2
             elif choice == "yawn" and prefs.get("face"):

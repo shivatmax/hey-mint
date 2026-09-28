@@ -2,11 +2,18 @@
 
 ## Unreleased
 
+- **Moods:** Mint shows feelings by itself as you talk (a smile at good news, a blush at thanks, a laugh at a
+  joke) and slides on its sunglasses when it finishes a task. Off with the `auto_emotions` setting.
+
 - **Daily briefing** (`briefing`): calendar, reminders, mail, tasks, weather and headlines in one spoken
   minute; schedule it with an automation.
 - **Apple Shortcuts by voice** (`shortcut`): Home scenes and lights, Focus modes, music, your own shortcuts.
 - **Screenshot search** (`find_screenshot`): finds screenshots by the text in them, read on the Mac.
 - **Meeting action items to Reminders** (`meeting action=reminders`).
+- **Translate the screen** (`translate_screen`): any language on screen, with the translations pinned beside
+  the text.
+- **Mail triage and replies in your style** (`mail`): what needs you in the inbox; drafts written the way you
+  write, never sent. The Mail app's inbox is now read in bulk (a big inbox had timed out).
 
 - **Meeting notes, no bot** (`meeting`, menu bar ▸ Record meeting):
   - Recording: `MintRecorder` (new Swift helper, `launcher/recorder`) records the call's audio through

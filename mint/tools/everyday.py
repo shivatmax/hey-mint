@@ -587,9 +587,10 @@ def list_emails(count: int = 5) -> str:
     script = f"""
     tell application "Mail"
         set out to ""
-        set msgs to messages of inbox
-        set n to count of msgs
+        set n to count of messages of inbox
         if n > {count} then set n to {count}
+        if n is 0 then return ""
+        set msgs to messages 1 thru n of inbox
         repeat with i from 1 to n
             set m to item i of msgs
             set flag to ""
@@ -609,7 +610,7 @@ def read_email(number: int = 1) -> str:
     """Body of the Nth message in Mail.app's inbox (1 = newest)."""
     script = f"""
     tell application "Mail"
-        set m to item {int(number)} of (messages of inbox)
+        set m to message {int(number)} of inbox
         return (sender of m) & linefeed & (subject of m) & linefeed & linefeed & (content of m)
     end tell"""
     ok, out = _osascript(script, timeout=20)

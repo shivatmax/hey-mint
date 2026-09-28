@@ -54,6 +54,7 @@ words, by voice or by typing (<kbd>⌘J</kbd>):
 | *(click Record meeting)* “what did we decide in the Acme call?” | Meeting notes with no bot: records the call and your mic, then a transcript, decisions and action items |
 | “watch me do this once”, “show me how to export a PDF in Preview” | Learns a task from one demonstration; or guides you step by step, pointing at each control |
 | “good morning, brief me”, “turn on the living room lights”, “find the screenshot with the invoice number” | A spoken daily briefing, your Apple Shortcuts (Home scenes, Focus, music), screenshots found by what's in them |
+| “translate this page”, “triage my email”, “draft a reply saying I'll send it Friday” | Translations pinned on screen; inbox sorted by what needs you; replies drafted in your style (never sent) |
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
@@ -145,7 +146,7 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
                              │
           ┌──────────────────┼───────────────────────────┐
           ▼                  ▼                           ▼
-  102 tools on the Mac   Jev (fast choices from     Agents (GPT-6 Luna, Codex)
+  104 tools on the Mac   Jev (fast choices from     Agents (GPT-6 Luna, Codex)
    Accessibility, menus,  real lists: controls,      research, code, documents,
    AppleScript, files,    skills, memories, apps)    websites; work as a team
    browser, Vision OCR

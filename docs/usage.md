@@ -403,7 +403,7 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
   - Moving on: Mint goes to the next step by itself when you click the control or the expected change
     happens (a menu opens, a sheet appears), or when you say "next". Mint never clicks for you.
 
-### Briefings, Shortcuts, screenshots
+### Briefings, Shortcuts, screenshots, translation, email
 
 | Say | What happens |
 |---|---|
@@ -412,9 +412,15 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
 | "run my Good Night shortcut", "turn on the living room lights" | `shortcut`: runs the user's Apple Shortcuts, which is how Mint reaches Home scenes, Focus and music apps (a Mac app outside Mac Catalyst can't use HomeKit directly) |
 | "find the screenshot with the invoice number" | `find_screenshot`: the text in every screenshot is read on the Mac (Vision) and indexed; words first, Gemini only if that finds nothing |
 | "add my action items from that meeting to Reminders" | `meeting action=reminders` (yours; `everyone=true` for all) |
+| "translate this page", "what does this say?" | `translate_screen`: Gemini reads the front window (any language or script) and each translation is pinned beside its text for a minute |
+| "triage my email", "what needs my attention?" | `mail action=triage`: the newest messages in the Mail app, sorted into needs a reply, to do, FYI, newsletters and promos |
+| "draft a reply to #2 saying I'll send it Friday" | `mail action=draft_reply`: written in your own style (from your sent mail) and opened as a draft, never sent |
 
 - **Briefing sources:** weather from wttr.in and headlines from Google News RSS (no keys; skipped
   when offline); everything else comes from the Mac.
+- **Mail:** read through the Mail app (any account added to it), one bulk request per field. A very
+  large inbox can take 30 s or more, so triage and drafting carry on in the background and report back.
+  For Gmail, reading the inbox in the browser is often faster.
 - **Screenshot index:** kept in `~/Library/Application Support/Mint/screenshots.json` (mode 600). A
   search reads new screenshots for up to 25 s, and the rest carry on in the background.
 
@@ -884,6 +890,8 @@ each description.
 | `briefing` | focus, news_topic | The user's day in one spoken summary: today's calendar, reminders due, the newest mail (what needs them), unfinished tasks, today's meetings, the weather and a few headlines. |
 | `shortcut` | action, name, input | Run one of the user's Apple Shortcuts by name (Home scenes and lights, Focus, music, their own automations), optionally with text input, and get its output; or list them. |
 | `find_screenshot` | query, open | Find screenshots by the text or things in them (an invoice number, an error, a booking, a chat), wherever they are saved. |
+| `translate_screen` | target, show | Translate the foreign text in the front window (any language or script, even in images) and pin each translation beside its text on screen for a minute. |
+| `mail` | action, number, say, count | The Mail app's inbox, smarter: triage (sort the newest messages into needs a reply, to do, FYI, newsletters, promos, with one line each) and draft_reply (write a reply to message `number` in the user's own style, from what they say, and open it as a draft - never sent). |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |
@@ -905,4 +913,4 @@ each description.
 | `run_applescript` | script | Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting. |
 | `fix_hearing` | heard, meant, forget | Remember a word or name you misheard, so it is heard right from now on. |
 
-102 tools.
+104 tools.

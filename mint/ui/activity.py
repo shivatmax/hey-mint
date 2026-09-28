@@ -61,6 +61,7 @@ _KIND = {
     "watch_video": "look", "automation": "timer", "recall_history": "search",
     "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
     "teach": "look", "tutor": "look", "briefing": "calendar", "shortcut": "open", "find_screenshot": "search",
+    "translate_screen": "look", "mail": "mail",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -172,6 +173,10 @@ def phrase(name: str, args: dict) -> str:
         case "tidy":
             return {"apply": "Tidying the folder", "undo": "Putting files back", "cancel": "Dropping the plan"}.get(
                 str(a.get("action")), f"Planning a tidy-up · {_quote(a.get('folder') or 'Downloads', 30)}")
+        case "translate_screen":
+            return f"Translating the screen · {_quote(a.get('target') or 'English', 20)}"
+        case "mail":
+            return "Drafting a reply" if a.get("action") == "draft_reply" else "Sorting the inbox"
         case "briefing":
             return "Getting your briefing"
         case "shortcut":

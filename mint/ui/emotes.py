@@ -229,6 +229,8 @@ class Emotes:
         sharing.install()                # visible-in-screen-share switch
         from mint.ui import flourishes as cute_fx
         cute_fx.attach(hud)              # a little flourish per kind of action, paw prints on clicks
+        from mint.ui import moods
+        moods.attach(hud)                # feelings during the conversation; sunglasses when a task is done
 
     # --- public -------------------------------------------------------------------------
 
@@ -280,8 +282,7 @@ class Emotes:
         self._token += 1
         token = self._token
         seconds = EMOTES[key][0]
-        if key not in ("cry", "angry", "sleepy") and hasattr(self.orb, "leaf_wiggle"):
-            self.orb.leaf_wiggle()           # the mint sprout joins in
+        self.last_played = time.monotonic()
         orb = self.orb
         d = orb.d
         s = d / 44.0
