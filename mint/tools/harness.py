@@ -234,7 +234,8 @@ SAME_TOOL = 6      # this many calls in a row to one tool, whatever the argument
 _outcomes: deque = deque(maxlen=6)     # True when a call failed
 _EXEMPT = {"wait_until_done", "wait_for_text", "agent_status", "look", "read_window", "get_status", "recall",
            "list_open", "frontmost_app", "list_agents", "list_skills", "list_memories", "express",
-           "step_done", "plan_task", "find_skill", "set_voice", "set_preference"}
+           "step_done", "plan_task", "task", "find_skill", "set_voice", "set_preference", "automation",
+           "watch_video"}
 # The "N calls in a row to one tool" warning is for searching in circles (30 find_files in testing). Doing
 # a list of things the user asked for - every orb trick, several sites, many files - is not a loop:
 # it told the model to stop at the 6th of "do all the tricks one by one".

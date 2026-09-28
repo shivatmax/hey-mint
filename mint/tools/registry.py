@@ -179,8 +179,9 @@ def declarations() -> list[types.FunctionDeclaration]:
                        "description": "Short imperative steps in order, e.g. 'Read today's calendar'."}},
             ["goal", "steps"]),
         _fn("step_done",
-            "Mark a step of the current task finished (or failed), with a one-line result.",
-            {"step": {**INTEGER, "description": "Step number, 1-based."},
+            "Mark a step of the current task finished (or failed), with a one-line result saying what you "
+            "checked (what the window, file or page showed).",
+            {"step": {**STRING, "description": "Step number: '2', or '3.1' for a sub-step."},
              "result": {**STRING},
              "failed": {"type": types.Type.BOOLEAN}},
             ["step", "result"]),
@@ -215,12 +216,14 @@ def declarations() -> list[types.FunctionDeclaration]:
             "chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; "
             "'turn off the mic' -> microphone off (then they can only type); 'make it purple' "
             "-> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen "
-            "effects, word-by-word captions, and whether you listen while you work. Confirm "
-            "briefly what you changed.",
+            "effects, word-by-word captions, whether you listen while you work, and the activity "
+            "timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> "
+            "activity_timeline clear). Confirm briefly what you changed.",
             {"setting": {**STRING, "enum": ["spoken_replies", "microphone", "theme", "position",
-                                            "face", "effects", "word_animation", "listen_while_working"]},
+                                            "face", "effects", "word_animation", "listen_while_working",
+                                            "activity_timeline"]},
              "value": {**STRING, "description":
-                       "on/off for switches; theme: mint (green), blue, aurora (teal/violet), sunset "
+                       "on/off for switches (activity_timeline also: clear); theme: mint (green), blue, aurora (teal/violet), sunset "
                        "(orange), rose (pink), mono (white); position: top-right, "
                        "top-left, top-center, bottom-right, bottom-left."}},
             ["setting", "value"]),
@@ -586,6 +589,65 @@ def _work_handlers():
 
 
 _SYNC.update({name: (lambda a, _n=name: _work_handlers()[_n](a)) for name in ("wait_until_done", "preview_site")})
+
+
+# --- Tasks that last: sub-steps, replanning, resuming (tasks.py; run by the session) --
+
+_tools_before_tasks = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.app import tasks
+    return _tools_before_tasks() + [types.Tool(function_declarations=tasks.declarations())]
+
+
+# --- The journal: what happened when (journal.py) ------------------------------------
+
+_tools_before_journal = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.knowledge import journal
+    return _tools_before_journal() + [types.Tool(function_declarations=journal.declarations())]
+
+
+_SYNC["recall_history"] = lambda a: __import__("mint.knowledge.journal", fromlist=["HANDLERS"]).HANDLERS["recall_history"](a)
+
+
+# --- Automations: schedules and triggers (automations.py) ---------------------------
+
+_tools_before_automations = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.tools import automations
+    return _tools_before_automations() + [types.Tool(function_declarations=automations.declarations())]
+
+
+_SYNC["automation"] = lambda a: __import__("mint.tools.automations", fromlist=["tool"]).tool(a)
+
+
+# --- Watching videos: transcript + keyframes (video.py) ------------------------------
+# Its own dispatch step because it can hand back an image (the frame at a time).
+
+_tools_before_video = tools
+_dispatch_before_video = dispatch
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.tools import video
+    return _tools_before_video() + [types.Tool(function_declarations=video.declarations())]
+
+
+async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:  # noqa: F811
+    if name == "watch_video":
+        from mint.tools import video
+        try:
+            return await asyncio.to_thread(video.tool, args or {})
+        except Exception as error:
+            log.exception("watch_video failed")
+            return f"FAILED: could not watch the video: {error}", None
+    return await _dispatch_before_video(name, args)
 
 
 # --- Harness: files, web, browser, menus, targeted scrolling, AppleScript (harness_tools.py) --

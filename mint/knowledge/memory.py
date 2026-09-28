@@ -153,6 +153,14 @@ def relevant(query: str, limit: int = 6, include_pinned: bool = False) -> list[d
     if not pool or not query.strip():
         return []
     started = time.monotonic()
+    if not jev.available():
+        chosen = _gemini_relevant(query, pool[-400:], limit)
+        if chosen is None:
+            chosen = _lexical(query, pool, limit)
+        log.info("recall %r -> %d blocks in %.1fs (Gemini)", query[:60], len(chosen), time.monotonic() - started)
+        if chosen:
+            _touch([b["id"] for b in chosen])
+        return chosen
     if len(pool) > BATCH:
         # Narrow a big bank first: one choice question ranks every block, and
         # the best BATCH go on to be judged one by one.
@@ -173,8 +181,10 @@ def relevant(query: str, limit: int = 6, include_pinned: bool = False) -> list[d
         for b in pool}
     answers = jev.ask({"request": query}, questions, timeout=6.0)
     if answers is None:
-        chosen = _lexical(query, pool, limit)
-        log.info("recall: Jev unreachable, word match gave %d", len(chosen))
+        chosen = _gemini_relevant(query, pool, limit)
+        if chosen is None:
+            chosen = _lexical(query, pool, limit)
+        log.info("recall: Jev unreachable, fallback gave %d", len(chosen))
     else:
         scored = sorted(((jev.yes(answers, b["id"]), b) for b in pool), key=lambda x: -x[0])
         chosen = [b for p, b in scored if p >= RELEVANT][:limit]
@@ -195,6 +205,55 @@ def _lexical(query: str, pool: list[dict], limit: int) -> list[dict]:
     return [b for _, b in sorted(scored, key=lambda x: -x[0])[:limit]]
 
 
+def _numbered(pool: list[dict]) -> str:
+    return "\n".join(f"{b['id']}: ({b['group']}) {b['text']}" for b in pool)
+
+
+def _gemini_relevant(query: str, pool: list[dict], limit: int) -> list[dict] | None:
+    """Without Jev (no TypeSafe key): one Flash Lite request picks the relevant facts.
+    None when Gemini did not answer (the caller falls back to word matching)."""
+    from mint.core import llm
+    answer = llm.ask_json(
+        "A voice assistant keeps these facts about its user, one per line (id: (group) fact):\n"
+        f"{_numbered(pool)}\n\nWhich facts are needed or clearly helpful to answer or act on this request: "
+        f"{query!r}? Think of synonyms (boss = manager, mum = mother). Return JSON: {{\"ids\": [...]}}, most "
+        f"useful first, at most {limit}; [] if none.")
+    if not isinstance(answer, dict):
+        return None
+    by_id = {b["id"]: b for b in pool}
+    return [by_id[i] for i in answer.get("ids") or [] if i in by_id][:limit]
+
+
+def _gemini_file(text: str, group: str, bank: list[dict]) -> tuple[str, dict | None]:
+    """Without Jev: which group a new fact goes in, and which saved fact it replaces."""
+    from mint.core import llm
+    groups = dict(GROUPS)
+    for b in bank:
+        groups.setdefault(b["group"], f"The user's '{b['group']}' memories.")
+    pool = bank[-200:]
+    answer = llm.ask_json(
+        f"A voice assistant is saving a new fact about its user: {text!r}.\n"
+        + ("" if group else "Groups:\n" + "\n".join(f"- {k}: {v}" for k, v in groups.items()) + "\n")
+        + f"Saved facts (id: (group) fact):\n{_numbered(pool) or '(none)'}\n\n"
+        "Does the new fact REPLACE one saved fact - the same subject with a new or corrected value ('my "
+        "manager is Rahul' replaces 'my manager is Priya'; 'I also like tea' does not replace 'I like "
+        "coffee')? Return JSON: {\"group\": \"<group name>\", \"replaces\": \"<id or null>\"}.")
+    if not isinstance(answer, dict):
+        return group or "misc", None
+    chosen = group or _group_name(str(answer.get("group") or "misc"))
+    old = next((b for b in pool if b["id"] == answer.get("replaces")), None)
+    return chosen, old
+
+
+def _keep_history(block: dict, before: str) -> None:
+    """A fact that changed keeps what it used to say, and until when ('what was my
+    manager before?'), instead of losing it."""
+    if before and before != block["text"]:
+        history = block.setdefault("history", [])
+        history.append({"text": before, "until": time.strftime("%Y-%m-%d")})
+        block["history"] = history[-5:]
+
+
 def _touch(ids: list[str]) -> None:
     with _lock:
         bank = _load()
@@ -212,7 +271,13 @@ def recall(query: str = "") -> str:
     found = relevant(query)
     if not found:
         return f"Nothing remembered is relevant to '{query}'."
-    return "\n".join(f"- ({b['group']}) {b['text']}" for b in found)
+    return "\n".join(f"- ({b['group']}) {b['text']}" + _was(b) for b in found)
+
+
+def _was(b: dict) -> str:
+    history = b.get("history") or []
+    return (" [before: " + "; ".join(f"'{h['text']}' until {h['until']}" for h in history[-2:]) + "]") \
+        if history else ""
 
 
 def pinned_text(limit: int = 1800) -> str:
@@ -276,9 +341,11 @@ def _file(text: str, group: str, bank: list[dict]) -> tuple[str, dict | None]:
                                               "the user, be filed in?"}
     if not questions:
         return group or "misc", None
+    if not jev.available():
+        return _gemini_file(text, group, bank)
     answers = jev.ask({"request": text}, questions, timeout=6.0, retries=1)
     if answers is None:
-        return group or "misc", None
+        return _gemini_file(text, group, bank)
     if not group:
         group = (answers.get("group") or {}).get("choice") or "misc"
     old = max(pool, key=lambda b: jev.yes(answers, b["id"])) if pool else None
@@ -308,6 +375,11 @@ def _replaces(text: str, group: str, bank: list[dict]) -> dict | None:
     return best if jev.yes(answers, best["id"]) >= 0.6 else None
 
 
+_RELATIVE = re.compile(r"\b(today|tonight|tomorrow|yesterday|this (morning|evening|week|weekend|month)|"
+                       r"next (week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+                       r"(on|this) (monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b", re.I)
+
+
 def add(text: str, group: str = "", pinned: bool | None = None, source: str = "user") -> str:
     text = " ".join(str(text).split())
     if not text:
@@ -315,17 +387,28 @@ def add(text: str, group: str = "", pinned: bool | None = None, source: str = "u
     if has_secret(text):
         return ("Refused: that looks like a password, key or card number. Those are never stored; "
                 "use a password manager.")
+    if _RELATIVE.search(text) and "(said " not in text:
+        # "tomorrow" means nothing next week: keep the day it was said, so it can be read (and tidied) later.
+        text += f" (said {time.strftime('%a %d %b %Y')})"
+    with _lock:
+        snapshot = _load()
+    if any(b["text"].lower() == text.lower() for b in snapshot):
+        return "Already remembered."
+    # Filing asks Jev or Gemini (seconds, up to minutes when Gemini is overloaded): not under the
+    # lock, which recall and every other memory change need.
+    group, old_snapshot = _file(text, _group_name(group) if group else "", snapshot)
     with _lock:
         bank = _load()
         if any(b["text"].lower() == text.lower() for b in bank):
             return "Already remembered."
-        group, old = _file(text, _group_name(group) if group else "", bank)
+        old = next((b for b in bank if old_snapshot is not None and b["id"] == old_snapshot["id"]), None)
         if pinned is None:
             pinned = group in PINNED_GROUPS
         if old is not None:
             before = old["text"]
             old.update(text=text, updated=time.strftime("%Y-%m-%d %H:%M"), source=source,
                        pinned=bool(pinned or old.get("pinned")))
+            _keep_history(old, before)
             _save(bank)
             return f"Updated memory ({old['group']}): '{before}' is now '{text}'."
         bank.append(_block(_next_id(bank), text, group, bool(pinned), source))
@@ -339,9 +422,19 @@ def _find(what: str, bank: list[dict]) -> tuple[dict | None, str]:
     if len(hits) == 1:
         return hits[0], ""
     options = {b["id"]: _describe(b)[:200] for b in bank[-250:]}
-    ranked, _ = jev.rank(what, options, "Which remembered fact is `request` talking about?", timeout=6.0)
+    ranked, _ = jev.rank(what, options, "Which remembered fact is `request` talking about?", timeout=6.0) \
+        if jev.available() else ([], None)
     if ranked and ranked[0][1] >= 0.5:
         return next(b for b in bank if b["id"] == ranked[0][0]), ""
+    if not ranked:
+        from mint.core import llm
+        answer = llm.ask_json(f"Saved facts (id: (group) fact):\n{_numbered(bank[-250:])}\n\nWhich ONE fact "
+                              f"is this talking about: {what!r}? JSON: {{\"id\": \"<id or null>\", \"sure\": "
+                              "true only if it clearly means that fact and no other}.")
+        hit = next((b for b in bank if isinstance(answer, dict) and answer.get("sure") is True
+                    and b["id"] == answer.get("id")), None)
+        if hit is not None:
+            return hit, ""
     listing_ = "; ".join(b["text"] for b in bank[-12:])
     return None, f"Not sure which memory '{what}' means. Some of what is remembered: {listing_}"
 
@@ -350,15 +443,21 @@ def update(what: str, new_text: str = "", fixed: bool | None = None, group: str 
     if new_text and has_secret(new_text):
         return "Refused: that looks like a password, key or card number."
     with _lock:
+        snapshot = _load()
+    if not snapshot:
+        return "Nothing is remembered yet."
+    found, why = _find(what, snapshot)          # may ask Jev or Gemini: not under the lock
+    if found is None:
+        return why
+    with _lock:
         bank = _load()
-        if not bank:
-            return "Nothing is remembered yet."
-        block, why = _find(what, bank)
+        block = next((b for b in bank if b["id"] == found["id"]), None)
         if block is None:
-            return why
+            return "That memory is gone."
         before = block["text"]
         if new_text:
             block["text"] = " ".join(new_text.split())
+            _keep_history(block, before)
         if fixed is not None:
             block["pinned"] = bool(fixed)
         if group:
@@ -372,12 +471,17 @@ def update(what: str, new_text: str = "", fixed: bool | None = None, group: str 
 
 def forget(what: str) -> str:
     with _lock:
+        snapshot = _load()
+    if not snapshot:
+        return "There is nothing remembered to forget."
+    found, why = _find(what, snapshot)          # may ask Jev or Gemini: not under the lock
+    if found is None:
+        return why
+    with _lock:
         bank = _load()
-        if not bank:
-            return "There is nothing remembered to forget."
-        block, why = _find(what, bank)
+        block = next((b for b in bank if b["id"] == found["id"]), None)
         if block is None:
-            return why
+            return "That memory was already gone."
         bank.remove(block)
         _save(bank)
     return f"Forgot: {block['text']}"
@@ -385,7 +489,7 @@ def forget(what: str) -> str:
 
 def clear() -> None:
     with _lock:
-        for path in (BANK, VIEW):
+        for path in (BANK, VIEW, ROOT / "changes.jsonl", ROOT / "tidied.json"):
             try:
                 path.unlink()
             except OSError:
@@ -491,3 +595,103 @@ def add_exact(text: str, group: str = "misc", pinned: bool = False) -> str:
         bank.append(_block(_next_id(bank), text, _group_name(group or "misc"), bool(pinned), "edited"))
         _save(bank)
     return "Added."
+
+
+# --- tidying up, once a day ----------------------------------------------------------------------
+
+TIDIED = ROOT / "tidied.json"
+CHANGES = ROOT / "changes.jsonl"
+TIDY_EVERY = 20 * 3600
+
+_TIDY = """You look after the memory of a voice assistant: facts about its user, one per line as
+"id | group | saved on | fact". Today is {today}. Tidy it, conservatively:
+
+- merge: facts that say the same thing (or one contains the other) -> one fact, keeping every detail.
+- expired: facts only true until a date that has passed ("meeting with Sam tomorrow" saved a week ago,
+  "flying to Goa on 3 Sep" when it is later). NOT lasting facts, preferences, people or habits.
+- regroup: facts in group "misc" that clearly belong in one of: {groups}.
+
+Change nothing else. When unsure, leave it. Return JSON:
+{{"merge": [{{"ids": ["m3", "m9"], "text": "merged fact"}}], "expired": [{{"id": "m5", "why": "..."}}],
+  "regroup": [{{"id": "m7", "group": "people"}}]}}
+
+FACTS:
+{facts}"""
+
+
+def _log_change(kind: str, detail: dict) -> None:
+    with CHANGES.open("a") as f:
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M"), "kind": kind, **detail}, ensure_ascii=False) + "\n")
+    os.chmod(CHANGES, 0o600)
+
+
+def tidy(force: bool = False) -> str:
+    """Merge duplicates, drop facts whose date has passed, file 'misc' facts properly -
+    what sleep does for a memory. Every change is written to memory/changes.jsonl
+    (with the old text), so nothing is lost for good."""
+    from mint.core import llm
+    try:
+        last = json.loads(TIDIED.read_text()).get("at", 0)
+    except (OSError, ValueError):
+        last = 0
+    if not force and time.time() - last < TIDY_EVERY:
+        return "Tidied recently."
+    with _lock:
+        bank = _load()
+    pool = [b for b in bank if not b.get("pinned")]
+    ROOT.mkdir(parents=True, exist_ok=True)
+    TIDIED.write_text(json.dumps({"at": time.time()}))
+    if len(pool) < 4:
+        return "Too few memories to tidy."
+    facts = "\n".join(f"{b['id']} | {b['group']} | {b.get('updated', b.get('created', ''))[:10]} | {b['text']}"
+                      for b in pool[-300:])
+    answer = llm.ask_json(_TIDY.format(today=time.strftime("%A %d %B %Y"), groups=", ".join(GROUPS), facts=facts))
+    if not isinstance(answer, dict):
+        return "Could not tidy (no answer)."
+    done = []
+    with _lock:
+        bank = _load()
+        by_id = {b["id"]: b for b in bank if not b.get("pinned")}
+        for m in (answer.get("merge") or [])[:8]:
+            ids = list(dict.fromkeys(i for i in m.get("ids") or [] if i in by_id))   # no id twice
+            text = " ".join(str(m.get("text") or "").split())
+            if len(ids) < 2 or not text or has_secret(text):
+                continue
+            keep, *drop = [by_id[i] for i in ids]
+            _log_change("merge", {"kept": keep["id"], "before": [b["text"] for b in [keep, *drop]], "after": text})
+            before = keep["text"]
+            keep["text"], keep["updated"] = text, time.strftime("%Y-%m-%d %H:%M")
+            _keep_history(keep, before)
+            for b in drop:
+                bank.remove(b)
+                by_id.pop(b["id"], None)
+            done.append(f"merged {len(ids)} into '{text[:60]}'")
+        for e in (answer.get("expired") or [])[:8]:
+            b = by_id.pop(str(e.get("id")), None)
+            if b is not None:
+                _log_change("expired", {"id": b["id"], "text": b["text"], "why": e.get("why", "")})
+                bank.remove(b)
+                done.append(f"dropped past '{b['text'][:60]}'")
+        for r in (answer.get("regroup") or [])[:12]:
+            b = by_id.get(str(r.get("id")))
+            group = _group_name(str(r.get("group") or ""))
+            if b is not None and b["group"] == "misc" and group in GROUPS and group not in PINNED_GROUPS:
+                _log_change("regroup", {"id": b["id"], "from": b["group"], "to": group})
+                b["group"] = group
+                done.append(f"filed '{b['text'][:40]}' under {group}")
+        if done:
+            _save(bank)
+    log.info("memory tidy: %s", "; ".join(done) or "nothing to do")
+    return ("Tidied the memory: " + "; ".join(done)) if done else "The memory was already tidy."
+
+
+def tidy_later(delay: float = 120.0) -> None:
+    """In the background, a while after Mint starts, at most once a day."""
+    def run():
+        try:
+            tidy()
+        except Exception:
+            log.exception("memory tidy failed")
+    timer = threading.Timer(delay, run)
+    timer.daemon = True
+    timer.start()

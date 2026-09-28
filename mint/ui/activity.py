@@ -49,7 +49,7 @@ _KIND = {
     "set_timer": "timer",
     "set_volume": "sound", "media_key": "sound",
     "system_action": "system", "get_status": "system", "notify": "system",
-    "plan_task": "plan", "step_done": "plan",
+    "plan_task": "plan", "step_done": "plan", "task": "plan",
     "switch_to": "switch",
     "wait_until_done": "timer", "preview_site": "web",
     "read_file": "file", "write_file": "file", "find_files": "file", "file_action": "file",
@@ -58,6 +58,7 @@ _KIND = {
     "run_applescript": "code",
     "screenshot": "shot", "clipboard": "clip", "quit_mint": "system", "read_clipboard": "clip", "write_clipboard": "clip",
     "pointer": "click",
+    "watch_video": "look", "automation": "timer", "recall_history": "search",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -162,6 +163,18 @@ def phrase(name: str, args: dict) -> str:
                    f"{_quote(str(a.get('path', '')).rsplit('/', 1)[-1], 34)}"
         case "web_search":
             return f"Searching · {_quote(a.get('query', ''), 40)}"
+        case "recall_history":
+            return f"Looking back · {_quote(a.get('when') or a.get('question', ''), 34)}"
+        case "automation":
+            act = str(a.get("action", "list"))
+            return {"create": f"New automation · {_quote(a.get('name') or a.get('do', ''), 30)}",
+                    "list": "Checking automations"}.get(act, f"{act.replace('_', ' ').capitalize()} · "
+                                                             f"{_quote(a.get('name', ''), 30)}")
+        case "watch_video":
+            src = str(a.get("source") or "")
+            what = _site(src) if src.startswith("http") else (src.rsplit("/", 1)[-1] or "the video")
+            return (f"Frame at {a['at']}" if a.get("at") else
+                    f"Watching {_quote(what, 34)}" if not a.get("question") else f"About the video · {_quote(a['question'], 30)}")
         case "read_url":
             return f"Reading {_site(str(a.get('url', '')))}"
         case "browser":

@@ -49,6 +49,9 @@ words, by voice or by typing (<kbd>⌘J</kbd>):
 | “remind me to call Sam at five”, “what's on today?” | Calendar, reminders, notes, timers, email drafts, volume, media keys, screenshots, clipboard |
 | “have Astra research the best keyboards and write a brief” | Background agents (research, code, documents, websites) that ask questions, team up and report back |
 | “remember my manager is Meera”, “save how to do that as a skill” | Long-term memory and self-learned skills, both editable |
+| “watch this video: what's the aesthetic?”, “what did he say at 3:20?” | Understands a video (link, file or the one on screen) in seconds from its transcript and a few keyframes, with timestamps |
+| “every weekday at 9, brief me on my calendar and mail”, “when a PDF lands in Downloads, file it” | Automations: schedules, folder and app triggers, reminders before meetings |
+| “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
 
 <p align="center">
@@ -138,7 +141,7 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
                              │
           ┌──────────────────┼───────────────────────────┐
           ▼                  ▼                           ▼
-   88 tools on the Mac   Jev (fast choices from     Agents (GPT-6 Luna, Codex)
+   92 tools on the Mac   Jev (fast choices from     Agents (GPT-6 Luna, Codex)
    Accessibility, menus,  real lists: controls,      research, code, documents,
    AppleScript, files,    skills, memories, apps)    websites; work as a team
    browser, Vision OCR
@@ -153,6 +156,14 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
   locally; nothing leaves the Mac while Mint is asleep.
 - **Learns.** Tasks that took many steps or needed your correction become skills, ranked
   by how often they work.
+- **Remembers well.** The memory keeps separate stores, each with its own job:
+  - facts about you, which are replaced (not piled up) when they change, remember what they used to
+    say, and are tidied once a day;
+  - a journal of what happened when;
+  - plans that outlive a restart;
+  - an opt-in, text-only timeline of what was on screen.
+- **Cheap to watch.** Videos become a transcript (the site's captions when there are any) and about
+  12 keyframes on one contact sheet: about 6k tokens for a 15-minute talk instead of about 180k.
 
 How the pieces fit together is in [docs/architecture.md](docs/architecture.md); every command and
 tool is in [docs/usage.md](docs/usage.md); working on Mint is in [docs/development.md](docs/development.md).

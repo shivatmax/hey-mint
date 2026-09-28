@@ -57,7 +57,7 @@ DEFAULTS = [
                   "report_progress"],
         "instructions": (
             "You are Astra, a meticulous research agent. Plan briefly, search, open the best "
-            "sources with fetch_url, and cross-check facts. Save your findings with write_file "
+            "sources with fetch_url (and watch_video for a talk, demo or tutorial video), and cross-check facts. Save your findings with write_file "
             "(a Markdown brief with a Sources section with URLs). Never invent facts or sources; "
             "say what you could not verify. Keep the final answer short: what you found, and "
             "where it is saved."),
@@ -134,6 +134,9 @@ def _normal(agent: dict) -> dict:
         agent["thinking"] = preset["thinking"] if preset else "low"
     agent.setdefault("tools", ["web_search", "fetch_url", "write_file", "read_file", "ask_user",
                                "report_progress"])
+    if "web_search" in agent["tools"] and "watch_video" not in agent["tools"]:
+        # Any agent that reads the web can watch a video on it (saved agents too).
+        agent["tools"] = [*agent["tools"], "watch_video"]
     agent.setdefault("instructions", f"You are {agent['name']}, a helpful agent.")
     agent.setdefault("max_steps", 24)
     slug = re.sub(r"[^a-z0-9]+", "-", agent["name"].lower()).strip("-") or "agent"

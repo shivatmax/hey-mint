@@ -175,7 +175,13 @@ class Hub:
             except Exception:
                 log.debug("could not wake for an agent", exc_info=True)
         self._outbox.append(text)
-        session = getattr(mint, "session", None)
+        await self.flush()
+
+    async def flush(self) -> None:
+        """Deliver what was said to Mint while its session was (re)connecting. Called by
+        tell_mint and by the session as soon as it is connected."""
+        mint = self.mint
+        session = getattr(mint, "session", None) if mint is not None else None
         if session is None:
             return
         while self._outbox:

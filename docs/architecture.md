@@ -25,11 +25,11 @@ to **agents** that run in the background and report back.
 
 | Package | Responsibility | Key modules |
 |---|---|---|
-| `mint.app` | Startup, the Live session, lifecycle | `main` (entry point, flags), `session` (audio in/out, tool calls, wake/sleep, reconnects), `autopilot` (finishing multi-part requests), `control` (stop), `power` (quit, login item), `ear` (hand-over to the low-memory listener) |
-| `mint.core` | Shared configuration and services | `config` (keys, models, the system instruction), `prefs` (settings.json), `custom` (custom.json), `jev`, `hotkeys` |
+| `mint.app` | Startup, the Live session, lifecycle | `main` (entry point, flags), `session` (audio in/out, tool calls, wake/sleep, reconnects), `autopilot` (finishing multi-part requests), `control` (stop), `power` (quit, login item), `ear` (hand-over to the low-memory listener), `tasks` (plans that survive restarts: sub-steps, replanning, resuming) |
+| `mint.core` | Shared configuration and services | `config` (keys, models, the system instruction), `prefs` (settings.json), `custom` (custom.json), `jev`, `llm` (Gemini requests for background jobs, with retries across models), `hotkeys` |
 | `mint.voice` | Listening and speaking | `engine` (AVAudioEngine with voice processing), `wake` + `features` (the "Hey Mint" detector), `voicelock` + `enroll` (speaker verification), `hearing` + `vocab` (words it gets wrong), `voices` |
-| `mint.knowledge` | What Mint knows | `conversation` (history and rolling summary), `memory` (one fact per block, Jev recall), `skills` (Markdown how-tos by category), `learner` (writes skills from experience) |
-| `mint.tools` | Everything Gemini can call | `registry` (declarations and dispatch), `harness` (files, web, browser, menus, scrolling, AppleScript), `everyday` (calendar, reminders, notes, mail drafts), `clipboard` (screenshots and clipboard), `apps`, `browser_choice`, `workspace`, `work` (long tasks), `extra` (skills, memory, expressions, marks, moving the orb) |
+| `mint.knowledge` | What Mint knows | `conversation` (history and rolling summary), `memory` (one fact per block; Jev or Gemini recall; keeps earlier values; daily tidy), `journal` (what happened when: `recall_history`), `timeline` (the opt-in activity timeline), `skills` (Markdown how-tos by category), `learner` (writes skills from experience) |
+| `mint.tools` | Everything Gemini can call | `registry` (declarations and dispatch), `harness` (files, web, browser, menus, scrolling, AppleScript), `everyday` (calendar, reminders, notes, mail drafts), `clipboard` (screenshots and clipboard), `apps`, `browser_choice`, `workspace`, `work` (long tasks), `video` (watching videos: captions or transcription, keyframes, digest), `automations` (schedules and triggers), `extra` (skills, memory, expressions, marks, moving the orb) |
 | `mint.screen` | Seeing and acting on the screen | `axkit` (Accessibility), `ground` (finding the control you meant), `ocr` (on-device text recognition), `vision` (screenshots for the model), `pointer` (finding words and marking them) |
 | `mint.ui` | Everything drawn | `presence` (menu bar and wiring), `hud` + `orb` (the orb, its face and morphs), `chat`, `settings`, `brain` (skills and memory window), `effects` + `flourishes`, `emotes`, `motion` (60 fps paths and tricks), `marks`, `critters` (agents as creatures), `sharing` (screen-share visibility) |
 | `mint.agents` | Background agents | `runtime` (the hub and each agent's tool loop), `registry` (agents.json), `providers` (OpenAI / OpenRouter), `codex` (OpenAI Codex runner), `team` (agents asking agents), `orchestrator` (the tools Gemini uses to delegate) |
@@ -55,7 +55,23 @@ checks the result, step by step until the goal is met.
 4. **Show.** `mint.ui` turns each tool call into an orb morph, a caption and a small flourish.
    None of it appears in Mint's own screenshots.
 5. **Remember.** Turns go into the conversation history; facts into memory; tasks that took
-   many steps or needed correcting become skills (`mint.knowledge.learner`).
+   many steps or needed correcting become skills (`mint.knowledge.learner`). Plans are saved as
+   they go (`mint.app.tasks`), so "where were we?" works after a restart, and the journal
+   (`mint.knowledge.journal`) answers questions about any of it by date.
+
+**Running by itself.** `mint.tools.automations` checks its schedules and watchers every 15
+seconds and hands what is due to the session through the agents' hub, as a message Mint acts on.
+When the Python process has unloaded, it has already written the next due time to
+`automations-next`; Mint Ear checks that file every 30 seconds and starts Mint in time.
+
+**Watching a video.** `mint.tools.video` runs two jobs in parallel:
+- speech: the site's captions (through yt-dlp), or `afconvert` audio sent to Gemini in two-minute
+  pieces;
+- pictures: AVFoundation samples about 100 small frames, picks the frames where the picture changes,
+  and lays about 12 of them out on one contact sheet with their times.
+
+A Flash model then writes the digest from the transcript, the sheet and the measured pace and
+colours. Everything is cached per video.
 
 ## Safety by construction
 
@@ -69,6 +85,6 @@ checks the result, step by step until the goal is met.
 ## Data on your Mac
 
 The installed app runs from `~/Library/Application Support/Mint`: keys (`.env`, mode 600),
-`settings.json`, `custom.json`, `agents.json`, `memory/`, `skills/`, `voice/` (your enrolment)
-and the conversation history. Logs go to `~/Library/Logs/Mint/mint.log`. None of this is in
+`settings.json`, `custom.json`, `agents.json`, `memory/`, `skills/`, `voice/` (your enrolment),
+the conversation history, `tasks.json`, `automations.json` and, when it is on, `timeline.jsonl`. Logs go to `~/Library/Logs/Mint/mint.log`. None of this is in
 the repository.

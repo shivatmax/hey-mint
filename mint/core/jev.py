@@ -43,6 +43,11 @@ def _api_key() -> str | None:
     return _key or None
 
 
+def available() -> bool:
+    """A TypeSafe key is set (without one, callers use their Gemini fallback)."""
+    return _api_key() is not None
+
+
 @dataclass
 class Pick:
     id: str | None          # None when Jev chose "none"

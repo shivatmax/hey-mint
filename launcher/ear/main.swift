@@ -43,6 +43,8 @@ final class Controller: NSObject, NSApplicationDelegate {
     var prefsTimer: Timer?
     var listenerFailures = 0
     var restarts: [Date] = []
+    var automationTimer: Timer?
+    var automationTried: (due: Double, at: Date)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
@@ -71,6 +73,28 @@ final class Controller: NSObject, NSApplicationDelegate {
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("local.mint.ready"), object: nil,
                                                             queue: .main) { [weak self] _ in self?.fromListener("READY") }
         launch(reason: "launch")          // opening Mint.app opens Mint, as always
+        // Automations (mint/tools/automations.py): Mint writes when the next one is due; start it then.
+        automationTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.checkAutomations()
+        }
+    }
+
+    func checkAutomations() {
+        guard child == nil, !launching, !quitting else { return }
+        let path = Bundled.root + "/automations-next"
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8),
+              let due = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              Date().timeIntervalSince1970 >= due - 45 else { return }
+        // Mint rewrites the file once it has run what was due. The same time still there
+        // means that start failed (a crash): try again at most every 15 minutes, and give
+        // up on it after an hour, rather than starting Mint every 30 seconds.
+        if let tried = automationTried, tried.due == due {
+            let since = Date().timeIntervalSince(tried.at)
+            if since < 900 || Date().timeIntervalSince1970 - due > 3600 { return }
+        }
+        automationTried = (due, Date())
+        Log.write("[ear] an automation is due; starting Mint")
+        launch(reason: "automation")
     }
 
     // --- Mint, the child ------------------------------------------------------------

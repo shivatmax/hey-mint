@@ -28,6 +28,12 @@ SCHEMAS = {
         "description": "Read a web page as plain text (first ~8000 characters by default).",
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string"}, "max_chars": {"type": "integer"}}, "required": ["url"]}},
+    "watch_video": {
+        "description": ("Watch a video (YouTube, X, Vimeo, Loom, TikTok link or a file path) fast: returns what it "
+                        "is, key moments with timestamps, its look and feel, the answer to `question`, and the "
+                        "timestamped transcript. Cite times as m:ss."),
+        "parameters": {"type": "object", "properties": {
+            "source": {"type": "string"}, "question": {"type": "string"}}, "required": ["source"]}},
     "write_file": {
         "description": "Write a text file in your workspace (creates folders). Overwrites.",
         "parameters": {"type": "object", "properties": {
@@ -85,6 +91,9 @@ def run(name: str, args: dict, workspace: Path, team_root: Path | None = None) -
             return web_search(str(args.get("query", "")), int(args.get("max_results") or 6))
         if name == "fetch_url":
             return fetch_url(str(args.get("url", "")), int(args.get("max_chars") or 8000))
+        if name == "watch_video":
+            from mint.tools import video
+            return video.watch_for_agent(str(args.get("source", "")), str(args.get("question", "")), workspace)
         if name == "write_file":
             path = _inside(workspace, str(args["path"]))
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -224,6 +233,8 @@ def describe_args(name: str, args: dict) -> str:
         return f"reading {str(args.get('path', ''))[:40]}"
     if name == "create_pdf":
         return "making a PDF"
+    if name == "watch_video":
+        return "watching a video"
     if name == "run_command":
         return f"running {str(args.get('command', ''))[:30]}"
     return name.replace("_", " ")

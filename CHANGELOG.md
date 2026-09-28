@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+- **Watching videos** (`watch_video`):
+  - What it takes: a YouTube, X, Vimeo, Loom, TikTok or Instagram link, a video or audio file, or
+    "this video" on screen.
+  - What it gives: what the video is, the key moments with timestamps, and its look and feel (from
+    about 12 scene-change keyframes on one contact sheet, plus measured pace and colours).
+  - How speech is read: captions when there are any, otherwise Gemini transcribes it in parallel
+    two-minute pieces (optionally `parakeet-mlx` on the Mac).
+  - Follow-ups and frames: follow-up questions are answered from the cache, and `at` shows an exact
+    frame.
+  - Tools: frames come from AVFoundation and audio from `afconvert`, so no ffmpeg is needed. Web
+    videos come through `yt-dlp` (new dependency).
+  - Sub-agents with web access can watch videos too.
+- **Automations** (`automation`):
+  - Triggers: once, daily at a time on some days, every N minutes (optionally between two times), a
+    new file in a folder, an app opening, N minutes before calendar events.
+  - Actions: Mint does it, a sub-agent does it, or a notification.
+  - Safety: automations never send, buy or delete.
+  - When Mint has unloaded: Mint Ear starts Mint when one is due.
+- **Tasks that last** (`task`):
+  - Plans are saved and survive restarts and "stop" (which now pauses the task).
+  - Steps can be split into sub-steps (3.1, 3.2), replanned or annotated.
+  - "Where were we?" resumes with the outline and notes.
+  - `step_done` records what was checked.
+- **Memory:**
+  - Without a TypeSafe key, filing facts, replacing outdated ones and recall now use Gemini Flash
+    Lite instead of word matching.
+  - Changed facts keep their earlier value.
+  - Relative dates are stamped with the day they were said.
+  - A daily tidy merges duplicates and drops facts whose date has passed, logging every change.
+- **The journal** (`recall_history`): "what did we do yesterday?", "when did I ask about flights?",
+  "what did Astra find on Monday?", answered from the conversation history, tasks, automations and
+  videos.
+- **Activity timeline** (opt-in): the app, window title and page address in front, text only, for
+  14 days. It answers "what was I working on?" and "how long was I in Slack today?".
+
 ## 0.1.2 (2026-09-28)
 
 - A developer handbook ([docs/development.md](docs/development.md)): running from a checkout,

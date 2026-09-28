@@ -17,6 +17,7 @@ changes apply at once, shortcuts included.
       "mic": true,                  false = microphone off; type instead
       "shortcuts": {"toggle": "cmd+j", "close": ""},
       "listen_while_working": true, still hears you mid-task
+      "timeline": false,            the activity timeline (timeline.py): app, window title, page address
       "stop_words": ["stop", "cancel", ...]   said alone, these stop everything
       "voice_lock": true,           only your voice reaches Gemini (after Train my voice)
       "addressee_check": true,      ignore follow-ups said to someone else
@@ -67,6 +68,8 @@ DEFAULTS: dict = {
     "shortcuts": {"toggle": "cmd+j", "close": ""},
     # Keep hearing the user while a task runs; "stop" (any of stop_words) cuts it off.
     "listen_while_working": True,
+    # The activity timeline (timeline.py) - off until the user turns it on.
+    "timeline": False,
     # Voice lock: only the enrolled voice reaches Gemini (needs "Train my voice").
     "voice_lock": True,
     # Follow-ups are checked by Jev: said to Mint, or to someone else?

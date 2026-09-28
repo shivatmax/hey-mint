@@ -933,6 +933,9 @@ class Mint:
         from mint.knowledge.conversation import memory, HISTORY
         self._print(f"[{'compact' if carry else 'new session'} ({source})]")
         self._flush_playback()
+        if self.task:
+            from mint.app import tasks
+            tasks.pause(self.task, "a new conversation was started")
         self.task = None
         self._recent_calls = {}
         self.ui.progress(0, 0)
@@ -1007,10 +1010,10 @@ class Mint:
             return
         step = ""
         if self.task:
-            steps = self.task["steps"]
-            remaining = [i for i in range(1, len(steps) + 1) if i not in self.task["done"]]
-            if remaining:
-                step = f"step {remaining[0]} of {len(steps)} - {steps[remaining[0] - 1]}"
+            from mint.app import tasks
+            current = tasks.current(self.task)
+            if current is not None:
+                step = f"step {current['n']} of {tasks.progress(self.task)[1]} - {current['text']}"
         asking = False
         try:
             from mint.agents.runtime import hub
@@ -1050,6 +1053,9 @@ class Mint:
         self._batch, self._batch_results = [], {}
         self._busy = False
         had_task = self.task is not None
+        if self.task:
+            from mint.app import tasks
+            tasks.pause(self.task, f"the user said stop ({source})")
         self.task = None
         self.ui.progress(0, 0)
         self.ui.stopped()
@@ -1345,11 +1351,14 @@ class Mint:
             return self._start_timer(float(args.get("minutes", 1)), args.get("label", "")), None
 
         if name == "plan_task":
+            from mint.app import tasks
             steps = [str(s) for s in (args.get("steps") or []) if str(s).strip()]
-            self.task = {"goal": str(args.get("goal", "")), "steps": steps, "done": {}}
+            self.task, paused = tasks.start(str(args.get("goal", "")), steps)
             self._print(f"[task] {self.task['goal']}: " + " | ".join(f"{i}. {s}" for i, s in enumerate(steps, 1)))
             if steps:
                 self.ui.progress(0, len(steps), f"Step 1/{len(steps)}: {steps[0][:60]}")
+            paused_note = (f" (Paused the earlier task {tasks.brief(paused)} - it can be resumed later.)"
+                           if paused else "")
             # The skill and memories for this request, before the first step is
             # taken: without them the plan was made first and the known route
             # arrived too late (ZCode, in testing).
@@ -1359,11 +1368,14 @@ class Mint:
             except Exception:
                 pack = ""
             return (f"Task started with {len(steps)} steps. Do step 1 now: {steps[0] if steps else ''}. "
-                    "Call step_done after each step.") + pack, None
+                    "Call step_done after each step." + paused_note) + pack, None
 
         if name == "step_done":
-            return self._step_done(int(args.get("step", 0)), str(args.get("result", "")),
+            return self._step_done(str(args.get("step", "")), str(args.get("result", "")),
                                    bool(args.get("failed", False))), None
+
+        if name == "task":
+            return self._task_tool(args or {}), None
 
         from mint.ui import activity
         on_screen = activity.kind(name) in {"click", "type", "scroll", "open", "web", "switch"}
@@ -1382,13 +1394,23 @@ class Mint:
         on = value.strip().lower() in {"on", "true", "yes", "enable", "enabled", "1", "show"}
         switches = {"spoken_replies": "voice", "microphone": "mic", "face": "face",
                     "effects": "cursor_effects", "word_animation": "word_animation",
-                    "listen_while_working": "listen_while_working"}
+                    "listen_while_working": "listen_while_working", "activity_timeline": "timeline"}
+        if setting == "activity_timeline" and value.strip().lower() in {"clear", "delete", "forget", "erase"}:
+            from mint.knowledge import timeline
+            return timeline.clear()
         if setting in switches:
             prefs.set(switches[setting], on)
             if setting == "spoken_replies":
                 return ("Spoken replies are ON: you speak again." if on else
                         "Spoken replies are OFF: from now on the user reads your replies in the chat "
                         "bubble instead of hearing them. Keep replies short and readable.")
+            if setting == "activity_timeline":
+                return ("The activity timeline is ON: while Mint runs it notes which app, window and web page is "
+                        "in front (text only, never screenshots or typing; not private windows or password "
+                        "managers), kept on this Mac for 14 days. Tell the user that, and that they can ask what "
+                        "they worked on or where their time went." if on else
+                        "The activity timeline is OFF; nothing more is recorded (what was recorded stays until "
+                        "the user asks to delete it: activity_timeline=clear).")
             if setting == "microphone" and not on:
                 return ("Microphone is OFF: you cannot hear the user now; they can type with the "
                         "chat (Cmd-J or click the orb) or turn the mic back on from the orb.")
@@ -1407,24 +1429,93 @@ class Mint:
             return f"Moved to the {where.replace('-', ' ')}."
         return f"Unknown setting '{setting}'."
 
-    def _step_done(self, step: int, result: str, failed: bool) -> str:
-        if not self.task or not (1 <= step <= len(self.task["steps"])):
-            return "There is no such step in the current task."
-        self.task["done"][step] = ("FAILED: " if failed else "") + result
-        steps = self.task["steps"]
-        remaining = [i for i in range(1, len(steps) + 1) if i not in self.task["done"]]
-        self._print(f"[task] step {step}/{len(steps)} {'FAILED' if failed else 'done'}: {result[:100]}")
-        if not remaining:
-            summary = "; ".join(f"{i}. {self.task['done'][i]}" for i in range(1, len(steps) + 1))
+    def _show_progress(self) -> None:
+        from mint.app import tasks
+        if not self.task:
+            self.ui.progress(0, 0)
+            return
+        done, total = tasks.progress(self.task)
+        step = tasks.current(self.task)
+        if step is not None:
+            self.ui.progress(done, total, f"Step {step['n']}/{total}: {step['text'][:60]}")
+
+    def _step_done(self, step: str, result: str, failed: bool) -> str:
+        from mint.app import tasks
+        if not self.task:
+            waiting = tasks.open_tasks()
+            return ("There is no task running." + (f" A paused one: {tasks.brief(waiting[0])} - if this step belongs "
+                                                   "to it, call task action=resume first." if waiting else
+                                                   " Start one with plan_task."))
+        problem = tasks.mark(self.task, step, result, failed)
+        if problem:
+            return problem
+        done, total = tasks.progress(self.task)
+        self._print(f"[task] step {step} {'FAILED' if failed else 'done'} ({done}/{total}): {result[:100]}")
+        nxt = tasks.current(self.task)
+        if nxt is None:
+            summary = "; ".join(f"{s['n']}. {s['result'] or s['status']}" for s in tasks.leaves(self.task))
             self.task = None
-            self.ui.progress(len(steps), len(steps), "✓ task complete")
+            self.ui.progress(total, total, "✓ task complete")
             self.ui.celebrate()
             if self.loop is not None:
                 self.loop.call_later(4, lambda: self.ui.progress(0, 0))
             return f"All steps finished. Tell the user briefly what was done: {summary}"
-        nxt = remaining[0]
-        self.ui.progress(len(steps) - len(remaining), len(steps), f"Step {nxt}/{len(steps)}: {steps[nxt - 1][:60]}")
-        return f"Recorded. Next is step {nxt}: {steps[nxt - 1]}."
+        self._show_progress()
+        return f"Recorded. Next is step {tasks.label(nxt)}."
+
+    def _task_tool(self, args: dict) -> str:
+        from mint.app import tasks
+        action = str(args.get("action") or "list").lower()
+        steps = [str(s) for s in (args.get("steps") or []) if str(s).strip()]
+        if action == "list":
+            rows = tasks.open_tasks()
+            if not rows:
+                return "No unfinished tasks."
+            return ("Unfinished tasks:\n" + "\n".join(f"- {tasks.brief(r)}" for r in rows)
+                    + "\nIf the user wants to carry on, call task action=resume now"
+                    + (" (which = words from the goal)." if len(rows) > 1 else "."))
+        if action == "resume":
+            found = tasks.find(str(args.get("which") or ""))
+            if found is None:
+                return "No unfinished task to resume" + (f" matching '{args.get('which')}'" if args.get("which") else "") + "."
+            if self.task and self.task["id"] != found["id"]:
+                tasks.pause(self.task, "another task was resumed")
+            self.task = found
+            self.task["state"] = "active"
+            tasks.save(self.task)
+            self._show_progress()
+            return tasks.resume_text(self.task)
+        if action == "abandon":
+            found = self.task if not args.get("which") else tasks.find(str(args["which"]))
+            if found is None:
+                return "No such task."
+            found["state"] = "abandoned"
+            tasks.save(found)
+            if self.task and self.task["id"] == found["id"]:
+                self.task = None
+                self.ui.progress(0, 0)
+            return f"Dropped the task '{found['goal']}'."
+        if not self.task:
+            return "There is no task running. Start one with plan_task (or task action=resume)."
+        if action == "add_steps":
+            result = tasks.add_steps(self.task, steps, str(args.get("under") or ""), str(args.get("after") or ""))
+            self._show_progress()
+            nxt = tasks.current(self.task)
+            return result + (f" Current step: {tasks.label(nxt)}." if nxt else "")
+        if action == "replan":
+            if not steps:
+                return "FAILED: give the new steps."
+            result = tasks.replan(self.task, steps)
+            self._show_progress()
+            return result + f"\n{tasks.outline(self.task)}"
+        if action == "note":
+            return tasks.note(self.task, str(args.get("text") or ""))
+        if action == "pause":
+            tasks.pause(self.task, str(args.get("text") or ""))
+            self.task = None
+            self.ui.progress(0, 0)
+            return "Paused. It is saved; say 'continue' to pick it up."
+        return f"Unknown task action '{action}'."
 
     def _context_after(self, name: str) -> str:
         """What a person would glance at after acting: what is in front now,
@@ -1445,12 +1536,12 @@ class Mint:
             except Exception:
                 pass
         if self.task:
-            steps = self.task["steps"]
-            remaining = [i for i in range(1, len(steps) + 1) if i not in self.task["done"]]
-            if remaining:
-                notes.append(f"[Task '{self.task['goal'][:60]}': {len(steps) - len(remaining)}/{len(steps)} "
-                             f"steps done. Current: step {remaining[0]} - {steps[remaining[0] - 1]}. "
-                             "Call step_done when it is finished.]")
+            from mint.app import tasks
+            step = tasks.current(self.task)
+            if step is not None:
+                done, total = tasks.progress(self.task)
+                notes.append(f"[Task '{self.task['goal'][:60]}': {done}/{total} steps done. Current: step "
+                             f"{tasks.label(step)}. Call step_done when it is finished.]")
         return ("\n" + "\n".join(notes)) if notes else ""
 
     def _start_timer(self, minutes: float, label: str) -> str:
@@ -1475,6 +1566,12 @@ class Mint:
         self.loop = asyncio.get_running_loop()
         from mint.agents import runtime as agent_hub
         agent_hub.hub.attach(self)          # sub-agents report to this session
+        from mint.tools import automations
+        from mint.knowledge import memory as membank
+        automations.start()                 # schedules and triggers (they report through the hub)
+        from mint.knowledge import timeline
+        timeline.start()                    # the activity timeline (does nothing unless it is on)
+        membank.tidy_later()                # merge duplicate memories, drop past ones (once a day)
         client = _client()
         attempt = 0
         self._state("starting")
@@ -1506,6 +1603,10 @@ class Mint:
                     self._state(self._idle_state())
                     if self._pending_text:
                         asyncio.create_task(self._send_pending_text())
+                    from mint.agents.runtime import hub as _hub
+                    if _hub._outbox:
+                        # Agent reports and automations that arrived while connecting.
+                        asyncio.create_task(_hub.flush())
 
                     async with asyncio.TaskGroup() as group:
                         group.create_task(self._receive())
@@ -1693,6 +1794,12 @@ class Mint:
         try:
             from mint.tools import work as work_tools
             if work_tools.busy():
+                return False
+        except Exception:
+            pass
+        try:
+            from mint.tools import automations
+            if automations.keep_loaded():     # a folder/app watcher, or one due within minutes
                 return False
         except Exception:
             pass

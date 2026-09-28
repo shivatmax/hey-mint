@@ -476,8 +476,16 @@ def prompt_text() -> str:
     if saved in VOICES:
         config.VOICE = saved
     emotes.ensure_attached()
+    from mint.tools import automations
     from mint.tools import harness as harness_tools
-    parts = [PROMPT, harness_tools.PROMPT, EXPRESSIVE, SHOWING]
+    from mint.knowledge import journal
+    from mint.app import tasks
+    from mint.tools import video
+    parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
+             EXPRESSIVE, SHOWING]
+    unfinished = tasks.prompt_text()
+    if unfinished:
+        parts.append(unfinished)
     parts.append(f"Your current voice is {config.VOICE}" + (f" ({VOICES[config.VOICE]})" if config.VOICE in VOICES else "")
                  + ". If asked which voice you use, just say so; do not call set_voice.")
     style = prefs.get("speaking_style")
@@ -690,7 +698,7 @@ def _skill_hint(app_name: str) -> str:
     return f"\n[Saved skills for {app_name}: {titles}. Call find_skill with the task to load one.]"
 
 
-_NO_CONTEXT = {"step_done", "stop_listening", "express", "set_voice", "get_status",
+_NO_CONTEXT = {"step_done", "task", "automation", "stop_listening", "express", "set_voice", "get_status",
                "set_preference", "show_chat", "notify", "set_timer", "media_key", "set_volume"}
 _skill_asked = {"at": 0.0}
 

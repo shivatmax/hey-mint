@@ -357,11 +357,75 @@ password, key or card number, is never kept, and Mint never pastes into a passwo
 | "start work" (a routine in `custom.json`) | `run_routine` |
 | "run `ls` in my projects folder" | `run_shell`, only when started with `MINT_ALLOW_SHELL=1` |
 
+### Watching videos
+
+`watch_video` understands a video in seconds without playing it. It works on a YouTube, X, Vimeo, Loom,
+TikTok or Instagram link, a video or audio file, or "this video" (the video page in front, else the
+video selected in Finder, else the newest screen recording on the Desktop or in Downloads or Movies).
+
+| Say | What happens |
+|---|---|
+| "watch this and tell me what it's about" | a digest: what it is, 4-8 key moments with timestamps, the look and feel, and saves the transcript to `~/Documents/Mint/videos/` |
+| "what did he say about pricing?" | answered from the saved transcript and keyframes, with timestamps (~5 s) |
+| "show me the frame at 3:20" | that exact frame is sent to Mint to look at |
+| "what's the aesthetic of this reel?" | the frames plus measured cuts per minute, brightness and main colours |
+| "transcribe this recording" | the timestamped transcript file |
+
+How it stays fast and cheap (`mint/tools/video.py`):
+
+- **Speech.** The site's own captions when there are any (YouTube: instant, no tokens). Otherwise
+  Gemini transcribes the audio in parallel two-minute pieces. The pieces start at exact offsets, so
+  timestamps stay within seconds; one 5-minute piece drifted by 2 minutes in testing. When
+  `parakeet-mlx` is installed, the audio is transcribed on the Mac instead.
+- **Picture.** About 12 keyframes, chosen where the picture changes (scene cuts), laid out with their
+  times on one contact sheet.
+- **Cost.** A 15-minute talk comes to about 6k tokens, against about 180k for sending the video
+  itself. In testing it took 13 s with captions and 50 s without.
+- **Tools.** Frames come from AVFoundation and audio from `afconvert`, both part of macOS, so no
+  ffmpeg is needed. `yt-dlp` fetches web videos. If a YouTube video can't be fetched, Gemini watches
+  it from its address at low resolution.
+- **Cache.** Everything is cached in `~/Library/Application Support/Mint/videos/`.
+- **Sub-agents.** Sub-agents with web access have `watch_video` too, so Astra can use a talk or a
+  demo as a source.
+
 ## 8. Long tasks across apps
 
-- **Plans.** For three or more steps Mint calls `plan_task`; the orb shows a
-  progress ring and "Step 2/5", each tool result reminds it what is next
-  (`step_done`), and confetti plays at the end.
+- **Plans.** For three or more steps Mint calls `plan_task`. The orb shows a progress ring and
+  "Step 2/5", each tool result reminds Mint what is next (`step_done`), and confetti plays at the
+  end.
+- **Tasks that last** (`mint/app/tasks.py`). Plans are saved in `tasks.json`, so they survive restarts,
+  unloading and "stop":
+  - **Checked steps.** `step_done` records what Mint checked (what the window, file or page showed),
+    not just "done". A step that didn't happen is marked failed and retried another way.
+  - **Sub-steps.** When a step turns out bigger than planned, it is split with
+    `task action=add_steps under=3`, which gives 3.1, 3.2 and so on. A step whose sub-steps are all
+    finished finishes by itself.
+  - **Replanning.** `task action=replan` replaces the steps not done yet.
+  - **Notes.** `task action=note` keeps facts later steps need, such as a path, a name or a price.
+  - **Stop and continue.** "Stop" pauses the task instead of dropping it. Unfinished tasks are
+    listed in every new session, and "where were we?" or "continue" resumes one: Mint gets the
+    outline, what each finished step found, and the notes.
+- **Automations** (`mint/tools/automations.py`, the `automation` tool). Things Mint does by itself:
+
+  | Say | Trigger → action |
+  |---|---|
+  | "every weekday at 9, brief me on my calendar and unread mail" | daily at 09:00 on weekdays → Mint |
+  | "every Friday at 5, have Astra write a brief on this week's AI news" | daily, Fri → a sub-agent |
+  | "remind me to stretch every hour between 10 and 6" | every 60 min, 10:00-18:00 → a notification |
+  | "when a PDF lands in Downloads, file it in Documents/Invoices" | a new `*.pdf` in the folder → Mint |
+  | "10 minutes before any meeting, open its notes doc" | before calendar events → Mint |
+  | "when I open Figma, turn on Do Not Disturb" | an app opens → Mint |
+  | "tomorrow at 7, read me the news" | once → Mint |
+
+  - **Managing them.** "What automations do I have?" lists them. They can also be paused, resumed,
+    deleted or run now, by name.
+  - **Safety.** An automation runs on its own, so it never sends, posts, buys or deletes. It prepares
+    the draft or the list and tells you it's ready.
+  - **Mint unloaded.** If Mint has unloaded to save memory, it writes the next due time to
+    `automations-next` and Mint Ear starts it then.
+  - **Missed runs.** A daily run missed while the Mac was asleep still runs within 3 hours;
+    otherwise it is skipped and noted.
+  - **Watchers.** While a folder or app watcher is on, Mint stays loaded.
 - **All of it in one go (autopilot).** Ask for several things ("do all your tricks, then smile, then
   tell me the time", "show me all your emotions one by one", "open X, Y and Z") and Mint does them
   back to back, with no "next" from you. It is told to report once at the end. `mint/app/autopilot.py`
@@ -433,11 +497,40 @@ misc.
 | "who's my boss?" | `recall`: Jev checks every block in one request and returns only the relevant ones |
 | "forget my old address" | `forget` |
 | "what do you remember about me?" | `list_memories` |
+| "what was my manager before?" | `recall`: a changed fact keeps what it used to say, and until when |
+| "what did we do yesterday?", "when did I ask about flights?" | `recall_history` (the journal) |
+| "what was that site you found last week?", "what did Astra find on Monday?" | `recall_history` |
+| "remember what I work on" | `set_preference activity_timeline on` (the timeline, below) |
+| "what was I working on yesterday afternoon?", "how long was I in Slack today?" | `recall_history` with the timeline |
 
-Only fixed memories and a group index go into the prompt; everything else is
-recalled on demand, which keeps sessions small. Facts are also extracted
-automatically from conversation summaries. Passwords, keys and card numbers are
-refused.
+Only fixed memories and a group index go into the prompt; everything else is recalled on demand,
+which keeps sessions small. Facts are also extracted automatically from conversation summaries.
+Passwords, keys and card numbers are refused.
+
+- **Without a TypeSafe key.** Filing a fact, spotting the older fact it replaces, and recall ("who's
+  my boss?" finds "my manager is Rahul") all use one Gemini Flash Lite request each. With a key,
+  Jev does them.
+- **Dates.** A fact that says "tomorrow" or "this Friday" is saved with the day it was said.
+- **Tidying, once a day.**
+  - A background pass merges duplicate facts, drops ones whose date has passed ("dinner with Sam
+    tomorrow", saved last week) and files `misc` facts into their group.
+  - Every change goes to `memory/changes.jsonl` with the old text. Fixed memories are never touched.
+- **The journal** (`mint/knowledge/journal.py`). `recall_history` answers questions about the past, with the
+  day and time, from what Mint already keeps:
+  - every turn of every conversation (`history.jsonl`);
+  - the tasks, the automations' runs and the videos watched;
+  - the activity timeline, when it's on.
+
+  It narrows these to the days asked about ("yesterday", "last week", "on Monday", "20 sep", "3 days
+  ago"). Longer spans are narrowed further to the entries that share the question's rarest words.
+- **The activity timeline** (`mint/knowledge/timeline.py`, off until you turn it on).
+  - What it records: while Mint runs, the app in front, its window title and the page address in a
+    browser. Text only: never screenshots or typing.
+  - What it skips: password managers and private windows, and nothing is recorded while the screen
+    is locked or the Mac is idle.
+  - Safari: Safari can't tell its private windows apart, so its pages are never recorded, only that
+    Safari was in front.
+  - Where it's kept: `timeline.jsonl`, on this Mac only, for 14 days. "Delete my timeline" erases it.
 
 **Chat housekeeping:** "summarise and compact the session" (a Flash summary, then
 a fresh session from it), "clear the chat", "start a new session".
@@ -558,6 +651,12 @@ and if anything hangs Mint exits anyway after 15 seconds.
 | `skills/` | skills, by category; `_archive/` for removed ones |
 | `memory/bank.json`, `memory/MEMORY.md` | memories |
 | `history.jsonl`, `summary.md` | conversation log and running summary |
+| `tasks.json` | plans and their steps, open and recently finished |
+| `automations.json`, `automations-next` | automations; when the next one is due (read by Mint Ear) |
+| `timeline.jsonl` | the activity timeline, when it is on (14 days) |
+| `memory/changes.jsonl` | what the daily memory tidy changed, with the old text |
+| `~/Documents/Mint/videos/` | notes and transcripts of videos Mint watched |
+| `~/Library/Application Support/Mint/videos/` | the video cache: keyframes, transcripts, contact sheets |
 | `~/Documents/Mint/` | files Mint makes (PDFs, notes, agent work) |
 | `~/Library/Application Support/Mint/backups/` | previous versions of files Mint overwrote or edited |
 | `~/Library/Logs/Mint/mint.log` | the log (every tool call and result) |
@@ -629,11 +728,11 @@ each description.
 | `switch_to` | what | Bring an already-open Chrome tab or window to the front, by words from its title, e.g. |
 | `export_doc_pdf` | open_after | Export the open Google Doc itself as a PDF, exactly as Docs renders it, and open it. |
 | `plan_task` | goal, steps | Start a multi-step task: state the goal and the ordered steps BEFORE doing any of them. |
-| `step_done` | step, result, failed | Mark a step of the current task finished (or failed), with a one-line result. |
+| `step_done` | step, result, failed | Mark a step of the current task finished (or failed), with a one-line result saying what you checked (what the window, file or page showed). |
 | `create_pdf` | title, content, open_after | Write a nicely formatted PDF and open it. |
 | `run_routine` | name | Run one of the user's saved routines by name. |
 | `desktop` | goal | Drive the screen to do something that the instant tools cannot: click a specific button or link, type into a particular field, choose a menu item, pick a search result. |
-| `set_preference` | setting, value | Change how you (Mint) behave or look, when the user asks: 'don't speak, just chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; 'turn off the mic' -> microphone off (then they can only type); 'make it purple' -> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen effects, word-by-word captions, and whether you listen while you work. |
+| `set_preference` | setting, value | Change how you (Mint) behave or look, when the user asks: 'don't speak, just chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; 'turn off the mic' -> microphone off (then they can only type); 'make it purple' -> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen effects, word-by-word captions, whether you listen while you work, and the activity timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> activity_timeline clear). |
 | `chat_action` | action | Manage the chat window's conversation when the user asks: 'clear the chat' -> clear (window only; memory is kept); 'summarise / compact our conversation' -> summarize (a Flash model summarises it, a summary card appears, and you are restarted with just that summary as context - like compacting); 'start a new session / start fresh / new conversation' -> new_session (saves this conversation to memory, then restarts you with a clean context). |
 | `show_chat` | open | Open or close the chat window (conversation history, typing box, settings). |
 | `stop_listening` |  | Go back to sleep and wait for the wake word. |
@@ -657,12 +756,12 @@ each description.
 | `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - scrolling the window to them if needed - and draws a box, underline, highlight, circle or arrow around them, with an optional short note; your orb flies over beside it. |
 | `mark_area` | x, y, w, h, style, note | Mark a region with no text (an image, a chart, an icon) using 0-1000 coordinates of your latest look screenshot: x, y of its top-left corner, and its width and height. |
 | `clear_marks` |  | Remove the marks you drew on screen. |
-| `move_orb` | direction, amount | Move your orb on screen when the user asks: 'go a little down', 'move up', 'move left a lot', 'you are covering that' (direction away), 'go to the middle'. |
+| `move_orb` | direction, amount, tricks | Move your orb on screen when the user asks: 'go a little down', 'move up', 'move left a lot', 'you are covering that' (direction away), 'go to the middle'. |
 | `screen_share_visibility` | visible | Show or hide Mint in screen sharing, recordings and screenshots. |
 | `express` | emotion, requested | Play an expression on your orb body. |
 | `set_voice` | voice, style | Change your speaking voice and/or style when the user asks ('use a deeper voice', 'sound more cheerful', 'talk slower', 'use Puck'). |
 | `list_agents` |  | List your sub-agents: name, what each is for, its model, and what each is doing now. |
-| `delegate_task` | agent, task, why, thinking, context, folder, attach_window | Hand a substantial task to a sub-agent, which works in the background while you keep talking. |
+| `delegate_task` | agent, task, why, thinking, context, folder, helpers, attach_window | Hand a substantial task to a sub-agent, which works in the background while you keep talking. |
 | `delegate_tasks` | tasks | Start several sub-agent tasks at once (in parallel), e.g. |
 | `agent_status` | agent | What your sub-agents are doing, or have finished, right now. |
 | `message_agent` | agent, message, thinking | Send new or changed instructions to a running sub-agent - when the user changes what they want mid-task ('tell Luna to use pytest', 'make it shorter'). |
@@ -671,6 +770,10 @@ each description.
 | `create_agent` | name, role, instructions, thinking, web, color | Create (or update) a named sub-agent when the user asks for one: its name, what it is for, how it should work, and optionally which model. |
 | `wait_until_done` | app, until_text, timeout_minutes | Wait until an app has FINISHED what it is doing before you use the result: ChatGPT (or any AI chat) still writing its answer, a page loading, something generating. |
 | `preview_site` | path | Show a web page or site that was built on this Mac (e.g. |
+| `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
+| `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
+| `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |
+| `watch_video` | source, question, at, frames, fresh | Watch and understand a video in seconds: a YouTube / X / Vimeo / Loom / TikTok / Instagram link, a video or audio file, or - with no source - the video page in front, the video selected in Finder, or the newest screen recording. |
 | `screenshot` | what, target, size, copy, save, name, format | Take a screenshot and save it as a file (and copy it to the clipboard). |
 | `clipboard` | action, text, path, index | Manage the clipboard. |
 | `read_file` | path, start_line, max_chars | Read a file on this Mac: text, code, Markdown, CSV, JSON, PDF, Word/RTF/Pages-exported docs. |
@@ -688,4 +791,4 @@ each description.
 | `run_applescript` | script | Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting. |
 | `fix_hearing` | heard, meant, forget | Remember a word or name you misheard, so it is heard right from now on. |
 
-88 tools.
+92 tools.

@@ -6,6 +6,10 @@ Hey Mint's own code is GPL-3.0.
 [jev-use](https://github.com/savka777/jev-use) by Savva Bojko, under the MIT licence
 (`launcher/engine/LICENSE`).
 
+**Adapted:** how `mint/tools/video.py` picks a video's caption track (the uploader's own before
+automatic ones, and the language it is spoken in) follows `select_caption` in
+[claude-video](https://github.com/bradautomates/claude-video) (MIT).
+
 It uses, but does not include, the following; each keeps its own license, which you should
 review before redistributing a build:
 
@@ -17,6 +21,8 @@ review before redistributing a build:
 | OpenAI / OpenRouter | Background agents | Your own API key |
 | TypeSafe Jev | Fast choices, and every action of the screen-control engine | Your own API key |
 | PyObjC, NumPy, Pillow, mss, onnxruntime, PyAudio, kaldi-native-fbank | Runtime libraries | `requirements.txt` |
+| yt-dlp (Unlicense) | Fetching web videos and their captions for `watch_video` | `requirements.txt` |
+| parakeet-mlx (Apache-2.0), optional | On-device transcription for `watch_video`, when installed | `pip install parakeet-mlx` |
 | Google Fonts (Bricolage Grotesque, Atkinson Hyperlegible, JetBrains Mono) | The guide's typography | Loaded from fonts.googleapis.com |
 
 `models/hey_mint.json` and `models/hey_mint_data.npz` were trained for this project from

@@ -332,7 +332,29 @@
   const vio = new IntersectionObserver(entries => {
     for (const e of entries) { const v = e.target; if (e.isIntersecting && !reduce) { v.preload = 'auto'; v.play().catch(() => {}); } else v.pause(); }
   }, {threshold: .25});
-  $$('video').filter(v => !v.closest('[data-player]')).forEach(v => { v.muted = true; v.loop = true; v.playsInline = true; vio.observe(v); });
+  // The 1-minute film: poster + play button; plays muted with native controls, back to the poster at the end.
+  const film = $('[data-film]');
+  if (film) {
+    const fv = $('video', film);
+    // Fallback: if this browser can't stream the file (Safari wants byte ranges), play it from YouTube instead.
+    const toYouTube = () => {
+      if ($('iframe', film)) return;
+      fv.pause(); fv.remove();
+      const f = document.createElement('iframe');
+      f.src = 'https://www.youtube-nocookie.com/embed/' + film.dataset.youtube + '?autoplay=1&mute=1&rel=0&playsinline=1';
+      f.title = 'Hey Mint, the 1-minute launch film'; f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; f.allowFullscreen = true;
+      film.appendChild(f);
+    };
+    const go = () => {
+      film.classList.add('playing'); fv.controls = true; fv.muted = true;   // starts muted; the controls unmute it
+      fv.play().catch(e => { if (e.name === 'NotSupportedError') toYouTube(); });   // AbortError = tab hidden, not a failure
+      setTimeout(() => { if (fv.isConnected && document.visibilityState === 'visible' && (fv.error || fv.readyState < 3)) toYouTube(); }, 4000);
+    };
+    fv.addEventListener('error', () => { if (film.classList.contains('playing')) toYouTube(); });
+    $('.film-play', film).addEventListener('click', go);
+    fv.addEventListener('ended', () => { film.classList.remove('playing'); fv.controls = false; fv.load(); });
+  }
+  $$('video').filter(v => !v.closest('[data-player]') && !v.closest('[data-film]')).forEach(v => { v.muted = true; v.loop = true; v.playsInline = true; vio.observe(v); });
 
   // Docs search: sections and every example.
   const input = $('#find'), hits = $('#hits');
