@@ -1238,6 +1238,33 @@ def _recent_hint() -> str:
     return (" Recent meetings: " + "; ".join(m["name"] for m in recent)) if recent else " No meetings were recorded yet."
 
 
+def to_reminders(which: str = "", everyone: bool = False) -> str:
+    """The meeting's action items as Reminders: the user's own ("You"), or everyone's.
+    Each is titled with the task and who owns it; a due day said in the meeting is kept."""
+    from mint.tools import everyday as skills
+    matches = find(which or "last")
+    if not matches:
+        return f"No recorded meeting matches '{which}'." + _recent_hint()
+    m = matches[0]
+    notes = Path(m["folder"]) / "notes.md"
+    if not notes.exists():
+        return f"'{m['title']}' has no notes yet."
+    section = re.search(r"## Action items\s*\n(.*?)(?:\n## |\Z)", notes.read_text(), re.S)
+    items = re.findall(r"^- \[[ x]\] \*\*(.+?)\*\*\s*[-–:]\s*(.+?)\s*(?:\[\d+:\d\d\])?\s*$",
+                       section.group(1) if section else "", re.M)
+    mine = [(who, what) for who, what in items if everyone or who.strip().lower() in ("you", "me")]
+    if not mine:
+        return (f"'{m['title']}' has no action items" + ("" if everyone else " for you") + "."
+                + (f" Others have {len(items)}; ask for everyone's." if items and not everyone else ""))
+    made = []
+    for who, what in mine:
+        title = what if who.strip().lower() in ("you", "me") else f"{who}: {what}"
+        result = skills.create_reminder(f"{title} ({m['title']})")
+        made.append(title if not result.lower().startswith(("could not", "mint is not allowed", "access")) else
+                    f"FAILED {title}: {result}")
+    return f"Added {len(mine)} reminder(s) from '{m['title']}': " + "; ".join(made)
+
+
 def listing(which: str = "") -> str:
     rows = find(which) if which else list_meetings(15)
     if not rows:
@@ -1256,7 +1283,9 @@ themselves (recording also stops by itself a few minutes after the call ends, or
 If notes came out partial or were interrupted, "try the notes again" -> action=retry (which= optional). \
 For questions about a past meeting - "what did we decide in the Acme call?", "my action items from \
 yesterday's standup" - use action=open with which=<how the user described it> and answer from the notes \
-(open with show=true only when the user wants to see them). Never start recording on your own; recording is \
+(open with show=true only when the user wants to see them). "Add my action items to reminders" / "remind me \
+of what I have to do from that meeting" -> action=reminders (which= the meeting, default the last one; \
+everyone=true for all owners). Never start recording on your own; recording is \
 only for calls the user asks to record, and tell them it is recording."""
 
 
@@ -1273,14 +1302,17 @@ def declarations():
                      "Mint's Meetings folder. Actions: start, stop, status, list (past meetings, optionally "
                      "matching `which`), open (the notes of one past meeting, to answer questions about it), "
                      "retry (write the transcript and notes again for `which`, else the latest partial or "
-                     "interrupted meeting)."),
+                     "interrupted meeting), reminders (turn the meeting's action items into Reminders: the "
+                     "user's own, or everyone's with everyone=true)."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=S, enum=["start", "stop", "status", "list", "open", "retry"]),
+            "action": types.Schema(type=S, enum=["start", "stop", "status", "list", "open", "retry", "reminders"]),
             "title": s(S, "start: the meeting's name if the user gave one (otherwise it is guessed from the "
                           "calendar or the call)"),
             "which": s(S, "open/list/retry: which meeting, as the user said it - 'Acme call', 'yesterday's standup', "
                           "'Monday', '2026-09-28', 'last'"),
-            "show": types.Schema(type=types.Type.BOOLEAN, description="open: also open the notes on screen")},
+            "show": types.Schema(type=types.Type.BOOLEAN, description="open: also open the notes on screen"),
+            "everyone": types.Schema(type=types.Type.BOOLEAN, description="reminders: everyone's action items, "
+                                                                           "not only the user's")},
             required=["action"]))]
 
 
@@ -1296,6 +1328,8 @@ def tool(args: dict) -> str:
         return open_meeting(str(args.get("which") or "last"), bool(args.get("show")))
     if action == "retry":
         return retry(str(args.get("which") or ""))
+    if action == "reminders":
+        return to_reminders(str(args.get("which") or ""), bool(args.get("everyone")))
     return status()
 
 

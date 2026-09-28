@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Daily briefing** (`briefing`): calendar, reminders, mail, tasks, weather and headlines in one spoken
+  minute; schedule it with an automation.
+- **Apple Shortcuts by voice** (`shortcut`): Home scenes and lights, Focus modes, music, your own shortcuts.
+- **Screenshot search** (`find_screenshot`): finds screenshots by the text in them, read on the Mac.
+- **Meeting action items to Reminders** (`meeting action=reminders`).
+
 - **Meeting notes, no bot** (`meeting`, menu bar ▸ Record meeting):
   - Recording: `MintRecorder` (new Swift helper, `launcher/recorder`) records the call's audio through
     a Core Audio tap, which needs only the "System Audio Recording" permission, plus your mic, as two

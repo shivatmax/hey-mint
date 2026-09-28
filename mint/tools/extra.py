@@ -481,11 +481,14 @@ def prompt_text() -> str:
     if saved in VOICES:
         config.VOICE = saved
     emotes.ensure_attached()
+    from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import automations
+    from mint.tools import briefing
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
     from mint.tools import meetings
     from mint.tools import rewrite
+    from mint.tools import screenshots
     from mint.tools import sheets
     from mint.app import tasks
     from mint.knowledge import teach
@@ -494,7 +497,7 @@ def prompt_text() -> str:
     from mint.tools import video
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
-             meetings.PROMPT, EXPRESSIVE, SHOWING]
+             meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

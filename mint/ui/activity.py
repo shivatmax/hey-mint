@@ -60,7 +60,7 @@ _KIND = {
     "pointer": "click",
     "watch_video": "look", "automation": "timer", "recall_history": "search",
     "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
-    "teach": "look", "tutor": "look",
+    "teach": "look", "tutor": "look", "briefing": "calendar", "shortcut": "open", "find_screenshot": "search",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -172,6 +172,12 @@ def phrase(name: str, args: dict) -> str:
         case "tidy":
             return {"apply": "Tidying the folder", "undo": "Putting files back", "cancel": "Dropping the plan"}.get(
                 str(a.get("action")), f"Planning a tidy-up · {_quote(a.get('folder') or 'Downloads', 30)}")
+        case "briefing":
+            return "Getting your briefing"
+        case "shortcut":
+            return f"Shortcut · {_quote(a.get('name', ''), 34)}" if a.get("name") else "Checking shortcuts"
+        case "find_screenshot":
+            return f"Finding a screenshot · {_quote(a.get('query', ''), 30)}"
         case "tutor":
             return {"start": f"Showing you how · {_quote(a.get('task', ''), 30)}", "next": "Next step",
                     "back": "Previous step", "stop": "Ending the lesson"}.get(str(a.get("action")), "Lesson")

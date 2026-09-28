@@ -263,7 +263,8 @@ class Emotes:
         orb = self.orb
         for eye, _ in orb.eyes:
             eye.setHidden_(not on)
-        for layer in list(orb.smiles) + list(orb.cheeks) + [orb.mouth]:
+        for layer in list(orb.smiles) + list(orb.cheeks) + [orb.mouth] + (
+                [orb.rest_mouth] if getattr(orb, "rest_mouth", None) is not None else []):
             layer.setHidden_(not on)
         self._face_hidden = not on
 
@@ -279,6 +280,8 @@ class Emotes:
         self._token += 1
         token = self._token
         seconds = EMOTES[key][0]
+        if key not in ("cry", "angry", "sleepy") and hasattr(self.orb, "leaf_wiggle"):
+            self.orb.leaf_wiggle()           # the mint sprout joins in
         orb = self.orb
         d = orb.d
         s = d / 44.0

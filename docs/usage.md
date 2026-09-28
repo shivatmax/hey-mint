@@ -403,6 +403,21 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
   - Moving on: Mint goes to the next step by itself when you click the control or the expected change
     happens (a menu opens, a sheet appears), or when you say "next". Mint never clicks for you.
 
+### Briefings, Shortcuts, screenshots
+
+| Say | What happens |
+|---|---|
+| "good morning, brief me", "what's my day like?" | `briefing`: today's calendar, reminders due, the newest mail (who needs you), unfinished tasks, the weather and a few headlines, read out in about a minute |
+| "every weekday at 8:30, give me my daily briefing" | an automation that runs `briefing` by itself |
+| "run my Good Night shortcut", "turn on the living room lights" | `shortcut`: runs the user's Apple Shortcuts, which is how Mint reaches Home scenes, Focus and music apps (a Mac app outside Mac Catalyst can't use HomeKit directly) |
+| "find the screenshot with the invoice number" | `find_screenshot`: the text in every screenshot is read on the Mac (Vision) and indexed; words first, Gemini only if that finds nothing |
+| "add my action items from that meeting to Reminders" | `meeting action=reminders` (yours; `everyone=true` for all) |
+
+- **Briefing sources:** weather from wttr.in and headlines from Google News RSS (no keys; skipped
+  when offline); everything else comes from the Mac.
+- **Screenshot index:** kept in `~/Library/Application Support/Mint/screenshots.json` (mode 600). A
+  search reads new screenshots for up to 25 s, and the rest carry on in the background.
+
 ### Power tools for everyday work
 
 | Say | What happens |
@@ -865,7 +880,10 @@ each description.
 | `tidy` | action, folder, how | Organise a folder's loose files into sub-folders (by kind, topic, project or month) with a preview: plan (nothing moves), apply (after the user agrees), undo (put the last tidy-up back). |
 | `teach` | action, goal, title, narration | Learn a task by watching the user do it once, then save it as a skill Mint can follow later. |
 | `tutor` | action, task, app | Teach the user a task on screen instead of doing it: Mint plans the steps, points at each control with an arrow and a note, waits until the user has done it, then shows the next. |
-| `meeting` | action, title, which, show | Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint's Meetings folder. |
+| `meeting` | action, title, which, show, everyone | Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint's Meetings folder. |
+| `briefing` | focus, news_topic | The user's day in one spoken summary: today's calendar, reminders due, the newest mail (what needs them), unfinished tasks, today's meetings, the weather and a few headlines. |
+| `shortcut` | action, name, input | Run one of the user's Apple Shortcuts by name (Home scenes and lights, Focus, music, their own automations), optionally with text input, and get its output; or list them. |
+| `find_screenshot` | query, open | Find screenshots by the text or things in them (an invoice number, an error, a booking, a chat), wherever they are saved. |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |
@@ -887,4 +905,4 @@ each description.
 | `run_applescript` | script | Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting. |
 | `fix_hearing` | heard, meant, forget | Remember a word or name you misheard, so it is heard right from now on. |
 
-99 tools.
+102 tools.
