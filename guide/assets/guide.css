@@ -318,6 +318,60 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
 .rise{opacity:0;transform:translateY(18px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
 .rise.in{opacity:1;transform:none}
 
+/* ---------- playground: the big Mint and the critters ---------- */
+.play{padding-top:24px}
+.play-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px 40px;flex-wrap:wrap;margin-bottom:26px}
+.play-head .intro{margin-bottom:0}
+.play-actions{display:flex;flex-wrap:wrap;gap:8px;max-width:470px;justify-content:flex-end}
+.chip{all:unset;box-sizing:border-box;cursor:pointer;font:600 13.5px var(--mono);padding:8px 14px;border-radius:999px;background:var(--paper);
+  border:1px solid var(--line);transition:transform .2s var(--spring),border-color .2s,background .2s}
+.chip:hover{transform:translateY(-2px);border-color:var(--mint)}
+.chip.go{background:var(--ink);color:#fff;border-color:transparent}
+.chip.go:hover{background:#26324A}
+.playground{position:relative;display:flex;align-items:flex-end;justify-content:center;gap:1cqw;min-height:260px;container-type:inline-size;
+  padding:64px clamp(16px,3vw,40px) 58px;border-radius:32px;overflow:hidden;
+  background:radial-gradient(420px 220px at 82% 30%,rgba(255,255,255,.55),transparent 70%),linear-gradient(135deg,#DBEBF2,#E8E3FA 55%,#F7E6ED);
+  box-shadow:0 0 0 1px rgba(22,32,46,.05),0 40px 80px -50px rgba(40,50,90,.5)}
+.playground::after{content:"";position:absolute;left:6%;right:6%;bottom:52px;height:14px;border-radius:50%;background:rgba(40,50,90,.08);filter:blur(6px);z-index:0}
+.playground > *{position:relative;z-index:1}
+.crew-row{display:flex;align-items:flex-end;gap:0}
+.critter{all:unset;box-sizing:border-box;cursor:pointer;position:relative;display:block;width:12.4cqw;margin:0 -2.4cqw;transform-origin:50% 100%;-webkit-tap-highlight-color:transparent}
+.critter-svg{display:block;width:100%;height:auto;overflow:visible}
+.critter-svg g{transform-box:view-box}
+.critter-svg .c-body{animation:cbob 3s ease-in-out infinite}
+@keyframes cbob{50%{translate:0 -.9px}}
+.critter-svg .c-eyes{transition:translate .12s linear}
+.critter-svg .c-happy,.critter-svg .c-dizzy{display:none}
+.critter-svg.happy .c-happy,.critter-svg.dizzy .c-dizzy{display:inline}
+.critter-svg.happy .c-eyes,.critter-svg.dizzy .c-eyes,.critter-svg.beaky .c-mouth{display:none}
+.c-tag{position:absolute;left:50%;top:100%;transform:translate(-50%,4px);white-space:nowrap;font:12.5px/1.2 var(--body);background:var(--caption);color:#F4F4F8;
+  padding:5px 10px;border-radius:10px;opacity:0;transition:opacity .2s,transform .25s var(--spring);pointer-events:none;z-index:3}
+.c-tag b{color:var(--glow);font-weight:700}
+.critter:hover .c-tag,.critter:focus-visible .c-tag{opacity:1;transform:translate(-50%,12px)}
+.c-say{position:absolute;left:50%;bottom:100%;translate:-50% -6px;white-space:nowrap;font:700 14.5px/1 var(--body);background:#fff;color:var(--ink);
+  padding:7px 11px;border-radius:13px;box-shadow:0 10px 20px -12px rgba(40,50,90,.55);pointer-events:none;z-index:4;animation:cpop .3s var(--spring)}
+.c-say::after{content:"";position:absolute;left:50%;top:100%;translate:-50% -1px;border:6px solid transparent;border-top-color:#fff}
+@keyframes cpop{from{scale:.3;opacity:0}}
+.c-float{position:absolute;bottom:78%;font:700 17px/1 var(--body);pointer-events:none;animation:float 1.4s ease-out forwards;z-index:4}
+.c-flame{position:absolute;left:78%;top:38%;font-size:clamp(16px,2vw,24px);pointer-events:none;animation:flame .75s ease-out forwards;z-index:4}
+@keyframes flame{from{transform:translateX(0) scale(.3);opacity:0}40%{opacity:1;transform:translateX(16px) scale(1.2)}to{opacity:0;transform:translateX(42px) scale(.6)}}
+.toybox{all:unset;box-sizing:border-box;cursor:pointer;display:block;width:7.4cqw;margin:0 1.8cqw 0 1cqw}
+.toybox svg{display:block;width:100%;overflow:visible}
+.toybox .lid{transform-box:view-box;transform-origin:30px 25px}
+.toybox:hover svg{animation:boxwiggle .5s ease-in-out}
+@keyframes boxwiggle{25%{rotate:-5deg}75%{rotate:5deg}}
+.big-orb{--s:16.5cqw;margin-bottom:2px}
+.critter:focus-visible,.toybox:focus-visible,.chip:focus-visible,.big-orb:focus-visible{outline:3px solid var(--lilac);outline-offset:4px;border-radius:14px}
+@media (max-width:760px){
+  .playground{flex-wrap:wrap;padding:56px 14px 40px;row-gap:34px}
+  .crew-row{width:100%;flex-wrap:wrap;justify-content:center;row-gap:30px}
+  .critter{width:27%;margin:0 -1.5%}
+  .toybox{width:16cqw}
+  .big-orb{--s:34cqw}
+  .play-actions{justify-content:flex-start}
+  .playground::after{display:none}
+}
+
 @media (max-width:980px){
   .hero-in,.agents-grid,.get{grid-template-columns:minmax(0,1fr)}
   .hero{padding-top:36px}

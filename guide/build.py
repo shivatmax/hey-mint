@@ -114,7 +114,7 @@ TAIL = """<footer><span>Hey Mint · open-source voice assistant for macOS · GPL
 <a href="docs">Docs</a><a href="{repo}">GitHub</a><a href="{repo}/releases">Releases</a><a href="{repo}/blob/main/docs/development.md">Contribute</a></footer>
 <div class="bubble" id="bubble" role="status" aria-live="polite"></div>
 <div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it.">{orb}</button></div></div>
-{extra}<script src="assets/guide.js"></script>
+{extra}<script src="assets/guide.js"></script><script src="assets/critters.js"></script>
 </body></html>"""
 
 
