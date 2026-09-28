@@ -12,11 +12,27 @@
       <div class="meta">Apple silicon · macOS 14.2+ · needs a free Gemini key</div>
     </div>
 
-    <div class="player" data-player>
-      <div class="screen">
-        {{scene talk}}{{scene mark-box}}{{scene agent}}{{scene show}}
-        <span class="tag" data-for="agent">Real agent run · middle {{agent_speed}}× faster</span>
+    <div class="hero-stage">
+      <div class="playground" data-playground>
+        <button class="orb big-orb" type="button" aria-label="Mint. Poke it.">{{orb}}</button>
       </div>
+      <div class="play-actions">
+        <button class="chip" data-big-emote="love">♥ love</button><button class="chip" data-big-emote="laugh">laugh</button>
+        <button class="chip" data-big-emote="cool">cool</button><button class="chip" data-big-emote="surprised">surprised</button>
+        <button class="chip" data-big-emote="sleepy">sleepy</button><button class="chip" data-big-emote="dance">dance</button>
+        <button class="chip go" data-show>▶ put on a show</button>
+      </div>
+      <p class="play-hint">Poke Mint. Hover and click the critters, or the toy box.</p>
+    </div>
+  </div>
+</header>
+
+<section class="band watch" id="watch">
+  <div class="band-in watch-grid" data-player>
+    <div>
+      <div class="eyebrow rise">Watch it work</div>
+      <h2 class="rise">Real Mint, doing the real thing.</h2>
+      <p class="intro rise">Pick something to say. Each clip is Mint doing exactly that on a Mac.</p>
       <ul class="phrases" role="tablist" aria-label="Things you can say">
         <li><button role="tab" data-v="talk"><small>Open an app</small>open Slack and go to the on-call channel</button></li>
         <li><button role="tab" data-v="mark-box"><small>Find it on screen</small>where's the deadline?</button></li>
@@ -24,26 +40,11 @@
         <li><button role="tab" data-v="show"><small>Just for fun</small>put on a show</button></li>
       </ul>
     </div>
-  </div>
-</header>
-
-<section class="band play" id="play">
-  <div class="band-in">
-    <div class="play-head">
-      <div>
-        <div class="eyebrow rise">Say hi</div>
-        <h2 class="rise">Poke Mint. Meet the crew.</h2>
-        <p class="intro rise">It's all live. Eyes follow your pointer, and every critter has its own move. Click them, click the toy box, or put on a show.</p>
+    <div class="player">
+      <div class="screen">
+        {{scene talk}}{{scene mark-box}}{{scene agent}}{{scene show}}
+        <span class="tag" data-for="agent">Real agent run · middle {{agent_speed}}× faster</span>
       </div>
-      <div class="play-actions rise">
-        <button class="chip" data-big-emote="love">♥ love</button><button class="chip" data-big-emote="laugh">laugh</button>
-        <button class="chip" data-big-emote="cool">cool</button><button class="chip" data-big-emote="surprised">surprised</button>
-        <button class="chip" data-big-emote="cry">cry</button><button class="chip" data-big-emote="sleepy">sleepy</button>
-        <button class="chip" data-big-emote="dance">dance</button><button class="chip go" data-show>▶ put on a show</button>
-      </div>
-    </div>
-    <div class="playground rise" data-playground>
-      <button class="orb big-orb" type="button" aria-label="Mint. Poke it.">{{orb}}</button>
     </div>
   </div>
 </section>
