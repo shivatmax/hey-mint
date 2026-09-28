@@ -357,6 +357,92 @@ password, key or card number, is never kept, and Mint never pastes into a passwo
 | "start work" (a routine in `custom.json`) | `run_routine` |
 | "run `ls` in my projects folder" | `run_shell`, only when started with `MINT_ALLOW_SHELL=1` |
 
+### Meeting notes (no bot joins your call)
+
+Click **Record meeting** in the menu bar, or say "take notes of this meeting". Mint records silently
+until you click **Stop recording**, or say "stop recording" once the call is over.
+
+- **Works with:** Google Meet in any browser, Zoom, Teams, Slack huddles, FaceTime, Webex.
+- **Two tracks:** the call's audio (a Core Audio tap: macOS's "System Audio Recording Only" permission,
+  no screen recording, no virtual driver) and your microphone. The mic is "You"; the call is everyone
+  else, with names filled in when the conversation makes them clear.
+- **At the end:** Gemini writes a timestamped transcript and the notes: summary, decisions, action
+  items (who, by when), open questions and key quotes. Times are aligned on the Mac, not guessed.
+- **Where:** `Meetings/<date time> <title>/` in the storage folder, with `transcript.md`, `notes.md` and
+  the recording (compressed to .m4a; Settings ▸ Storage & Privacy can drop it). The title comes
+  from the calendar event, the Meet/Teams/Zoom tab, or the call app.
+- **When a call starts:** Mint offers to take notes (a notification and the menu), because it has lent
+  the microphone to the call. Turn the offer off in Settings.
+- **Afterwards:** "what did we decide in the Acme call?", "open yesterday's meeting notes", "list my
+  meetings" → `meeting action=open/list`.
+
+### Teach by showing, and the tutor
+
+| Say | What happens |
+|---|---|
+| "watch me do this once", "let me show you how" | `teach start`: Mint watches your clicks, typing and app switches (say what you're doing as you go) |
+| "done", "that's how" | `teach stop`: the recording becomes a skill with general steps and `<parameters>`, saved to Skills |
+| "show me how to export a PDF in Preview", "walk me through adding a filter in Sheets" | `tutor start`: Mint points at each control and waits for you to do it |
+| "next", "go back", "stop the lesson" | `tutor next / back / stop` |
+
+- **Teach** (`mint/knowledge/teach.py`).
+  - How it listens: a listen-only event tap (the Input Monitoring permission) records each click
+    with the name of the control under it (Accessibility), typing per field, shortcuts, menu choices,
+    app switches and pages visited, plus a few small screenshots kept in memory.
+  - Privacy: nothing typed into a password field (or while macOS secure input is on) is recorded,
+    and anything that looks like a key or card number is blanked.
+  - How the skill is written: Gemini keeps the steps that matter and names controls the way Mint's
+    tools target them. Things that change each time become parameters, and steps that send or delete
+    get "confirm first".
+  - Limits: it stops after 10 minutes.
+- **Tutor** (`mint/ui/tutor.py`).
+  - The plan: a saved skill for that app, else Gemini with the app's real menus and visible
+    controls.
+  - Pointing: each step is shown with an arrow or box and a short instruction (menus through
+    Accessibility, then on-screen text, then vision), and Mint says it.
+  - Moving on: Mint goes to the next step by itself when you click the control or the expected change
+    happens (a menu opens, a sheet appears), or when you say "next". Mint never clicks for you.
+
+### Power tools for everyday work
+
+| Say | What happens |
+|---|---|
+| "make this more formal", "fix the grammar", "turn this into bullets", "translate this to Hindi" | `edit_selection` rewrites the selected text in any app and replaces it in place; "undo that" or ⌘Z brings it back |
+| "put all the invoices in Downloads into a spreadsheet" | `make_spreadsheet` reads every file, including scans and photos of receipts, and saves an .xlsx with one row per document |
+| "clean up my Downloads", "sort my Desktop by project" | `tidy` plans first (nothing moves), asks, then moves; "undo that" puts everything back |
+| "volume 30", "next song", "pause", "mute", "lock the screen" | runs the moment you stop talking (`mint/app/instant.py`) |
+| "save everything in my Dropbox from now on" | `set_preference storage_folder` |
+
+- **Editing selected text** (`mint/tools/rewrite.py`).
+  - Gemini Flash Lite is told which app and window the text is in, so an email stays an email and a
+    chat message stays short.
+  - Names, numbers and links are kept exactly.
+  - A selection that looks like a password, key or card number is refused.
+- **Spreadsheets** (`mint/tools/sheets.py`).
+  - Columns: when you don't name them, they are chosen from the first files (invoices get Vendor,
+    Invoice Number, Date, Due Date, Total, Currency).
+  - Values: numbers stay numbers and dates stay dates, and a source-file column is added.
+  - Big folders: more than six files are processed in the background, and a message says when the
+    sheet is ready.
+- **Tidying** (`mint/tools/tidy.py`).
+  - Groups: by kind (Documents, Images, Screenshots, Installers, Archives…) or by topic when it's
+    clear (Invoices & Receipts, Statements, Tickets & Travel), or however you ask.
+  - Renames: only names that say nothing ("document (3).pdf") are changed, from the file's own text.
+  - Duplicates: exact duplicates go to a Duplicates folder. Nothing is ever deleted and nothing is
+    overwritten.
+  - Undo: every move is journaled in `~/Library/Application Support/Mint/tidy/`.
+- **Instant commands.**
+  - How they work: the live transcript is checked against a short, fixed list of whole sentences.
+    If one matches and nothing more is said for 0.6 s, it runs locally.
+  - No doubles: when the model's own call for the same tool arrives, it is answered "already done".
+  - Not covered: longer requests ("pause the video in Chrome", "volume 30 and open Slack") go the
+    usual way.
+  - Off switch: "turn off instant commands".
+- **Mint storage** (Settings ▸ Storage & Privacy, or by voice).
+  - Where: one folder, `~/Documents/Mint` unless you choose another.
+  - Sub-folders: Documents, Meetings, Videos, Agents and Spreadsheets.
+  - Existing files: files saved before a change stay where they are.
+
 ### Watching videos
 
 `watch_video` understands a video in seconds without playing it. It works on a YouTube, X, Vimeo, Loom,
@@ -498,6 +584,7 @@ misc.
 | "forget my old address" | `forget` |
 | "what do you remember about me?" | `list_memories` |
 | "what was my manager before?" | `recall`: a changed fact keeps what it used to say, and until when |
+| "why did you say that?", "which memory did you use?" | `memory_used`: the facts looked up in this conversation, and the fixed ones; fix or forget a wrong one |
 | "what did we do yesterday?", "when did I ask about flights?" | `recall_history` (the journal) |
 | "what was that site you found last week?", "what did Astra find on Monday?" | `recall_history` |
 | "remember what I work on" | `set_preference activity_timeline on` (the timeline, below) |
@@ -654,6 +741,8 @@ and if anything hangs Mint exits anyway after 15 seconds.
 | `tasks.json` | plans and their steps, open and recently finished |
 | `automations.json`, `automations-next` | automations; when the next one is due (read by Mint Ear) |
 | `timeline.jsonl` | the activity timeline, when it is on (14 days) |
+| `Meetings/`, `Spreadsheets/`, `Documents/`, `Videos/`, `Agents/` in the storage folder | what Mint makes (Settings ▸ Storage & Privacy; default `~/Documents/Mint`) |
+| `~/Library/Application Support/Mint/tidy/` | journals of folder tidy-ups, for undo |
 | `memory/changes.jsonl` | what the daily memory tidy changed, with the old text |
 | `~/Documents/Mint/videos/` | notes and transcripts of videos Mint watched |
 | `~/Library/Application Support/Mint/videos/` | the video cache: keyframes, transcripts, contact sheets |
@@ -709,7 +798,7 @@ each description.
 | `list_windows` |  | List the visible windows as app name and title. |
 | `quit_app` | name | Ask an application to quit. |
 | `type_text` | text, press_return, field | Instantly insert text at the cursor in whatever field is focused, in any app. |
-| `get_selected_text` |  | Read the text the user has selected in the front app. |
+| `get_selected_text` |  | Read the text the user has selected in the front app, to answer about it ('summarise this', 'what does this mean'). |
 | `get_status` |  | Current local time and date, battery level, and volume. |
 | `set_timer` | minutes, label | Start a timer. |
 | `notify` | title, message | Show a macOS notification. |
@@ -732,7 +821,7 @@ each description.
 | `create_pdf` | title, content, open_after | Write a nicely formatted PDF and open it. |
 | `run_routine` | name | Run one of the user's saved routines by name. |
 | `desktop` | goal | Drive the screen to do something that the instant tools cannot: click a specific button or link, type into a particular field, choose a menu item, pick a search result. |
-| `set_preference` | setting, value | Change how you (Mint) behave or look, when the user asks: 'don't speak, just chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; 'turn off the mic' -> microphone off (then they can only type); 'make it purple' -> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen effects, word-by-word captions, whether you listen while you work, and the activity timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> activity_timeline clear). |
+| `set_preference` | setting, value | Change how you (Mint) behave or look, when the user asks: 'don't speak, just chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; 'turn off the mic' -> microphone off (then they can only type); 'make it purple' -> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen effects, word-by-word captions, whether you listen while you work, and the activity timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> activity_timeline clear), where Mint saves what it makes ('save everything in my Dropbox' -> storage_folder = that folder's path, e.g. |
 | `chat_action` | action | Manage the chat window's conversation when the user asks: 'clear the chat' -> clear (window only; memory is kept); 'summarise / compact our conversation' -> summarize (a Flash model summarises it, a summary card appears, and you are restarted with just that summary as context - like compacting); 'start a new session / start fresh / new conversation' -> new_session (saves this conversation to memory, then restarts you with a clean context). |
 | `show_chat` | open | Open or close the chat window (conversation history, typing box, settings). |
 | `stop_listening` |  | Go back to sleep and wait for the wake word. |
@@ -752,6 +841,7 @@ each description.
 | `update_memory` | what, new_fact, fixed, group | Change a saved fact (the user says it changed or was wrong), or make it fixed / not fixed. |
 | `forget` | what | Forget a saved fact the user no longer wants kept. |
 | `list_memories` | group | List what is remembered, optionally one group. |
+| `memory_used` | minutes | Which remembered facts you were given in this conversation (and the fixed ones) - for 'why did you say that?', 'which memory did you use?', 'how do you know that?'. |
 | `show_skills_and_memory` | tab | Open the Skills & Memory window on screen, where the user can see and edit every skill and every remembered fact. |
 | `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - scrolling the window to them if needed - and draws a box, underline, highlight, circle or arrow around them, with an optional short note; your orb flies over beside it. |
 | `mark_area` | x, y, w, h, style, note | Mark a region with no text (an image, a chart, an icon) using 0-1000 coordinates of your latest look screenshot: x, y of its top-left corner, and its width and height. |
@@ -770,6 +860,12 @@ each description.
 | `create_agent` | name, role, instructions, thinking, web, color | Create (or update) a named sub-agent when the user asks for one: its name, what it is for, how it should work, and optionally which model. |
 | `wait_until_done` | app, until_text, timeout_minutes | Wait until an app has FINISHED what it is doing before you use the result: ChatGPT (or any AI chat) still writing its answer, a page loading, something generating. |
 | `preview_site` | path | Show a web page or site that was built on this Mac (e.g. |
+| `edit_selection` | instruction, replace, action | Rewrite the text the user has selected, in any app, and replace it in place: more formal, friendlier, shorter, fix grammar, bullet points, translate, expand, as a reply... |
+| `make_spreadsheet` | source, pattern, what, columns, name | Read many documents (PDFs, Word, text, scans, photos of receipts) and put the same fields from each into one .xlsx spreadsheet, one row per document (or per item in a statement), then open it. |
+| `tidy` | action, folder, how | Organise a folder's loose files into sub-folders (by kind, topic, project or month) with a preview: plan (nothing moves), apply (after the user agrees), undo (put the last tidy-up back). |
+| `teach` | action, goal, title, narration | Learn a task by watching the user do it once, then save it as a skill Mint can follow later. |
+| `tutor` | action, task, app | Teach the user a task on screen instead of doing it: Mint plans the steps, points at each control with an arrow and a note, waits until the user has done it, then shows the next. |
+| `meeting` | action, title, which, show | Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint's Meetings folder. |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |
@@ -791,4 +887,4 @@ each description.
 | `run_applescript` | script | Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting. |
 | `fix_hearing` | heard, meant, forget | Remember a word or name you misheard, so it is heard right from now on. |
 
-92 tools.
+99 tools.

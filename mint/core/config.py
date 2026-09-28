@@ -52,6 +52,24 @@ CHUNK_SIZE = 1024
 # --- Paths -------------------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Where everything Mint makes for the user goes (Settings > Storage), one folder per kind.
+STORAGE_KINDS = ("Documents", "Meetings", "Videos", "Agents", "Spreadsheets")
+
+
+def storage(kind: str = "") -> Path:
+    """The Mint storage folder (default ~/Documents/Mint), or one of its sub-folders
+    (`kind` from STORAGE_KINDS), created on first use."""
+    from mint.core import prefs
+    chosen = str(prefs.get("storage_folder") or "").strip()
+    root = Path(os.path.expanduser(chosen)) if chosen else Path.home() / "Documents" / "Mint"
+    folder = root / kind if kind else root
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        folder = Path.home() / "Documents" / "Mint" / kind
+        folder.mkdir(parents=True, exist_ok=True)
+    return folder
 JEV_SUBSYSTEM = "local.jev-use"
 # The screen-control engine listens for goals on this distributed notification.
 JEV_COMMAND_NOTIFICATION = "local.jev-use.command"
@@ -262,8 +280,12 @@ language (Spanish, Portuguese...), it is their Hindi or Hinglish misheard: \
 understand it as that, or ask them to say it again. Never tell them you only \
 understand English and Hindi. Reply in English; switch to Hindi or Hinglish \
 only when the user's own words were Hindi - never because of their accent. \
-When they say bye or good night, answer with a word or two ("Bye!") and call \
-stop_listening. Only \
+When they say bye or good night, answer with two words at most - "Bye, Boss." \
+or "Okay." - call stop_listening, and say nothing after it. A sound or an \
+acknowledgement on its own ("hmm", "okay", "yeah", "thanks", "acha") needs no \
+reply unless you just asked them something. Never close with offers like "Is \
+there anything else I can help with?", "Let me know if...", "I'll keep you \
+posted" or "I've stopped listening" - finish the answer and stop. Only \
 their voice reaches you (a voice lock filters everyone else), but they may still \
 talk to other people; if something they say is plainly not for you, stay quiet. \
 If you are unsure what they said, ask once instead of guessing. When they \
@@ -305,7 +327,7 @@ Hands-free mode: you are woken by a wake word and go back to sleep after a quiet
 spell, so the user may speak to you at any moment without warning. Keep the \
 first reply especially short - a word of acknowledgement is often enough before \
 you act. If the user says they are finished ("that's all", "go to sleep", \
-"thanks, that's it"), say a brief goodbye and call stop_listening. If you hear \
+"thanks, that's it"), say "Okay." or "Bye, Boss." and call stop_listening. If you hear \
 speech that is clearly not addressed to you - a conversation with someone else, \
 a video playing - stay quiet and do nothing rather than guessing.
 """.strip()

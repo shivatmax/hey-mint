@@ -35,7 +35,7 @@ from mint.core import config
 log = logging.getLogger("mint.agents")
 
 PATH = config.PROJECT_ROOT / "agents.json"
-WORK_ROOT = Path.home() / "Documents" / "Mint" / "agents"
+WORK_ROOT = Path.home() / "Documents" / "Mint" / "agents"      # default; new agents use config.storage("Agents")
 
 # The user's choice: every sub-agent runs on OpenAI's GPT-6 Luna through
 # OpenRouter, nothing else. Its thinking is set per task (none/low/medium).
@@ -140,7 +140,7 @@ def _normal(agent: dict) -> dict:
     agent.setdefault("instructions", f"You are {agent['name']}, a helpful agent.")
     agent.setdefault("max_steps", 24)
     slug = re.sub(r"[^a-z0-9]+", "-", agent["name"].lower()).strip("-") or "agent"
-    agent.setdefault("workspace", str(WORK_ROOT / slug))
+    agent.setdefault("workspace", str(config.storage("Agents") / slug))
     return agent
 
 

@@ -18,6 +18,9 @@ changes apply at once, shortcuts included.
       "shortcuts": {"toggle": "cmd+j", "close": ""},
       "listen_while_working": true, still hears you mid-task
       "timeline": false,            the activity timeline (timeline.py): app, window title, page address
+      "storage_folder": "",         where Mint saves what it makes; "" = ~/Documents/Mint (config.storage)
+      "meeting_offer": true,        when a call starts, offer to take notes (meetings.py)
+      "meeting_keep_audio": true,   keep meeting recordings (compressed) next to their notes
       "stop_words": ["stop", "cancel", ...]   said alone, these stop everything
       "voice_lock": true,           only your voice reaches Gemini (after Train my voice)
       "addressee_check": true,      ignore follow-ups said to someone else
@@ -70,6 +73,12 @@ DEFAULTS: dict = {
     "listen_while_working": True,
     # The activity timeline (timeline.py) - off until the user turns it on.
     "timeline": False,
+    # Where Mint saves what it makes ("" = ~/Documents/Mint), and meeting notes.
+    "storage_folder": "",
+    "meeting_offer": True,
+    "meeting_keep_audio": True,
+    # Simple commands ("volume 30", "next song") run the moment you stop talking (instant.py).
+    "instant_commands": True,
     # Voice lock: only the enrolled voice reaches Gemini (needs "Train my voice").
     "voice_lock": True,
     # Follow-ups are checked by Jev: said to Mint, or to someone else?

@@ -292,6 +292,11 @@ def _when_ts(text: str) -> float | None:
     return None
 
 
+_WORK = re.compile(r"(?:please )?(?:find|search|research|look (?:up|for|into)|check|read|summari[sz]e|brief|get|fetch|"
+                   r"tell me (?:about|what|how|if|whether)|give me (?:a|the) (?:summary|brief|update|list)|open|move|"
+                   r"file|organi[sz]e|clean|tidy|make|create|write|draft|download|watch|compare|collect|list)\b", re.I)
+
+
 def create(args: dict) -> str:
     kind = str(args.get("trigger") or "").strip().lower()
     if kind not in TRIGGERS:
@@ -305,6 +310,13 @@ def create(args: dict) -> str:
     how = str(args.get("how") or "mint").strip().lower()
     if how not in HOW:
         how = "mint"
+    if how == "notify":
+        # A notification only shows words. "Find the AI news and tell me" is work: Mint does it.
+        if _WORK.match(text):
+            how = "mint"
+        else:
+            text = re.sub(r"^(?:show|send|give)(?: me)? (?:a )?(?:notification|reminder|alert)(?: saying| that)?:?\s*",
+                          "", text, flags=re.I).strip(" '\"") or text
     trigger: dict = {"type": kind}
     if kind == "at":
         trigger["when_ts"] = _when_ts(args.get("time") or args.get("when") or "")
@@ -611,7 +623,9 @@ def keep_loaded() -> bool:
 PROMPT = """Automations: when the user wants something done by itself later or repeatedly - "every morning \
 at 9…", "every Friday…", "remind me every hour…", "when a file lands in Downloads…", "before each meeting…", \
 "tomorrow at 7 wake me with the news" - make it with automation action=create, instead of a timer or a \
-reminder (a reminder is only for things the USER must do). Say back when it runs and what it does. When an \
+reminder (a reminder is only for things the USER must do). how=notify ONLY shows a short message ("time to \
+stretch"); anything that needs work (find, check, read, summarise, research) is how=mint (or agent for long \
+research). Say back when it runs and what it does. When an \
 automation runs you get a message starting "(Automation '…'": do it quietly and briefly report; never send, \
 post, buy or delete inside an automation - prepare it and tell the user."""
 

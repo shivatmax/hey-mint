@@ -17,6 +17,8 @@ jobs:
           python -m pip install -r requirements.txt pytest ruff
       - name: Build the screen-control engine (Swift)
         run: cd launcher/engine && swift build -c release
+      - name: Build the meeting recorder
+        run: swiftc -O launcher/recorder/*.swift -o /tmp/MintRecorder -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/recorder/Info.plist
       - name: Lint (syntax errors, undefined names)
         run: ruff check mint tests
       - name: Offline checks

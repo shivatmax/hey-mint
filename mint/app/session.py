@@ -239,6 +239,13 @@ class Mint:
         self._ever_awake = False
         self._pending_wake = 0.0        # when an unsure "Hey Mint" is being checked
         self._goodbye_done = False
+        # Not every sound needs an answer ("hmm", "okay"), and a goodbye gets one
+        # short line, not three (see _filler_turn and _hush).
+        self._filler_checked = False
+        self._filler_hit = False
+        self._typed_turn = False
+        self._hush = False                  # after a goodbye: nothing more is said until woken
+        self._farewell_bytes = -1           # >= 0 while the goodbye line plays: bytes let through
 
         if hands_free:
             from mint.voice.wake import MintWake, PreRoll, WakeWord
@@ -323,6 +330,8 @@ class Mint:
         self.asleep = False
         self._last_voice = self._last_active = time.monotonic()
         self._ever_awake = True
+        self._hush = False
+        self._farewell_bytes = -1
         self._woke_at = time.monotonic() if reason.startswith("wake word") else 0.0
         self._expect_command = True
         self._suppress_turn = False
@@ -423,6 +432,7 @@ class Mint:
                     self._gate.cancel()
                 await asyncio.to_thread(self.audio.suspend, name)
                 self._print(f"[{name} is using the microphone - Mint steps aside until it's done]")
+                self._offer_meeting_notes(name)
                 self._state("paused", f"{name} is using the mic")
                 free_since = 0.0
             elif not callers and self._mic_lent_to:
@@ -430,6 +440,23 @@ class Mint:
                 if time.monotonic() - free_since >= 3.0:
                     self._take_mic_back()
                     free_since = 0.0
+
+    def _offer_meeting_notes(self, app: str) -> None:
+        """A call started: offer to take notes (Settings > Storage & Privacy), once per call.
+        Mint has let go of the mic for the call, so the offer is a notification and the menu
+        bar's "Record meeting" - one click."""
+        from mint.tools import meetings
+        from mint.core import prefs
+        from mint.tools import everyday as skills
+        if not prefs.get("meeting_offer") or meetings.is_recording():
+            return
+        if time.monotonic() - getattr(self, "_meeting_offered", -1e9) < 1800:
+            return
+        self._meeting_offered = time.monotonic()
+        skills.notify(f"{prefs.name()} can take notes of this call",
+                      f"{app} is on a call. Click {prefs.name()} in the menu bar ▸ Record meeting - "
+                      "you get a transcript and notes at the end.")
+        self.ui.action("On a call? Menu bar ▸ Record meeting")
 
     def _take_mic_back(self) -> None:
         name, self._mic_lent_to = self._mic_lent_to, ""
@@ -656,6 +683,8 @@ class Mint:
             return
         self._last_active = time.monotonic()
         self._ever_awake = True
+        self._hush = False
+        self._farewell_bytes = -1
         if self.session is None:
             # Reconnecting (a voice change, a network drop): in testing a
             # request typed then was silently lost. Keep it for the new session.
@@ -684,6 +713,8 @@ class Mint:
         self._turn_open = True
         self._suppress_turn = False
         self._addr_candidate = False
+        self._typed_turn = True               # typed on purpose: always answered
+        self._filler_checked = True
         self._print(f"[typed: {text[:120]}]")
         # Close any open stretch of microphone audio first: in testing, a typed
         # request sent while the mic was streaming room noise went unanswered -
@@ -776,8 +807,19 @@ class Mint:
             # is when to ask whether they were meant for Mint at all.
             self._start_addressee_check()
 
-        if response.data and self._suppress_turn:
-            pass                         # not for Mint: its answer is not played
+        if response.data and not self._suppress_turn and not self._hush and self._filler_turn():
+            self._suppress_turn = True
+            self._filler_hit = True
+            self._flush_playback()
+            self._print(f"(no reply needed: {' '.join(self._heard.split())})")
+        if response.data and self._farewell_bytes >= 0:
+            # The goodbye: one short line (~2 s of speech), then silence.
+            self._farewell_bytes += len(response.data)
+            if self._farewell_bytes > 24000 * 2 * 2:
+                self._hush = True
+                self._farewell_bytes = -1
+        if response.data and (self._suppress_turn or self._hush):
+            pass                         # not for Mint, filler, or after goodbye: not played
         elif response.data:
             self._last_voice = time.monotonic()
             if not self.voice_on:
@@ -826,6 +868,7 @@ class Mint:
                     pass
                 if not _foreign(self._heard) and chunk.strip():
                     self.ui.user_said(chunk)
+                    self._instant_poke()
                 self._last_voice = time.monotonic()
                 from mint.app import control
                 from mint.core import prefs
@@ -833,7 +876,8 @@ class Mint:
                     self._stop_armed = False
                     await self.stop_everything("voice")
 
-            if server.output_transcription and server.output_transcription.text and not self._suppress_turn:
+            if (server.output_transcription and server.output_transcription.text and not self._suppress_turn
+                    and not self._hush):
                 self._said += server.output_transcription.text
                 self.ui.assistant_said(server.output_transcription.text)
 
@@ -842,15 +886,21 @@ class Mint:
 
             if server.turn_complete:
                 self._check_goodbye()
+                if self._farewell_bytes >= 0:
+                    self._farewell_bytes = -1  # the goodbye line is done: quiet from here
+                    self._hush = True
                 from mint.knowledge.conversation import memory
                 if self._suppress_turn:
-                    # Someone else's conversation: not the user's history.
-                    if self._heard.strip():
+                    # Someone else's conversation, or a "hmm": not the user's history.
+                    if self._heard.strip() and not self._filler_hit:
                         self._print(f"(not for me: {' '.join(self._heard.split())})")
                 else:
                     if self._heard.strip():
                         self._print(f"you:    {' '.join(self._heard.split())}")
                         memory.add("user", self._heard)
+                        from mint.knowledge import teach
+                        if teach.recording():
+                            teach.add_narration(self._heard)      # what the user says while showing Mint
                         self._expect_command = False
                     if self._said.strip():
                         self._print(f"mint: {' '.join(self._said.split())}")
@@ -1052,6 +1102,17 @@ class Mint:
             self._tool_task.cancel()
         self._batch, self._batch_results = [], {}
         self._busy = False
+        # A lesson on screen ends, and a demonstration being watched is wrapped up. A meeting
+        # recording goes on: "stop" is said in meetings all the time.
+        try:
+            from mint.knowledge import teach
+            from mint.ui import tutor
+            if tutor.active():
+                tutor.stop()
+            if teach.recording():
+                threading.Thread(target=teach.stop, daemon=True, name="teach-stop").start()
+        except Exception:
+            log.exception("stopping the lesson or the demonstration failed")
         had_task = self.task is not None
         if self.task:
             from mint.app import tasks
@@ -1091,11 +1152,43 @@ class Mint:
         "(addressing someone by name, chit-chat, a phone call, reading aloud, thinking aloud, other "
         "languages spoken to people) is not.")
 
+    # Said on their own, these need no answer. Noises always; acknowledgements
+    # ("okay", "thanks", "acha") unless Mint has just asked something - then
+    # they are the answer. In the logs "Okay." got "Is there anything else I
+    # can help you with?", "Great, Boss!", "I'll keep you posted!".
+    _NOISES = {"hmm", "hm", "hmmm", "hmmmm", "mm", "mmm", "mmmm", "mhm", "mhmm", "uh", "uhh", "um", "umm",
+               "ah", "ahh", "er", "erm", "eh", "oh", "ooh", "huh-uh", "uh-huh"}
+    _ACKS = {"okay", "ok", "okey", "k", "alright", "right", "yeah", "yep", "yup", "yes", "sure", "cool", "nice",
+             "great", "fine", "good", "perfect", "awesome", "thanks", "thank", "you", "got", "it", "acha", "achha",
+             "accha", "haan", "han", "ha", "theek", "thik", "hai", "ji", "so", "and", "well"}
+    _ASKS = re.compile(r"\?\s*$|\b(should i|shall i|do you want|want me to|would you like|which one|or should)\b", re.I)
+
+    def _filler_turn(self) -> bool:
+        """The user's words so far are only a sound or an acknowledgement that
+        needs no reply. Decided once per turn, on the model's first audio (or
+        as soon as the words arrive, within the first second of it)."""
+        if self._filler_checked or self._typed_turn:
+            return False
+        words = re.findall(r"[a-z]+(?:-[a-z]+)?", self._heard.lower())
+        if not words:
+            return False                      # not transcribed yet: look again on the next chunk
+        self._filler_checked = True
+        if len(words) > 4:
+            return False
+        if all(w in self._NOISES for w in words):
+            return True
+        if all(w in self._NOISES or w in self._ACKS for w in words):
+            return not self._ASKS.search(self._last_said or "")
+        return False
+
     def _begin_user_turn(self) -> None:
         """A new utterance from the user (already voice-verified if the lock is on)."""
         from mint.core import prefs
         self._suppress_turn = False
         self._goodbye_done = False
+        self._filler_checked = False
+        self._filler_hit = False
+        self._typed_turn = False
         self._addr_task = None
         self._addr_candidate = not self._expect_command and bool(prefs.get("addressee_check"))
 
@@ -1107,7 +1200,11 @@ class Mint:
             return
         self._goodbye_done = True
         self._print(f"[goodbye: {' '.join(self._heard.split())}]")
-        # Let its own short goodbye play; stop listening now.
+        # Let its own goodbye play - the first ~2 s of it - then nothing more:
+        # it used to add "Goodbye!" and "I've already stopped listening. Feel
+        # free to reach out..." after stop_listening answered.
+        if self._farewell_bytes < 0 and not self._hush:
+            self._farewell_bytes = 0
         if self.hands_free:
             self.go_to_sleep("you said bye")
 
@@ -1219,11 +1316,14 @@ class Mint:
             # Nothing is done on the screen until it is clear the words were
             # meant for Mint (about a second, only for follow-ups).
             await asyncio.wait({self._addr_task}, timeout=4.5)
-        if self._suppress_turn and self.session is not None:
+        if (self._suppress_turn or self._hush) and self.session is not None:
             await self.session.send_tool_response(function_responses=[
                 types.FunctionResponse(id=f.id, name=f.name, response={"result": (
+                    "NOT RUN: the user said goodbye. Do nothing and say nothing." if self._hush else
                     "NOT RUN: the user was talking to someone else, not to you. Do nothing and "
-                    "say nothing.")}) for f in tool_call.function_calls])
+                    "say nothing.")}) for f in tool_call.function_calls if f.name != "stop_listening"]
+                or [types.FunctionResponse(id=f.id, name=f.name, response={"result": "Asleep. Say nothing."})
+                    for f in tool_call.function_calls])
             return
         from mint.app import control
         control.resume()                 # a new request: input is allowed again
@@ -1344,8 +1444,11 @@ class Mint:
                     "not appear in look screenshots."), None
 
         if name == "stop_listening":
+            already = self.asleep
             self.go_to_sleep("asked to stop")
-            return "Going to sleep. Say the wake word to start again.", None
+            self._hush = True                 # anything more it would say is after goodbye
+            self._farewell_bytes = -1
+            return ("Already asleep." if already else "Asleep.") + " Say nothing more - no goodbye, no summary.", None
 
         if name == "set_timer":
             return self._start_timer(float(args.get("minutes", 1)), args.get("label", "")), None
@@ -1385,16 +1488,68 @@ class Mint:
             # The chat had the keyboard; it was just handed back to the user's
             # app. Let that land before clicking or typing there.
             await asyncio.sleep(0.35)
-        result, image = await tools.dispatch(name, args)
+        from mint.app import instant
+        already = instant.claim(name, args)     # done the instant the user stopped talking: not twice
+        if already:
+            result, image = already, None
+        else:
+            instant.model_ran(name)             # and the instant path will not run it after this
+            result, image = await tools.dispatch(name, args)
         self.ui.activity_end(name, not _looks_failed(result))
         return result + self._context_after(name), image
+
+    def _instant_poke(self) -> None:
+        """After each piece of transcript: if the whole sentence so far is an instant command
+        and no more words come for a moment, do it now (instant.py)."""
+        from mint.app import instant
+        if not instant.enabled() or self.loop is None:
+            return
+        heard = self._heard
+        if instant.match(heard) is None:
+            return
+
+        async def later():
+            await asyncio.sleep(instant.QUIET)
+            last = getattr(self, "_instant_last", ("", 0.0))
+            if self._heard != heard or not self._turn_open or self._suppress_turn \
+                    or (last[0] == heard and time.monotonic() - last[1] < 4):
+                return
+            found = instant.match(heard)
+            if found is None or instant.model_just_ran(found[0]):
+                return
+            name, args, label = found
+            self._instant_last = (heard, time.monotonic())
+            try:
+                args = await asyncio.to_thread(instant.resolve, name, args)
+                if instant.model_just_ran(name):
+                    return
+                instant.ran(name, args, heard.strip())
+                self._print(f"[instant] {label}")
+                await tools.dispatch(name, args)
+            except Exception:
+                log.exception("instant %s failed", name)
+        self.loop.create_task(later())
 
     def _set_preference(self, setting: str, value: str) -> str:
         from mint.core import prefs
         on = value.strip().lower() in {"on", "true", "yes", "enable", "enabled", "1", "show"}
         switches = {"spoken_replies": "voice", "microphone": "mic", "face": "face",
                     "effects": "cursor_effects", "word_animation": "word_animation",
-                    "listen_while_working": "listen_while_working", "activity_timeline": "timeline"}
+                    "listen_while_working": "listen_while_working", "activity_timeline": "timeline",
+                    "instant_commands": "instant_commands"}
+        if setting == "storage_folder":
+            from mint.core import config
+            raw = value.strip()
+            if raw.lower() in {"", "default", "reset", "documents"}:
+                prefs.set("storage_folder", "")
+                return f"Mint saves what it makes in {config.storage()} again (the default)."
+            path = os.path.expanduser(raw if raw.startswith(("/", "~")) else "~/" + raw)
+            parent = os.path.dirname(path.rstrip("/"))
+            if not os.path.isdir(path) and not os.path.isdir(parent):
+                return f"There is no folder {parent}. Ask the user which folder they mean."
+            prefs.set("storage_folder", path)
+            return (f"From now on Mint saves meetings, videos, documents, spreadsheets and agent work in {config.storage()} "
+                    f"(one sub-folder each). Files saved before stay where they are.")
         if setting == "activity_timeline" and value.strip().lower() in {"clear", "delete", "forget", "erase"}:
             from mint.knowledge import timeline
             return timeline.clear()
@@ -1571,6 +1726,19 @@ class Mint:
         automations.start()                 # schedules and triggers (they report through the hub)
         from mint.knowledge import timeline
         timeline.start()                    # the activity timeline (does nothing unless it is on)
+        from mint.knowledge import teach
+
+        def teaching(state, detail=""):
+            labels = {"recording": "● Watching you - say “done” when finished", "auto_stopped": "Stopped watching",
+                      "saved": "Learned it ✓", "cancelled": "Stopped watching", "failed": "Could not learn it"}
+            self._print(f"[teach {state}] {detail}"[:200])
+            if state in labels:
+                self.ui.action(labels[state])
+        teach.on_change(teaching)
+        from mint.tools import meetings
+        if hasattr(meetings, "resume_pending"):
+            # A meeting cut off by a quit or crash still gets its transcript and notes.
+            threading.Timer(20, meetings.resume_pending).start()
         membank.tidy_later()                # merge duplicate memories, drop past ones (once a day)
         client = _client()
         attempt = 0
@@ -1800,6 +1968,11 @@ class Mint:
         try:
             from mint.tools import automations
             if automations.keep_loaded():     # a folder/app watcher, or one due within minutes
+                return False
+            from mint.tools import meetings
+            from mint.knowledge import teach
+            from mint.ui import tutor
+            if tutor.keep_loaded() or teach.recording() or meetings.busy():
                 return False
         except Exception:
             pass

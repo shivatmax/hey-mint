@@ -17,7 +17,10 @@ from pathlib import Path
 
 from mint.tools import fastinput
 
-OUTPUT = Path.home() / "Documents" / "Mint"
+def _output() -> Path:
+    """Where PDFs go: the Documents folder of Mint's storage (Settings > Storage)."""
+    from mint.core import config
+    return config.storage("Documents")
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 # Roles whose text is content rather than chrome around it.
@@ -145,7 +148,7 @@ def export_doc_pdf(open_after: bool = True) -> str:
 
     Uses Docs' own export address (…/export?format=pdf) in the same Chrome
     profile, so it is exact and needs no menu clicking. The file lands in
-    Downloads; it is moved to ~/Documents/Mint and opened.
+    Downloads; it is moved to Mint's Documents folder and opened.
     """
     from mint.tools import workspace
 
@@ -175,10 +178,10 @@ def export_doc_pdf(open_after: bool = True) -> str:
     if found_file is None:
         return ("FAILED: the export started but no PDF arrived in Downloads within 30 seconds. "
                 "Chrome may be asking where to save it.")
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    target = OUTPUT / found_file.name
+    output = _output()
+    target = output / found_file.name
     if target.exists():
-        target = OUTPUT / f"{found_file.stem}-{time.strftime('%H%M%S')}.pdf"
+        target = output / f"{found_file.stem}-{time.strftime('%H%M%S')}.pdf"
     shutil.move(str(found_file), target)
     if open_after:
         subprocess.run(["open", str(target)], check=False)
@@ -226,12 +229,11 @@ def _inline(text: str) -> str:
 
 
 def create_pdf(title: str, content: str, open_after: bool = True) -> str:
-    """Write a formatted PDF to ~/Documents/Mint and optionally open it."""
+    """Write a formatted PDF to Mint's Documents folder and optionally open it."""
     if not Path(CHROME).exists():
         return "FAILED: Google Chrome is needed to render PDFs and was not found."
-    OUTPUT.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")[:60] or "document"
-    target = OUTPUT / f"{slug}-{time.strftime('%Y%m%d-%H%M')}.pdf"
+    target = _output() / f"{slug}-{time.strftime('%Y%m%d-%H%M')}.pdf"
 
     work = Path(tempfile.mkdtemp(prefix="mint-pdf-"))
     try:

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Meeting notes, no bot** (`meeting`, menu bar ▸ Record meeting):
+  - Recording: `MintRecorder` (new Swift helper, `launcher/recorder`) records the call's audio through
+    a Core Audio tap, which needs only the "System Audio Recording" permission, plus your mic, as two
+    tracks.
+  - Output: Gemini writes a timestamped transcript (You vs. the others, names when said) and notes:
+    decisions, action items, open questions.
+  - Where it goes: the Meetings folder.
+  - Offer: Mint offers to take notes when a call starts.
+- **Teach by showing** (`teach`): Mint watches you do a task once and saves it as a skill with
+  parameters. Passwords are never recorded.
+- **Tutor mode** (`tutor`): "show me how to…" points at each control on screen and moves on when you do
+  it.
+- **Edit selected text by voice** (`edit_selection`): rewrite, fix, shorten, translate in place, in any
+  app.
+- **Documents to spreadsheet** (`make_spreadsheet`): many PDFs, scans or receipts into one .xlsx (new
+  dependency: openpyxl).
+- **Tidy a folder** (`tidy`): a plan first, then apply, then undo. It never deletes.
+- **Instant commands:** "volume 30", "next song", "pause", "mute" run the moment you stop talking,
+  never twice.
+- **"Which memory did you use?"** (`memory_used`).
+- **Mint storage folder** (Settings ▸ Storage & Privacy, or by voice): everything Mint makes goes into
+  one folder with Documents, Meetings, Videos, Agents and Spreadsheets.
+
 - **Watching videos** (`watch_video`):
   - What it takes: a YouTube, X, Vimeo, Loom, TikTok or Instagram link, a video or audio file, or
     "this video" on screen.

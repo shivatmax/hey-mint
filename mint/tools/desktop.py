@@ -244,6 +244,11 @@ async def _start_engine() -> None:
     _engine = subprocess.Popen([str(path), "-Headless", "YES"], env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     log.info("started the screen-control engine (%s, pid %d)", path, _engine.pid)
+    try:
+        from mint.knowledge import teach
+        teach.IGNORE_PIDS.add(_engine.pid)        # its clicks are Mint's, not the user's, when being taught
+    except Exception:
+        pass
     await asyncio.sleep(1.0)
 
 

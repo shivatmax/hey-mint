@@ -48,7 +48,12 @@ log = logging.getLogger("mint.tools.video")
 
 HOME = Path.home()
 CACHE = HOME / "Library" / "Application Support" / "Mint" / "videos"
-SAVED = HOME / "Documents" / "Mint" / "videos"
+SAVED = HOME / "Documents" / "Mint" / "videos"     # default; _saved() follows Settings > Storage
+
+
+def _saved() -> Path:
+    from mint.core import config
+    return config.storage("Videos")
 INDEX = CACHE / "index.json"
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".mpg", ".mpeg", ".3gp", ".m4a", ".mp3", ".wav",
              ".aac", ".flac", ".aiff", ".aif", ".caf", ".ogg", ".opus"}
@@ -680,7 +685,12 @@ def _watch_on_gemini(url: str, folder: Path, meta: dict, question: str) -> str:
 
 
 def _question_part(question: str) -> str:
-    return (f"**Answer** - then answer this, citing timestamps: {question}" if question else "")
+    if not question:
+        return ""
+    return (f"**Answer** - then answer this, citing timestamps: {question}\nIf it asks for feedback, suggestions "
+            "or how to improve the video, be a sharp editor: 4-6 concrete, specific changes tied to timestamps "
+            "(the hook in the first 3 seconds, pacing and cuts, clarity of the message, on-screen text and "
+            "captions, audio and music, the ending and call to action) - not generic praise.")
 
 
 # --- The whole job ------------------------------------------------------------------------
@@ -827,8 +837,7 @@ def _finish(folder: Path, meta: dict) -> None:
     _save_meta(folder, meta)
     _remember(meta["key"], meta)
     try:
-        SAVED.mkdir(parents=True, exist_ok=True)
-        out = SAVED / f"{_safe_name(meta.get('title'))}.md"
+        out = _saved() / f"{_safe_name(meta.get('title'))}.md"
         transcript = (folder / "transcript.txt").read_text() if (folder / "transcript.txt").exists() else ""
         out.write_text(f"# {meta.get('title') or 'Video'}\n\nSource: {meta.get('source')}\n\n"
                        f"{meta.get('digest', '')}\n\n## Transcript ({meta.get('transcript_source', 'none')})\n\n"
@@ -998,8 +1007,10 @@ def _start_job(kind: str, where: str, question: str, frames: int = 12, notify: b
             _prune()
             if late and notify:
                 if state.get("meta"):
+                    asked = (f" The user asked: {question!r} - answer that from the **Answer** part." if question
+                             else " Tell the user the gist in a few sentences.")
                     _notify("(Mint's video watcher, not the user.) Finished watching the video:\n"
-                            + _report(state["meta"], question) + "\nTell the user the gist in a few sentences.")
+                            + _report(state["meta"], question) + "\n" + asked)
                 else:
                     _notify(f"(Mint's video watcher, not the user.) Could not watch the video: {state.get('error')}")
 
@@ -1064,7 +1075,10 @@ PROMPT = """Videos: to watch, summarise, transcribe or answer anything about a v
 the one selected in Finder, else the newest recording). It reads the transcript and a few keyframes, so it \
 is fast; never play a video and look at it frame by frame instead. Follow-up questions about the same \
 video: watch_video with `question` (answered with timestamps), or `at` a time to see that frame. Long \
-videos finish in the background and a message arrives when they are done."""
+videos finish in the background and a message arrives when they are done. ALWAYS put what the user wants in \
+`question` (a summary, feedback, suggestions to improve it, the aesthetic, a specific detail) - the first call \
+too. Any later question about a video (suggestions, "what about the ending?") is a new watch_video call with \
+that `question`: never answer it from the earlier summary alone."""
 
 
 def declarations():
@@ -1078,13 +1092,14 @@ def declarations():
                      "link, a video or audio file, or - with no source - the video page in front, the video "
                      "selected in Finder, or the newest screen recording. Returns what it is, the key moments "
                      "with timestamps, the look and feel (style, colours, pace, mood) and the answer to "
-                     "`question`, and saves the full transcript to ~/Documents/Mint/videos. For a video watched "
+                     "`question`, and saves the full transcript in Mint's Videos folder. For a video watched "
                      "before (source empty = the last one), `question` is answered from its transcript and "
                      "keyframes and `at` shows you the exact frame at that time."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
             "source": schema(types.Type.STRING, "link, file path or file name; empty = the video in front / "
                                                 "the last one watched"),
-            "question": schema(types.Type.STRING, "what the user wants to know about it (optional)"),
+            "question": schema(types.Type.STRING, "what the user wants from it, in their words: summary, feedback, "
+                                                  "improvement suggestions, the aesthetic, a detail"),
             "at": schema(types.Type.STRING, "a time like '3:20' to see that frame (optional)"),
             "frames": schema(types.Type.INTEGER, "keyframes to look at, 4-24 (default 12; more for a "
                                                  "visual/aesthetic question)"),

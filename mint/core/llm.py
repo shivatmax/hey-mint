@@ -24,7 +24,18 @@ _client_cache = None
 _busy: dict[str, float] = {}      # model -> monotonic time it may be tried again
 
 
+_client_lock = __import__("threading").Lock()
+
+
 def client():
+    """One shared client, made once: threads making it at the same moment closed each other's
+    connection ("client has been closed")."""
+    global _client_cache
+    with _client_lock:
+        return _make_client()
+
+
+def _make_client():
     global _client_cache
     if _client_cache is None:
         from google import genai

@@ -94,8 +94,9 @@ def declarations() -> list[types.FunctionDeclaration]:
                               "description": "Press Return afterwards, e.g. to submit a search. Never to send a message unless asked."}},
             ["text"]),
         _fn("get_selected_text",
-            "Read the text the user has selected in the front app. Use when they say 'this', "
-            "'the selected text', 'summarise this', 'reply to this', 'translate this'.", {}),
+            "Read the text the user has selected in the front app, to answer about it ('summarise this', "
+            "'what does this mean'). To CHANGE selected text (rewrite, more formal, fix, shorten, translate "
+            "it in place) use edit_selection instead - it reads and replaces in one step.", {}),
         _fn("get_status", "Current local time and date, battery level, and volume.", {}),
         _fn("set_timer",
             "Start a timer. When it ends, the user gets a notification and you announce it.",
@@ -188,7 +189,7 @@ def declarations() -> list[types.FunctionDeclaration]:
         _fn("create_pdf",
             "Write a nicely formatted PDF and open it. Compose the full content yourself. Content "
             "uses light Markdown: '# Heading', '- bullet', '**bold**', blank lines between "
-            "paragraphs. Saved to ~/Documents/Mint.",
+            "paragraphs. Saved in Mint's Documents folder (Settings > Storage).",
             {"title": {**STRING}, "content": {**STRING},
              "open_after": {"type": types.Type.BOOLEAN, "description": "Open it when done. Default true."}},
             ["title", "content"]),
@@ -218,10 +219,12 @@ def declarations() -> list[types.FunctionDeclaration]:
             "-> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen "
             "effects, word-by-word captions, whether you listen while you work, and the activity "
             "timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> "
-            "activity_timeline clear). Confirm briefly what you changed.",
+            "activity_timeline clear), where Mint saves what it makes ('save everything in my Dropbox' -> "
+            "storage_folder = that folder's path, e.g. ~/Dropbox/Mint; 'default' resets it), and instant "
+            "simple commands. Confirm briefly what you changed.",
             {"setting": {**STRING, "enum": ["spoken_replies", "microphone", "theme", "position",
                                             "face", "effects", "word_animation", "listen_while_working",
-                                            "activity_timeline"]},
+                                            "activity_timeline", "storage_folder", "instant_commands"]},
              "value": {**STRING, "description":
                        "on/off for switches (activity_timeline also: clear); theme: mint (green), blue, aurora (teal/violet), sunset "
                        "(orange), rose (pink), mono (white); position: top-right, "
@@ -589,6 +592,40 @@ def _work_handlers():
 
 
 _SYNC.update({name: (lambda a, _n=name: _work_handlers()[_n](a)) for name in ("wait_until_done", "preview_site")})
+
+
+# --- Everyday power tools: editing selected text, spreadsheets from files, tidying ---
+# folders (rewrite.py, sheets.py, tidy.py). Each module has declarations() and HANDLERS.
+
+_tools_before_power = tools
+
+
+def _power_modules():
+    from mint.tools import meetings
+    from mint.tools import rewrite
+    from mint.tools import sheets
+    from mint.knowledge import teach
+    from mint.tools import tidy
+    from mint.ui import tutor
+    return rewrite, sheets, tidy, teach, tutor, meetings
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    decls = [d for m in _power_modules() for d in m.declarations()]
+    return _tools_before_power() + [types.Tool(function_declarations=decls)]
+
+
+def _power(name: str):
+    def run(args):
+        for module in _power_modules():
+            if name in module.HANDLERS:
+                return module.HANDLERS[name](args)
+        return f"There is no tool called '{name}'."
+    return run
+
+
+_SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "tidy", "teach",
+                                                  "tutor", "meeting")})
 
 
 # --- Tasks that last: sub-steps, replanning, resuming (tasks.py; run by the session) --

@@ -21,6 +21,7 @@ RUNTIME="$HOME/Library/Application Support/Mint"
 remove() {
   pkill -x "$APP_NAME" 2>/dev/null || true
   pkill -x MintEngine 2>/dev/null || true
+  pkill -x MintRecorder 2>/dev/null || true
   pkill -f "python -m mint" 2>/dev/null || true
   if [[ -f "$AGENT" ]]; then
     launchctl bootout "gui/$(id -u)" "$AGENT" 2>/dev/null || true
@@ -158,6 +159,13 @@ else
   printf '%s\n' "$engine_log" | tail -15 >&2
   echo "Warning: the screen-control engine did not build; Mint works without the desktop tool." >&2
 fi
+# Meeting notes: records the call's audio (a Core Audio tap) and the mic as two tracks (launcher/recorder).
+echo "Building the meeting recorder…"
+if ! recorder_log=$(xcrun swiftc -O launcher/recorder/*.swift -o "$BUILD/Contents/MacOS/MintRecorder" \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/recorder/Info.plist 2>&1); then
+  printf '%s\n' "$recorder_log" | tail -15 >&2
+  echo "Warning: the meeting recorder did not build; Mint works without meeting notes." >&2
+fi
 "$RUNTIME/.venv/bin/python" launcher/make_icon.py "$BUILD/Contents/Resources/$APP_NAME.icns" >/dev/null
 rm -f "$BUILD/Contents/Resources/$APP_NAME.png"
 
@@ -183,6 +191,8 @@ cat > "$BUILD/Contents/Info.plist" <<PLIST
 
   <key>NSMicrophoneUsageDescription</key>
   <string>Mint listens for its wake word on this Mac, and streams your voice to Gemini only after you say it.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Mint records a call's audio only when you click Record meeting, to write its transcript and notes.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Mint controls apps such as Notes, Mail and System Events when you ask it to.</string>
   <key>NSCalendarsFullAccessUsageDescription</key>
@@ -212,6 +222,7 @@ codesign --verify --strict "$BUILD"
 # --- install -------------------------------------------------------------------------
 pkill -x "$APP_NAME" 2>/dev/null || true
 pkill -x MintEngine 2>/dev/null || true
+pkill -x MintRecorder 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALL"
 ditto "$BUILD" "$INSTALL"

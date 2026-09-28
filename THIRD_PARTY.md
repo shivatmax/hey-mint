@@ -10,6 +10,17 @@ Hey Mint's own code is GPL-3.0.
 automatic ones, and the language it is spoken in) follows `select_caption` in
 [claude-video](https://github.com/bradautomates/claude-video) (MIT).
 
+**Ideas, not code**, from these open-source projects (all MIT or BSD):
+- **Meeting recorder** (`launcher/recorder`): the Core Audio process tap follows
+  [AudioCap](https://github.com/insidegui/AudioCap) (BSD-2) and
+  [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT).
+- **Teach by showing** (`mint/knowledge/teach.py`): events are compressed into steps the way
+  [OpenAdapt](https://github.com/OpenAdaptAI/OpenAdapt) (MIT) and
+  [microsoft/skill-recorder](https://github.com/microsoft/skill-recorder) (MIT) do it.
+- **Tutor mode** (`mint/ui/tutor.py`): pointing one step at a time and repairing a missing target follow
+  [Clicky](https://github.com/farzaa/clicky), [MudrikNow](https://github.com/abdallahmagdy15/mudriknow) and
+  [ClickTutor_AI](https://github.com/Nishant8677/ClickTutor_AI) (all MIT).
+
 It uses, but does not include, the following; each keeps its own license, which you should
 review before redistributing a build:
 
@@ -22,6 +33,7 @@ review before redistributing a build:
 | TypeSafe Jev | Fast choices, and every action of the screen-control engine | Your own API key |
 | PyObjC, NumPy, Pillow, mss, onnxruntime, PyAudio, kaldi-native-fbank | Runtime libraries | `requirements.txt` |
 | yt-dlp (Unlicense) | Fetching web videos and their captions for `watch_video` | `requirements.txt` |
+| openpyxl (MIT) | Writing .xlsx files for `make_spreadsheet` | `requirements.txt` |
 | parakeet-mlx (Apache-2.0), optional | On-device transcription for `watch_video`, when installed | `pip install parakeet-mlx` |
 | Google Fonts (Bricolage Grotesque, Atkinson Hyperlegible, JetBrains Mono) | The guide's typography | Loaded from fonts.googleapis.com |
 

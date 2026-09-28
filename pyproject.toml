@@ -33,6 +33,7 @@ dependencies = [
   "pyobjc-framework-Vision>=10.0",
   "pyobjc-framework-AVFoundation>=10.0",
   "yt-dlp>=2026.8.19",
+  "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

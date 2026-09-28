@@ -160,6 +160,7 @@ def relevant(query: str, limit: int = 6, include_pinned: bool = False) -> list[d
         log.info("recall %r -> %d blocks in %.1fs (Gemini)", query[:60], len(chosen), time.monotonic() - started)
         if chosen:
             _touch([b["id"] for b in chosen])
+            _note_use(chosen, query)
         return chosen
     if len(pool) > BATCH:
         # Narrow a big bank first: one choice question ranks every block, and
@@ -191,6 +192,7 @@ def relevant(query: str, limit: int = 6, include_pinned: bool = False) -> list[d
     log.info("recall %r -> %d blocks in %.1fs", query[:60], len(chosen), time.monotonic() - started)
     if chosen:
         _touch([b["id"] for b in chosen])
+        _note_use(chosen, query)
     return chosen
 
 
@@ -252,6 +254,35 @@ def _keep_history(block: dict, before: str) -> None:
         history = block.setdefault("history", [])
         history.append({"text": before, "until": time.strftime("%Y-%m-%d")})
         block["history"] = history[-5:]
+
+
+_used: list[tuple[float, str, str, str]] = []     # (when, id, fact, the request it was fetched for)
+
+
+def _note_use(chosen: list[dict], query: str) -> None:
+    """Remember which facts were handed to the conversation, for "which memory did you use?"."""
+    now = time.time()
+    for b in chosen:
+        _used.append((now, b["id"], b["text"], query[:120]))
+    del _used[:-60]
+
+
+def used(minutes: float = 30) -> str:
+    """The facts Mint was given in the last `minutes`, newest first, plus the fixed ones."""
+    since = time.time() - minutes * 60
+    seen, lines = set(), []
+    for when, bid, text, query in reversed(_used):
+        if when < since or bid in seen:
+            continue
+        seen.add(bid)
+        lines.append(f"- {text}  (looked up {time.strftime('%H:%M', time.localtime(when))} for: {query!r})")
+    fixed = [b["text"] for b in blocks() if b.get("pinned")]
+    out = ("Facts looked up recently:\n" + "\n".join(lines[:15])) if lines else \
+        "No remembered facts were looked up in the last half hour."
+    if fixed:
+        out += "\nAlways known (fixed memories): " + "; ".join(fixed[:12])
+    return out + ("\nTell the user which of these shaped the answer. If one is wrong or outdated, offer to fix it "
+                  "(update_memory) or forget it.")
 
 
 def _touch(ids: list[str]) -> None:

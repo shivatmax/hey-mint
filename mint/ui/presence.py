@@ -191,6 +191,17 @@ class Presence:
         self._row(menu, "Wake now", "wake")
         self._row(menu, "Go to sleep", "sleep")
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        try:
+            from mint.tools import meetings
+            if meetings.is_recording():
+                seconds = int(meetings.elapsed())
+                self._row(menu, f"● Stop recording ({seconds // 60}:{seconds % 60:02d})", "meeting:stop")
+            else:
+                self._row(menu, "Record meeting", "meeting:start")
+            self._row(menu, "Meeting notes…", "meeting:folder")
+        except Exception:
+            pass
+        menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._add_settings(menu)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._row(menu, "Grant Accessibility…", "grant")
@@ -209,6 +220,8 @@ class Presence:
             prefs.set("theme", value)
         elif kind == "position":
             prefs.set("position", value)
+        elif kind == "meeting":
+            self.fire(f"meeting_{value}")
         elif kind == "brain":
             from mint.ui import brain as brain_window
             brain_window.open_window(value or "skills")

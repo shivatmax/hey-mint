@@ -59,6 +59,8 @@ _KIND = {
     "screenshot": "shot", "clipboard": "clip", "quit_mint": "system", "read_clipboard": "clip", "write_clipboard": "clip",
     "pointer": "click",
     "watch_video": "look", "automation": "timer", "recall_history": "search",
+    "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
+    "teach": "look", "tutor": "look",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -163,6 +165,21 @@ def phrase(name: str, args: dict) -> str:
                    f"{_quote(str(a.get('path', '')).rsplit('/', 1)[-1], 34)}"
         case "web_search":
             return f"Searching · {_quote(a.get('query', ''), 40)}"
+        case "edit_selection":
+            return "Undoing the edit" if a.get("action") == "undo" else f"Rewriting · {_quote(a.get('instruction', ''), 34)}"
+        case "make_spreadsheet":
+            return f"Spreadsheet · {_quote(a.get('what') or a.get('source', ''), 34)}"
+        case "tidy":
+            return {"apply": "Tidying the folder", "undo": "Putting files back", "cancel": "Dropping the plan"}.get(
+                str(a.get("action")), f"Planning a tidy-up · {_quote(a.get('folder') or 'Downloads', 30)}")
+        case "tutor":
+            return {"start": f"Showing you how · {_quote(a.get('task', ''), 30)}", "next": "Next step",
+                    "back": "Previous step", "stop": "Ending the lesson"}.get(str(a.get("action")), "Lesson")
+        case "teach":
+            return {"start": "Watching how you do it", "stop": "Writing up what you showed me",
+                    "cancel": "Stopped watching"}.get(str(a.get("action")), "Teaching")
+        case "memory_used":
+            return "Checking what I remembered"
         case "recall_history":
             return f"Looking back · {_quote(a.get('when') or a.get('question', ''), 34)}"
         case "automation":

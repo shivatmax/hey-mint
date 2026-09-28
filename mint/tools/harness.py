@@ -50,7 +50,7 @@ from google.genai import types
 log = logging.getLogger("mint.harness")
 
 HOME = Path.home()
-MINT_FILES = HOME / "Documents" / "Mint"
+MINT_FILES = HOME / "Documents" / "Mint"      # the default; config.storage() is the real one (Settings > Storage)
 BACKUPS = HOME / "Library" / "Application Support" / "Mint" / "backups"
 
 STRING = {"type": types.Type.STRING}
@@ -86,7 +86,7 @@ def declarations() -> list[types.FunctionDeclaration]:
             "Create or change a text file (notes, code, Markdown, CSV, HTML...). mode: create (new file; "
             "fails if it exists), overwrite (replace all; the old version is backed up first), append, or "
             "replace (swap the exact text `find` for `content`; `find` must occur once). A bare file name "
-            "goes to ~/Documents/Mint. Never put passwords or keys in a file.",
+            "goes to Mint's Documents folder (Settings > Storage). Never put passwords or keys in a file.",
             {"path": STRING, "content": STRING,
              "mode": _enum(("create", "overwrite", "append", "replace"), "default create"),
              "find": {**STRING, "description": "for mode=replace: the exact text to replace"}},
@@ -395,7 +395,7 @@ _PLACES = {"desktop": HOME / "Desktop", "documents": HOME / "Documents", "downlo
            "home": HOME, "pictures": HOME / "Pictures", "movies": HOME / "Movies", "music": HOME / "Music",
            "icloud": HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs",
            "icloud drive": HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs",
-           "mint": MINT_FILES}
+           }
 _ROOTS = (HOME, Path("/tmp"), Path("/private/tmp"), Path("/Volumes"))
 
 
@@ -460,17 +460,18 @@ def _resolve(raw: str, must_exist: bool = True) -> tuple[Path | None, str]:
         path = Path(text)
     else:
         first, _, rest = text.partition("/")
-        place = _PLACES.get(first.lower())
+        from mint.core import config
+        place = config.storage() if first.lower() == "mint" else _PLACES.get(first.lower())
         if place is not None:
             path = place / rest if rest else place
         else:
-            candidates = [base / text for base in (MINT_FILES, HOME / "Desktop", HOME / "Documents",
-                                                   HOME / "Downloads", HOME)]
+            candidates = [base / text for base in (config.storage("Documents"), config.storage(), HOME / "Desktop",
+                                                   HOME / "Documents", HOME / "Downloads", HOME)]
             existing = [p for p in candidates if p.exists()]
             if existing:
                 path = existing[0]
             elif not must_exist:
-                path = MINT_FILES / text
+                path = config.storage("Documents") / text
             else:
                 matches = _spotlight(Path(text).name)
                 if len(matches) == 1:
@@ -702,7 +703,8 @@ def _made() -> list[Path]:
 def _place_score(path: Path) -> int:
     """User places first: Mint's own files, then Desktop / Documents / Downloads / iCloud top levels."""
     text = str(path)
-    if text.startswith(str(MINT_FILES)):
+    from mint.core import config
+    if text.startswith(str(config.storage())) or text.startswith(str(MINT_FILES)):
         return 3
     for base in (HOME / "Desktop", HOME / "Documents", HOME / "Downloads",
                  HOME / "Library" / "Mobile Documents" / "com~apple~CloudDocs"):

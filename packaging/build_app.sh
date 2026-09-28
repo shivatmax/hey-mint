@@ -103,6 +103,10 @@ xcrun swiftc -O -target arm64-apple-macos14.2 launcher/ear/*.swift -o "$APP/Cont
 echo "Building the screen-control engine…"
 (cd launcher/engine && xcrun swift build -c release >/dev/null)
 cp "$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDesktop" "$APP/Contents/MacOS/MintEngine"
+# Meeting notes: the call's audio and the mic as two tracks (launcher/recorder).
+echo "Building the meeting recorder…"
+xcrun swiftc -O -target arm64-apple-macos14.2 launcher/recorder/*.swift -o "$APP/Contents/MacOS/MintRecorder" \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/recorder/Info.plist
 "$PY" launcher/make_icon.py "$RES/Mint.icns" >/dev/null
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -127,6 +131,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 
   <key>NSMicrophoneUsageDescription</key>
   <string>Mint listens for its wake word on this Mac, and streams your voice to Gemini only after you say it.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Mint records a call's audio only when you click Record meeting, to write its transcript and notes.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Mint controls apps such as Notes, Mail and System Events when you ask it to.</string>
   <key>NSCalendarsFullAccessUsageDescription</key>
@@ -159,6 +165,7 @@ while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q "Mach-O"; then codesign "${sign_flags[@]}" "$file" 2>/dev/null; fi
 done < <(find "$RES" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -print0)
 codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintengine" "$APP/Contents/MacOS/MintEngine"
+codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintrecorder" "$APP/Contents/MacOS/MintRecorder"
 codesign "${sign_flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 

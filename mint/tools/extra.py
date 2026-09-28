@@ -160,6 +160,10 @@ def declarations() -> list[types.FunctionDeclaration]:
             {"what": {**STRING}}, ["what"]),
         _fn("list_memories", "List what is remembered, optionally one group.",
             {"group": {**STRING}}),
+        _fn("memory_used",
+            "Which remembered facts you were given in this conversation (and the fixed ones) - for 'why did you "
+            "say that?', 'which memory did you use?', 'how do you know that?'. Lets the user fix a wrong one.",
+            {"minutes": {**NUMBER, "description": "how far back (default 30)"}}),
         _fn("show_skills_and_memory",
             "Open the Skills & Memory window on screen, where the user can see and edit every skill "
             "and every remembered fact. Use when they ask to see, check, review or edit your skills "
@@ -452,6 +456,7 @@ HANDLERS = {
                                               group=str(a.get("group", ""))),
     "forget": lambda a: membank.forget(str(a.get("what", ""))),
     "list_memories": lambda a: membank.listing(str(a.get("group", ""))),
+    "memory_used": lambda a: membank.used(float(a.get("minutes") or 30)),
     "show_skills_and_memory": lambda a: _show_brain(str(a.get("tab") or "skills")),
 }
 
@@ -479,10 +484,17 @@ def prompt_text() -> str:
     from mint.tools import automations
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
+    from mint.tools import meetings
+    from mint.tools import rewrite
+    from mint.tools import sheets
     from mint.app import tasks
+    from mint.knowledge import teach
+    from mint.tools import tidy
+    from mint.ui import tutor
     from mint.tools import video
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
-             EXPRESSIVE, SHOWING]
+             rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
+             meetings.PROMPT, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

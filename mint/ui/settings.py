@@ -373,6 +373,48 @@ class SettingsWindow:
                           '"forget that", "remember that my manager is Meera".', 24, 90, 520, h=36, lines=2,
                     alpha=0.6, size=11)
 
+    def _tab_storage(self, view) -> None:
+        """Where Mint keeps what it makes, and the switches for what it records."""
+        from mint.core import config
+        self._label(view, "Storage", 24, 360, 200, bold=True, size=13)
+        path = self._label(view, str(config.storage()), 24, 334, 520, size=11, alpha=0.8)
+        path.setLineBreakMode_(AppKit.NSLineBreakByTruncatingMiddle)
+
+        def choose() -> None:
+            panel = AppKit.NSOpenPanel.openPanel()
+            panel.setCanChooseDirectories_(True)
+            panel.setCanChooseFiles_(False)
+            panel.setCanCreateDirectories_(True)
+            panel.setPrompt_("Use this folder")
+            panel.setMessage_(f"Where should {prefs.name()} save meetings, videos, documents and agent work?")
+            if panel.runModal() == AppKit.NSModalResponseOK and panel.URL() is not None:
+                prefs.set("storage_folder", str(panel.URL().path()))
+                path.setStringValue_(str(config.storage()))
+
+        def default() -> None:
+            prefs.set("storage_folder", "")
+            path.setStringValue_(str(config.storage()))
+        self._button(view, "Choose…", 24, 296, 120, choose)
+        self._button(view, "Show in Finder", 150, 296, 140,
+                     lambda: AppKit.NSWorkspace.sharedWorkspace().openURL_(
+                         AppKit.NSURL.fileURLWithPath_(str(config.storage()))))
+        self._button(view, "Use the default", 296, 296, 140, default)
+        self._label(view, "One folder per kind: " + ", ".join(config.STORAGE_KINDS) + ". Files already saved "
+                          "stay where they are.", 24, 262, 540, h=30, lines=2, size=11, alpha=0.65)
+        self._label(view, "Meetings", 24, 222, 200, bold=True, size=13)
+        self._check(view, "meeting_offer", "When a call starts (Meet, Zoom, Teams…), offer to take notes", 24, 196, 540)
+        self._check(view, "meeting_keep_audio", "Keep the recording next to the transcript and notes", 24, 170, 540)
+        self._label(view, "Privacy", 24, 130, 200, bold=True, size=13)
+        self._check(view, "timeline", "Activity timeline: note the app, window and web page in front "
+                                      "(text only, 14 days)", 24, 104, 540)
+
+        def forget_timeline() -> None:
+            from mint.knowledge import timeline
+            timeline.clear()
+        self._button(view, "Delete the timeline", 24, 64, 170, forget_timeline)
+        self._label(view, "Never screenshots or typing; private windows and password managers are skipped.",
+                    200, 70, 360, h=30, lines=2, size=11, alpha=0.65)
+
     def _act(self, name: str) -> None:
         callback = self.actions.get(name)
         if callback:
@@ -405,7 +447,7 @@ class SettingsWindow:
         for title, build in (("You", self._tab_you), ("Your voice", self._tab_voice),
                              (f"{prefs.name()}'s voice", self._tab_speaking),
                              ("Audio", self._tab_audio), ("Appearance", self._tab_looks),
-                             ("Skills & Memory", self._tab_brain)):
+                             ("Skills & Memory", self._tab_brain), ("Storage & Privacy", self._tab_storage)):
             item = AppKit.NSTabViewItem.alloc().initWithIdentifier_(title)
             item.setLabel_(title)
             view = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W - 32, H - 60))
