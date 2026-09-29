@@ -1,7 +1,4 @@
 
-https://github.com/user-attachments/assets/6cb3ff8e-8778-4e16-b3f2-fe447f29aa1c
-
-
 <div align="center">
 
 # Hey Mint
