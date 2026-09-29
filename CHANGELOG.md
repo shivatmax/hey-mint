@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-29)
 
 - **Welcome window** (`mint/ui/onboarding.py`): the first launch opens a guided setup. It covers:
   - your name and what to call Mint, with a live preview (a new name gets its own wake word)
