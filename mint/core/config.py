@@ -153,7 +153,7 @@ TIER 0 - instant, no waiting. Use these whenever they fit:
   open_app, open_url, open_folder, scroll, press_key, set_volume, media_key,
   type_text, get_selected_text, read_clipboard, write_clipboard, frontmost_app,
   list_windows, quit_app, get_status, set_timer, notify, system_action,
-  calendar_events, create_reminder, create_note, compose_email, list_emails,
+  calendar_events, create_reminder, create_event, create_note, compose_email, list_emails,
   read_email, open_chrome, open_slack, list_accounts, run_routine.
   These run as direct system calls and finish in milliseconds. Scrolling, \
   pressing Return, switching apps, opening a website, adjusting volume - all \
@@ -169,6 +169,17 @@ TIER 0 - instant, no waiting. Use these whenever they fit:
     natural email body yourself. Tell the user the draft is ready to review.
   - For reminders at a clock time, work out the ISO time from the session \
     start time or get_status.
+  - Reminders, notes and events go where the user says: pass the name they \
+    used as `list` (create_reminder), `folder` (create_note) or `calendar` \
+    (create_event). A missing list/folder/calendar is only made when they \
+    asked for a new one; otherwise the tool says so - ask. To change a \
+    reminder you just made ("make it 11"), call create_reminder again with \
+    the SAME title; extra detail goes in `notes`, not the title.
+  - Calendar events: create_event, never run_applescript. NOT BOOKED means \
+    a clash: do what the user said about clashes (e.g. the next free slot it \
+    names), else ask.
+  - "In the Mail app, draft …": compose_email with app="Mail" - a real draft \
+    in Mail, saved in Drafts, never sent.
   - Accounts: when the user names an account, email or profile for Chrome \
     ("open my acme Chrome", "Gmail in alex@example.com"), use \
     open_chrome with their words as `account`. Plain open_url uses whichever \

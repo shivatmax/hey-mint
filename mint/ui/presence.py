@@ -236,6 +236,7 @@ class Presence:
         self._row(menu, "Forget conversation history", "forget")
         if self.log_path:
             self._row(menu, "Open log", "log")
+        self._row(menu, "Report a problem…", "report:open")
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._row(menu, f"Quit {prefs.name()}", "quit", key="q")
 
@@ -253,6 +254,9 @@ class Presence:
         elif kind == "clipboard":
             from mint.ui import clipboard_window
             clipboard_window.window.show()
+        elif kind == "report":
+            from mint.app import report
+            report.open_issue()
         elif kind == "onboarding":
             from mint.ui import onboarding
             onboarding.onboarding.show()
@@ -395,8 +399,31 @@ def run_cocoa(build) -> None:
     app = AppKit.NSApplication.sharedApplication()
     # Accessory: a menu bar item with no Dock icon and no main window.
     app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
+    _edit_keys(app)
     build()
     AppHelper.runEventLoop(installInterrupt=True)
+
+
+def _edit_keys(app) -> None:
+    """A hidden Edit menu, so ⌘V, ⌘C, ⌘X, ⌘A and ⌘Z work in Mint's text fields (Settings, key prompts,
+    the chat). An accessory app shows no menu bar, but macOS still routes those keys through the main
+    menu - without one, pasting an API key into Settings did nothing."""
+    main = AppKit.NSMenu.alloc().init()
+    for title, items in (("Mint", []),
+                         ("Edit", [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), None, ("Cut", "cut:", "x"),
+                                   ("Copy", "copy:", "c"), ("Paste", "paste:", "v"),
+                                   ("Select All", "selectAll:", "a")])):
+        holder = AppKit.NSMenuItem.alloc().init()
+        menu = AppKit.NSMenu.alloc().initWithTitle_(title)
+        for item in items:
+            if item is None:
+                menu.addItem_(AppKit.NSMenuItem.separatorItem())
+                continue
+            words, action, key = item
+            menu.addItemWithTitle_action_keyEquivalent_(words, action, key)
+        holder.setSubmenu_(menu)
+        main.addItem_(holder)
+    app.setMainMenu_(main)
 
 
 def quit_app() -> None:

@@ -49,6 +49,16 @@ def _automation_hint(output: str, app: str) -> str:
 BOARD_LOCK = threading.RLock()
 
 
+def _not_a_copy(board) -> None:
+    """Tell the clipboard history that the clipboard's current contents are Mint borrowing it (a paste),
+    not something the user copied (bench: Mint's own pastes showed up as the user's copies)."""
+    try:
+        from mint.tools import clipboard as clip_tools
+        clip_tools._own_counts.add(board.changeCount())
+    except Exception:
+        pass
+
+
 class _Clipboard:
     """Save and restore the user's clipboard around an operation that borrows it."""
 
@@ -66,6 +76,8 @@ class _Clipboard:
                 self.board.clearContents()
                 if self.saved is not None:
                     self.board.setString_forType_(self.saved, AppKit.NSPasteboardTypeString)
+                _not_a_copy(self.board)
+        _not_a_copy(self.board)            # what Mint pasted, and then the user's clip put back, are not copies
         BOARD_LOCK.release()
         # Restore after a beat, so the paste has definitely read the new value.
         threading.Timer(0.6, restore).start()
@@ -119,6 +131,9 @@ def type_text(text: str, press_return: bool = False, pid: int | None = None) -> 
                    "Check with look before typing it again - never send it twice.")
     if "FAILED" not in verdict and "not verified" not in verdict and "Not confirmed" not in verdict:
         verdict += _name_untitled_doc(text)
+    if "FAILED" not in verdict:
+        from mint.tools import undo
+        undo.typed(text, press_return, pid)
     return done + verdict
 
 
@@ -444,13 +459,32 @@ def system_action(action: str) -> str:
     if action in {"dark_mode_on", "dark_mode_off", "toggle_dark_mode"}:
         value = {"dark_mode_on": "true", "dark_mode_off": "false",
                  "toggle_dark_mode": "not dark mode"}[action]
+        was = _dark_mode()
         ok, out = _osascript("tell application \"System Events\" to tell appearance "
                              f"preferences to set dark mode to {value}")
+        if ok and was is not None and _dark_mode() != was:
+            from mint.tools import undo
+            undo.record("dark_mode", f"{'light' if was else 'dark'} mode", {"kind": "dark_mode", "on": was})
         return "Done." if ok else _automation_hint(out, "System Events")
     if action in {"mute", "unmute"}:
+        ok, was = _osascript("output muted of (get volume settings)", timeout=4)
         _osascript(f"set volume output muted {'true' if action == 'mute' else 'false'}")
+        if ok and was in ("true", "false") and (was == "true") != (action == "mute"):
+            from mint.tools import undo
+            undo.record("mute", "muting the sound" if action == "mute" else "unmuting the sound",
+                        {"kind": "mute", "muted": was == "true"})
         return "Muted." if action == "mute" else "Unmuted."
     return "Unknown action. Use lock, sleep_display, dark_mode_on, dark_mode_off, toggle_dark_mode, mute or unmute."
+
+
+def _dark_mode() -> bool | None:
+    """Whether dark mode is on, read without asking System Events (no Automation prompt)."""
+    try:
+        done = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True,
+                              timeout=4, check=False)
+        return done.stdout.strip() == "Dark"
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
 
 # --- calendar and reminders (EventKit) ---------------------------------------
@@ -469,6 +503,12 @@ def _event_store(entity: int):
     status = EventKit.EKEventStore.authorizationStatusForEntityType_(entity)
     # 3 = authorized (legacy), 4 = full access.
     if status in (3, 4):
+        # A long-lived store does not see calendars and lists made since (by the user in Calendar, or by
+        # a script): bench, "no calendar called 'Mint Bench'" a minute after it was made.
+        try:
+            _store.refreshSourcesIfNecessary()
+        except Exception:
+            pass
         return _store, None
     if status in (1, 2):
         kind = "Calendars" if entity == EventKit.EKEntityTypeEvent else "Reminders"
@@ -553,63 +593,473 @@ def calendar_rows(day: dt.date | None = None) -> list[dict]:
     return rows
 
 
-def create_reminder(title: str, in_minutes: int | None = None, when: str | None = None) -> str:
-    """A reminder in the default list, optionally due at a time."""
+# --- where things go: the list, folder or calendar the user named ---------------------------------
+
+def _plain_name(name: str, kind: str) -> str:
+    """'my Mint Bench list' -> 'mint bench' (for comparing a spoken name with a real one)."""
+    text = " ".join(str(name or "").lower().replace("’", "'").strip(" '\"").split())
+    text = re.sub(r"^(?:my|the)\s+", "", text)
+    return re.sub(rf"\s+{kind}$", "", text).strip()
+
+
+def _pick(names: list[str], wanted: str, kind: str) -> str | None:
+    """The real name among `names` that `wanted` means (case and 'my … list' ignored), or None."""
+    key = _plain_name(wanted, kind)
+    if not key:
+        return None
+    exact = next((n for n in names if _plain_name(n, kind) == key), None)
+    if exact:
+        return exact
+    # "MintBench" for "Mint Bench", "work-notes" for "Work Notes": the same name without spaces or marks
+    # (bench: a new "MintBench" folder was made next to the user's "Mint Bench").
+    squash = re.sub(r"[^a-z0-9]", "", key.lower())
+    return next((n for n in names if re.sub(r"[^a-z0-9]", "", _plain_name(n, kind).lower()) == squash), None)
+
+
+def _named_in_request(names: list[str], kind: str) -> str | None:
+    """An existing list/folder/calendar the user's request names as one ("my Mint Bench list",
+    "the folder called Work"). Needed because the model often leaves the list out: in the 29 Sep
+    reliability run "add … to my Mint Bench list" went to the default list three times."""
+    try:
+        from mint.app import live
+        text = " ".join(live.request().lower().replace("’", "'").split())
+    except Exception:
+        return None
+    if not text:
+        return None
+    for name in sorted(names, key=len, reverse=True):
+        n = re.escape(" ".join(name.lower().split()))
+        if re.search(rf"\b{n}\s+{kind}s?\b|\b{kind}\s+(?:called|named)\s+['\"]?{n}\b", text):
+            return name
+    return None
+
+
+def _reminder_calendar(store, name: str | None, create: bool):
+    """(EKCalendar or None for the default, problem or None) for a Reminders list the user named."""
     import EventKit
+
+    lists = list(store.calendarsForEntityType_(EventKit.EKEntityTypeReminder) or [])
+    titles = [str(c.title()) for c in lists]
+    wanted = name or _named_in_request(titles, "list")
+    if not wanted:
+        return store.defaultCalendarForNewReminders(), None
+    real = _pick(titles, wanted, "list")
+    if real is not None:
+        return lists[titles.index(real)], None
+    label = " ".join(str(wanted).strip(" '\"").split())
+    if not create:
+        return None, (f"NOT CREATED: Reminders has no list called '{label}'. Its lists: {', '.join(titles)}. "
+                      "Ask the user whether to make that list (then call again with create_list=true) or which "
+                      "list to use - do not put it in another list without asking.")
+    default = store.defaultCalendarForNewReminders()
+    made = EventKit.EKCalendar.calendarForEntityType_eventStore_(EventKit.EKEntityTypeReminder, store)
+    made.setTitle_(label)
+    made.setSource_(default.source())
+    ok, error = store.saveCalendar_commit_error_(made, True, None)
+    if not ok:
+        return None, f"FAILED: could not make the Reminders list '{label}': {error}"
+    return made, None
+
+
+def _open_reminders(store, calendar) -> list:
+    """The incomplete reminders in one list."""
+    done = threading.Event()
+    found: list = []
+
+    def got(reminders):
+        found.extend(reminders or [])
+        done.set()
+
+    predicate = store.predicateForIncompleteRemindersWithDueDateStarting_ending_calendars_(None, None, [calendar])
+    store.fetchRemindersMatchingPredicate_completion_(predicate, got)
+    done.wait(20)
+    return found
+
+
+# The reminder Mint made last: a follow-up ("actually make it 11") should change it, not add a second
+# one. In the 29 Sep run the follow-up came back as a new reminder titled "… (bring the invoice)".
+_last_reminder: dict = {}
+
+
+def _same_reminder(store, calendar, title: str) -> tuple[object | None, str]:
+    """(an open reminder this call should update instead of duplicating, leftover words for its notes)."""
+    key = " ".join(title.lower().split())
+    for item in _open_reminders(store, calendar):
+        if " ".join(str(item.title() or "").lower().split()) == key:
+            return item, ""
+    last = _last_reminder
+    if last and time.monotonic() - last["at"] < 15 * 60:
+        old = " ".join(last["title"].lower().split())
+        rest = re.match(r"^\s*(?:\((.+)\)|[-–:,]\s*(.+))\s*$", key[len(old):]) if key.startswith(old) else None
+        if rest:
+            item = store.calendarItemWithIdentifier_(last["id"])
+            if item is not None and not item.isCompleted():
+                start = len(title) - len(key[len(old):].lstrip())
+                return item, title[start:].strip(" ()-–:,")
+    return None, ""
+
+
+def _due_components(due: dt.datetime):
     import Foundation
     from Foundation import NSCalendar, NSDate
+
+    units = (Foundation.NSCalendarUnitYear | Foundation.NSCalendarUnitMonth | Foundation.NSCalendarUnitDay
+             | Foundation.NSCalendarUnitHour | Foundation.NSCalendarUnitMinute)
+    return NSCalendar.currentCalendar().components_fromDate_(units, NSDate.dateWithTimeIntervalSince1970_(due.timestamp()))
+
+
+def _say_day(when: dt.datetime) -> tuple[dt.datetime, bool]:
+    """"Tomorrow" / "today" / "tonight" in the user's request decide the day, whatever date the model worked
+    out: just after midnight it still counted from the day before (bench, a run that crossed midnight)."""
+    from mint.app import live
+    request = " ".join((live.request() or "").lower().split())
+    today = dt.date.today()
+    if re.search(r"\bday after tomorrow\b", request):
+        day = today + dt.timedelta(days=2)
+    elif re.search(r"\btomorrow\b", request):
+        day = today + dt.timedelta(days=1)
+    elif re.search(r"\b(today|tonight|this (morning|afternoon|evening))\b", request):
+        day = today
+    else:
+        return when, False
+    if when.date() == day or re.search(r"\b(\d{1,2} (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|"
+                                       r"(mon|tues|wednes|thurs|fri|satur|sun)day)", request):
+        return when, False                                   # the right day, or the request names a date too
+    print(f"  [date: {when.date()} -> {day}, as the request says]", flush=True)
+    return when.replace(year=day.year, month=day.month, day=day.day), True
+
+
+def create_reminder(title: str, in_minutes: int | None = None, when: str | None = None,
+                    list_name: str | None = None, notes: str | None = None, create_list: bool = False) -> str:
+    """A reminder, optionally due at a time, in the list the user named (else the default list).
+
+    A list that does not exist is made only with `create_list`; otherwise the answer says so and lists
+    the real ones. An open reminder with the same title in that list (or the one just made, when the
+    new title only adds words to it) is changed instead of duplicated.
+    """
+    import EventKit
+    from Foundation import NSDate
 
     store, problem = _event_store(EventKit.EKEntityTypeReminder)
     if problem:
         return problem
+    title = " ".join(str(title or "").split())
+    if not title:
+        return "FAILED: a reminder needs a title."
 
     due = None
     if in_minutes:
         due = dt.datetime.now() + dt.timedelta(minutes=int(in_minutes))
     elif when:
         try:
-            due = dt.datetime.fromisoformat(when)
+            due = dt.datetime.fromisoformat(str(when).strip())
         except ValueError:
             return "Could not read that time. Give it as 2026-09-24T09:00, or as minutes from now."
+        due, _moved = _say_day(due)
 
-    reminder = EventKit.EKReminder.reminderWithEventStore_(store)
-    reminder.setTitle_(title)
-    reminder.setCalendar_(store.defaultCalendarForNewReminders())
+    calendar, problem = _reminder_calendar(store, list_name, bool(create_list))
+    if problem:
+        return problem
+    existing, extra = _same_reminder(store, calendar, title) if calendar is not None else (None, "")
+    reminder = existing or EventKit.EKReminder.reminderWithEventStore_(store)
+    if existing is None:
+        reminder.setTitle_(title)
+        reminder.setCalendar_(calendar)
+    notes = " ".join(str(notes).split()) if notes else extra
+    if notes:
+        reminder.setNotes_(notes)
     if due is not None:
-        calendar = NSCalendar.currentCalendar()
-        units = (Foundation.NSCalendarUnitYear | Foundation.NSCalendarUnitMonth
-                 | Foundation.NSCalendarUnitDay | Foundation.NSCalendarUnitHour
-                 | Foundation.NSCalendarUnitMinute)
-        components = calendar.components_fromDate_(
-            units, NSDate.dateWithTimeIntervalSince1970_(due.timestamp()))
-        reminder.setDueDateComponents_(components)
-        reminder.addAlarm_(EventKit.EKAlarm.alarmWithAbsoluteDate_(
-            NSDate.dateWithTimeIntervalSince1970_(due.timestamp())))
+        reminder.setDueDateComponents_(_due_components(due))
+        for alarm in list(reminder.alarms() or []):
+            reminder.removeAlarm_(alarm)
+        reminder.addAlarm_(EventKit.EKAlarm.alarmWithAbsoluteDate_(NSDate.dateWithTimeIntervalSince1970_(due.timestamp())))
 
     ok, error = store.saveReminder_commit_error_(reminder, True, None)
     if not ok:
         return f"Could not save the reminder: {error}"
-    return f"Reminder set: {title}" + (due.strftime(", due %A at %-I:%M %p") if due else "") + "."
+    where = str(reminder.calendar().title()) if reminder.calendar() is not None else "Reminders"
+    name = str(reminder.title())
+    _last_reminder.update({"id": str(reminder.calendarItemIdentifier()), "title": name, "at": time.monotonic()})
+    when_text = due.strftime(", due %A %-d %B at %-I:%M %p") if due else ""
+    from mint.tools import undo
+    if existing is not None:
+        undo.record("reminder", f"changing the reminder '{name}'", None,
+                    "change it back in Reminders; it was an existing reminder, so it was not deleted.")
+        return (f"Updated the existing reminder '{name}' in the '{where}' list (not duplicated){when_text}"
+                + (f", notes: {notes}" if notes else "") + ".")
+    undo.record("reminder", f"creating the reminder '{name}'",
+                {"kind": "reminder_delete", "id": str(reminder.calendarItemIdentifier()), "title": name})
+    return f"Reminder set in the '{where}' list: {name}{when_text}" + (f", notes: {notes}" if notes else "") + "."
+
+
+# --- calendar events --------------------------------------------------------------------------------
+
+def _event_calendar(store, name: str | None, create: bool):
+    """(EKCalendar, problem) for the calendar the user named, else the default one."""
+    import EventKit
+
+    calendars = [c for c in (store.calendarsForEntityType_(EventKit.EKEntityTypeEvent) or [])
+                 if c.allowsContentModifications()]
+    titles = [str(c.title()) for c in calendars]
+    wanted = name or _named_in_request(titles, "calendar")
+    if not wanted:
+        return store.defaultCalendarForNewEvents(), None
+    real = _pick(titles, wanted, "calendar")
+    if real is not None:
+        return calendars[titles.index(real)], None
+    label = " ".join(str(wanted).strip(" '\"").split())
+    if not create:
+        return None, (f"NOT BOOKED: there is no calendar called '{label}' that can be written to. Calendars: "
+                      f"{', '.join(titles)}. Ask the user which one to use, or whether to make it (then call "
+                      "again with create_calendar=true).")
+    made = EventKit.EKCalendar.calendarForEntityType_eventStore_(EventKit.EKEntityTypeEvent, store)
+    made.setTitle_(label)
+    made.setSource_(store.defaultCalendarForNewEvents().source())
+    ok, error = store.saveCalendar_commit_error_(made, True, None)
+    if not ok:
+        return None, f"FAILED: could not make the calendar '{label}': {error}"
+    return made, None
+
+
+def next_free(busy: list[tuple[dt.datetime, dt.datetime]], start: dt.datetime, length: dt.timedelta,
+              latest: dt.datetime) -> dt.datetime | None:
+    """The first start at or after `start`, on a half-hour step, where `length` fits between the busy spans
+    and ends by `latest`. None if it does not fit."""
+    slot = start
+    while slot + length <= latest:
+        clash = [b for b in busy if b[0] < slot + length and slot < b[1]]
+        if not clash:
+            return slot
+        slot = max(e for _, e in clash)
+        if slot.minute % 30 or slot.second:                     # back onto the half-hour grid
+            slot = slot.replace(second=0, microsecond=0) + dt.timedelta(minutes=30 - slot.minute % 30)
+    return None
+
+
+def create_event(title: str, start: str, end: str | None = None, minutes: int | None = None,
+                 calendar: str | None = None, location: str | None = None, notes: str | None = None,
+                 allow_overlap: bool = False, create_calendar: bool = False) -> str:
+    """A Calendar event, through EventKit (Calendar's AppleScript took over 30 s on 29 Sep).
+
+    Goes in the calendar the user named (else the default). If it overlaps an event on that calendar
+    it is NOT booked unless `allow_overlap`: the answer names the clash and the next free slot of the
+    same length that day, for the model to use or ask about.
+    """
+    import EventKit
+    from Foundation import NSDate
+
+    store, problem = _event_store(EventKit.EKEntityTypeEvent)
+    if problem:
+        return problem
+    title = " ".join(str(title or "").split())
+    try:
+        begins = dt.datetime.fromisoformat(str(start).strip())
+        ends = dt.datetime.fromisoformat(str(end).strip()) if end else begins + dt.timedelta(minutes=int(minutes or 60))
+    except ValueError:
+        return "Could not read that time. Give start (and end) as local ISO times, e.g. 2026-10-06T15:00."
+    fixed, _moved = _say_day(begins)
+    ends, begins = ends + (fixed - begins), fixed
+    if not title or ends <= begins:
+        return "FAILED: an event needs a title and an end after its start."
+    target, problem = _event_calendar(store, calendar, bool(create_calendar))
+    if problem:
+        return problem
+
+    def ns(when: dt.datetime):
+        return NSDate.dateWithTimeIntervalSince1970_(when.timestamp())
+
+    def py(nsdate) -> dt.datetime:
+        return dt.datetime.fromtimestamp(nsdate.timeIntervalSince1970())
+
+    day0 = dt.datetime.combine(begins.date(), dt.time.min)
+    found = store.eventsMatchingPredicate_(store.predicateForEventsWithStartDate_endDate_calendars_(
+        ns(day0), ns(day0 + dt.timedelta(days=1)), None)) or []
+    same = [e for e in found if e.calendar() is not None and e.calendar().calendarIdentifier() == target.calendarIdentifier()
+            and not e.isAllDay()]
+    for e in same:
+        if " ".join(str(e.title() or "").lower().split()) == title.lower() and py(e.startDate()) == begins:
+            return f"Already on the '{target.title()}' calendar: {title} at {begins:%-I:%M %p} - not booked twice."
+    busy = sorted((py(e.startDate()), py(e.endDate())) for e in same)
+    clashes = [e for e in same if py(e.startDate()) < ends and begins < py(e.endDate())]
+    if clashes and not allow_overlap:
+        spans = "; ".join(f"'{e.title()}' {py(e.startDate()):%-I:%M}-{py(e.endDate()):%-I:%M %p}" for e in clashes)
+        free = next_free(busy, begins, ends - begins, day0 + dt.timedelta(hours=22))
+        offer = (f" The next free slot of the same length that day is {free:%-I:%M %p}-{free + (ends - begins):%-I:%M %p} "
+                 f"(start {free:%Y-%m-%dT%H:%M})." if free else " Nothing that long is free later that day.")
+        return (f"NOT BOOKED: {begins:%-I:%M %p} clashes on the '{target.title()}' calendar with {spans}.{offer} "
+                "If the user said what to do on a clash, do that (call again with the new start); otherwise ask. "
+                "allow_overlap=true books on top.")
+
+    event = EventKit.EKEvent.eventWithEventStore_(store)
+    event.setTitle_(title)
+    event.setStartDate_(ns(begins))
+    event.setEndDate_(ns(ends))
+    event.setCalendar_(target)
+    if location:
+        event.setLocation_(str(location))
+    if notes:
+        event.setNotes_(str(notes))
+    ok, error = store.saveEvent_span_commit_error_(event, EventKit.EKSpanThisEvent, True, None)
+    if not ok:
+        return f"FAILED: could not save the event: {error}"
+    from mint.tools import undo
+    undo.record("event", f"adding '{title}' to the calendar", None, "delete the event in Calendar.")
+    others = [e for e in found if e not in same and not e.isAllDay()
+              and py(e.startDate()) < ends and begins < py(e.endDate())]
+    note = (" (Also at that time on other calendars: " + "; ".join(f"'{e.title()}'" for e in others[:3]) + ".)"
+            if others else "")
+    return (f"Added '{title}' to the '{target.title()}' calendar: {begins:%A %-d %B}, "
+            f"{begins:%-I:%M %p}-{ends:%-I:%M %p}.{note}")
 
 
 # --- notes and mail ------------------------------------------------------------
 
-def create_note(title: str, body: str = "") -> str:
-    html = "<h1>" + title + "</h1>" + "".join(
-        f"<div>{line or '<br>'}</div>" for line in body.split("\n"))
+_NOTE_SEP = "␞"
+
+
+def _note_folders() -> tuple[list[str] | None, str]:
+    ok, out = _osascript('tell application "Notes"\nset out to ""\nrepeat with f in folders\n'
+                         f'set out to out & (name of f) & "{_NOTE_SEP}"\nend repeat\nreturn out\nend tell', timeout=20)
+    if not ok:
+        return None, out
+    return [n for n in out.split(_NOTE_SEP) if n.strip()], ""
+
+
+def create_note(title: str, body: str = "", folder: str | None = None, create_folder: bool = False) -> str:
+    """A note in the Notes folder the user named (else Notes' default folder). A folder that does not
+    exist is made only with `create_folder`; otherwise the answer lists the real ones."""
+    import html as _html
+
+    title = " ".join(str(title or "").split())
+    text = str(body or "")
+    lines = text.split("\n")
+    if lines and lines[0].strip().lower() == title.lower():      # the model often repeats the title
+        lines = lines[1:]
+    markup = "<h1>" + _html.escape(title) + "</h1>" + "".join(
+        f"<div>{_html.escape(line) or '<br>'}</div>" for line in lines)
+
+    folders, problem = _note_folders()
+    if folders is None:
+        return _automation_hint(problem, "Notes")
+    wanted = folder or _named_in_request(folders, "folder")
+    target = _pick(folders, wanted, "folder") if wanted else None
+    make_folder = ""
+    if wanted and target is None:
+        label = " ".join(str(wanted).strip(" '\"").split())
+        if not create_folder:
+            return (f"NOT CREATED: Notes has no folder called '{label}'. Its folders: "
+                    f"{', '.join(dict.fromkeys(folders))}. Ask the "
+                    "user whether to make it (then call again with create_folder=true) or which folder to use.")
+        target = label
+        make_folder = (f"if not (exists folder {_as_string(label)}) then make new folder with properties "
+                       f"{{name:{_as_string(label)}}}\n")
+    where = f"at folder {_as_string(target)} " if target else ""
+    # Body only: Notes names a note after its first line, and a `name` as well wrote the title twice.
     ok, out = _osascript(
-        f"tell application \"Notes\" to make new note with properties "
-        f"{{name:{_as_string(title)}, body:{_as_string(html)}}}")
-    return f"Created the note '{title}'." if ok else _automation_hint(out, "Notes")
+        f"tell application \"Notes\"\n{make_folder}set n to make new note {where}with properties "
+        f"{{body:{_as_string(markup)}}}\n"
+        f"set f to \"\"\ntry\nset f to name of container of n\nend try\n"
+        f"return (id of n) & \"{_NOTE_SEP}\" & f\nend tell", timeout=20)
+    if not ok:
+        return _automation_hint(out, "Notes")
+    ident, _, place = out.partition(_NOTE_SEP)
+    place = place or target or ""                    # a new note's container is not always readable
+    from mint.tools import undo
+    undo.record("note", f"creating the note '{title}'", {"kind": "note_delete", "id": ident, "title": title})
+    return f"Created the note '{title}'" + (f" in the '{place}' folder" if place else "") + "."
 
 
-def compose_email(to: str = "", subject: str = "", body: str = "") -> str:
-    """Open a pre-filled draft in the default mail app. Never sends."""
+def _mail_handler() -> str:
+    """Bundle id of the app that opens mailto: links ('' if unknown)."""
+    try:
+        from Foundation import NSURL
+        url = AppKit.NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(NSURL.URLWithString_("mailto:x@y.z"))
+        bundle = AppKit.NSBundle.bundleWithURL_(url) if url is not None else None
+        return str(bundle.bundleIdentifier() or "") if bundle is not None else ""
+    except Exception:
+        return ""
+
+
+def _wants_mail_app(app: str | None) -> bool:
+    """Draft in Apple Mail (a real, saved draft) rather than through the default mailto: handler?"""
+    if app:
+        return bool(re.search(r"\b(apple\s*)?mail(\.app)?\b(?!to)", str(app).lower())) \
+            and not re.search(r"gmail|outlook|chrome|default", str(app).lower())
+    try:
+        from mint.app import live
+        request = live.request().lower()
+    except Exception:
+        request = ""
+    if re.search(r"\b(mail app|apple mail|mail\.app|in mail\b|the mail application)", request):
+        return True
+    return _mail_handler() == "com.apple.mail"
+
+
+def _addresses(to: str) -> list[str]:
+    found = re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", str(to or ""))
+    return list(dict.fromkeys(found))
+
+
+def _mail_draft(to: str, subject: str, body: str) -> str:
+    """A draft in Apple Mail: an open compose window, also saved to Drafts. Never sent."""
+    recipients = "".join(f"make new to recipient at end of to recipients with properties {{address:{_as_string(a)}}}\n"
+                         for a in _addresses(to))
+    script = f"""
+tell application "Mail"
+    if (count of accounts) is 0 then return "NOACCOUNT"
+    set m to make new outgoing message with properties {{subject:{_as_string(subject)}, content:{_as_string(body)}, visible:true}}
+    tell m
+        {recipients}
+    end tell
+    try
+        save m
+    end try
+    set rcpt to ""
+    repeat with r in (to recipients of m)
+        set rcpt to rcpt & (address of r) & ","
+    end repeat
+    return (id of m as text) & "{_NOTE_SEP}" & (subject of m) & "{_NOTE_SEP}" & rcpt
+end tell"""
+    ok, out = _osascript(script, timeout=45)
+    if not ok:
+        return "FAILED: could not make the draft in Mail. " + _automation_hint(out, "Mail")
+    if out == "NOACCOUNT":
+        return ("FAILED: the Mail app has no email account set up, so it cannot hold a draft. Tell the user; "
+                "or draft it in their webmail instead.")
+    ident, got_subject, got_to = (out.split(_NOTE_SEP) + ["", ""])[:3]
+    missing = [a for a in _addresses(to) if a.lower() not in got_to.lower()]
+    if got_subject != subject or missing:
+        return (f"FAILED: the Mail draft came out wrong (subject '{got_subject}', to '{got_to.strip(',')}'). "
+                "It was NOT sent. Tell the user to check the open draft.")
+    from mint.tools import undo
+    undo.record("email", f"making an email draft{' to ' + to if to else ''} in Mail", None,
+                "it was only a draft and was never sent; close its window and delete it from Drafts to discard it.")
+    return (f"Made a draft in the Mail app to {got_to.strip(',') or 'nobody yet'}, subject '{got_subject}' - open "
+            "for the user to review and saved in Drafts. NOT sent; the user sends it.")
+
+
+def compose_email(to: str = "", subject: str = "", body: str = "", app: str | None = None) -> str:
+    """A pre-filled draft for the user to review. Never sends.
+
+    In Apple Mail - when the user asks for the Mail app, `app` says so, or Mail is the default mail
+    app - it is a real draft made through Mail's scripting and checked. Otherwise a mailto: link opens
+    it in the default mail app. (In the 29 Sep run "in the Mail app, draft …" went through mailto:,
+    and mailto: opened Chrome, the default handler here: nothing reached Mail.)
+    """
+    if _wants_mail_app(app):
+        return _mail_draft(to, subject, body)
     query = urllib.parse.urlencode({"subject": subject, "body": body},
                                    quote_via=urllib.parse.quote)
     url = f"mailto:{urllib.parse.quote(to, safe='@,')}?{query}"
     subprocess.run(["open", url], check=False)
-    return "Opened a draft in the mail app. It has not been sent; the user reviews and sends it."
+    handler = _mail_handler()
+    app_name = {"com.google.Chrome": "Google Chrome", "com.apple.Safari": "Safari",
+                "com.microsoft.Outlook": "Outlook", "com.apple.mail": "Mail"}.get(handler, handler or "the default mail app")
+    from mint.tools import undo
+    undo.record("email", f"opening an email draft{' to ' + to if to else ''}", None,
+                "it was only a draft and was never sent; close the draft window to discard it.")
+    return (f"Opened a draft in {app_name} (the default mail app, through a mailto: link). It has not been sent; "
+            "the user reviews and sends it. If they wanted it in the Mail app, call again with app='Mail'.")
 
 
 def list_emails(count: int = 5) -> str:

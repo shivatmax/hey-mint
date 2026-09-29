@@ -24,7 +24,9 @@ collects nothing. What leaves your Mac goes straight from your Mac to the AI ser
 | Meeting notes, video watching and editing, translations, documents | The recorded audio, video frames or captions, and the document text being worked on | Google Gemini API |
 | Background agents and Codex (optional) | The task and the files or pages it works on | OpenAI |
 | Quick choices and the screen-control engine (optional) | The request, and the names of the controls in the app in front (no screenshots) | TypeSafe Jev |
+| Telegram remote control (optional; off until you add your own bot token and switch it on) | The requests and voice notes you send your bot, Mint's steps and replies, and screenshots or files from those requests | Telegram (your own bot, through the Bot API; voice notes are transcribed by the Google Gemini API) |
 | Watching or editing a web video | The video's address | The video site (via yt-dlp) |
+| Checking for updates (the downloaded app, at launch and every 12 hours; off with Settings ▸ Automatic updates) | A request for the latest release, with no data about you (GitHub sees your IP address, as with any download) | GitHub |
 
 Read each provider's terms: Google's for the Gemini API, OpenAI's and TypeSafe's. Some free tiers
 may use your data to improve their models. Paid tiers usually don't.

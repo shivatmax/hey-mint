@@ -1,4 +1,3 @@
-
 <div align="center">
 
 # Hey Mint
@@ -64,7 +63,11 @@ a video it's watching, an answer as a card.
 | “make it vertical for Reels and add captions”, “remove the silent parts”, “compress it under 25 MB” | Video editing by voice: planned by Gemini, rendered with ffmpeg next to the original, then checked (QA) |
 | “brighter”, “Chrome left, Slack right”, “turn on Do Not Disturb”, “record just this part of the screen” | Your Mac's switches (brightness, keep awake, Focus, Night Shift, windows via Rectangle) and screen recordings of the screen, a window or an area you describe |
 | *drag a file onto Mint* | Drop files, folders or text on the orb: it offers what fits (summarise, translate, spreadsheet, captions, transcribe) |
+| *a Telegram message or voice note from your phone* | Remote control from anywhere through your own Telegram bot: Mint does it on the Mac and shows each step in the chat, then the reply, screenshots and files |
+| “ask ChatGPT to outline the talk”, “is Claude still working?”, “tell me when Claude is done” | Drives the ChatGPT and Claude desktop apps: asks, reads replies, opens and lists chats and Claude Code sessions, and tells you when they finish |
 | “open my clipboard”, “paste the last 5 screenshots in the chat”, “pin this as my address” | A clipboard that remembers everything you copy and every screenshot: Mint turns into it (⌃⌥V), pick several in order, pin up to 20, passwords and keys go to the Keychain |
+| “what did I miss?”, “undo that”, “merge these folders, keep the newest” | Reads and clears your notifications; undoes what Mint just did (brightness, windows, text, files, reminders); merges folders keeping the newest copy |
+| “Hey Jarvis” (your own wake word), “always answer in Hindi” | Train a wake word of your own on your Mac in about a minute and a half; pick the language Mint answers in |
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
@@ -201,6 +204,10 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
 
 How the pieces fit together is in [docs/architecture.md](docs/architecture.md); every command and
 tool is in [docs/usage.md](docs/usage.md); working on Mint is in [docs/development.md](docs/development.md).
+
+## Reliability
+
+`bench/reliability/` holds 70 realistic, long tasks (files, documents, spreadsheets, Reminders, Notes, Calendar, Mail drafts, the web, clipboard, video, memory, agents), each with its own complications - typos, locked files, pages that fail, two- and four-turn follow-ups - set up in a sandbox, sent to the running app and checked by the end state, not by what Mint says. The latest full run passed 67 of 70; the three misses were fixed since. Run it with `bench/reliability/run.py` (see its README).
 
 ## Privacy and safety
 

@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased
+
+- **Reliability, from the benchmark (67% -> 96% on 70 tasks):**
+  - **Save and create where asked:**
+    - spreadsheets and PDFs save where the user says (`save_to`, or the path in the request)
+    - `data_to_sheet` takes `data` (no scratch CSVs) and writes a correct Total row
+    - new `edit_spreadsheet` edits an .xlsx in place
+    - web tables are read directly
+  - **Apple apps:** reminders, notes and calendar events go into the named list/folder/calendar, matched ignoring spaces and case. New `create_event` checks clashes. Mail drafts really open in Mail.
+  - **Dates:** "today/tomorrow" come from the user's words; Mint reconnects after midnight so the date is right.
+  - **Files:**
+    - a missing file with a close name is used (typo) or offered (a lookalike)
+    - `find_files` suggests the same name in another format
+    - listings show exact ages
+    - "Markdown" means .md
+    - creating a file that exists adds below instead of replacing
+    - a guard stops overwrites that would lose the user's lines
+  - **Tidy and merge:** tidy only skips files still being written; duplicates are by content. New `merge_folders` keeps the newest copy, puts older ones in `older/`, is undoable.
+  - **New `calculate` tool:** exact arithmetic for totals and conversions.
+  - **Clipboard:** `to_file` writes copies into a file exactly; restore reports the right item; Mint's own pastes are no longer recorded as the user's copies.
+  - **TextEdit:** .rtf files are edited directly (formatting kept); stale windows are reopened; saves are verified.
+  - **OCR:** `ocr_copy` returns the full text and can save it.
+  - **Video:** "cut out 0:05-0:15 as clip.mp4" keeps that part.
+  - **Agents:** save to the named path; a clear message (no retries) when the OpenAI account is out of credits.
+  - **Session:** a typed request is resent after a dropped session; hearing fixes are never saved from typed requests.
+  - **Also new:** Telegram remote control and ChatGPT/Claude desktop app control (from a parallel session).
+- **Telegram remote control** (`mint/app/telegram.py`): text or send voice notes to your own Telegram bot from
+  anywhere; Mint runs them on the Mac and mirrors its work live into the chat (one "working" message updated step
+  by step, then the reply, plus screenshots and files it made). Pairing with a 6-digit code (only your account),
+  /stop /status /screenshot /pause /resume, read-only mode, alerts from trackers and agents, an audit log.
+  Outbound long polling only: no server, no port forwarding.
+- **ChatGPT and Claude app control** (`mint/tools/agentapps.py`): "ask ChatGPT to …", "what did Claude answer?",
+  "is Claude still working?", open, list and start chats or Claude Code sessions, stop a reply. Native
+  accessibility, the prompt verified before one Send, replies treated as quoted data. Trackers: "tell me when
+  ChatGPT finishes", "let me know when Claude is done".
+- **Your own wake word** (`mint/voice/wake_train.py`): type "Hey Jarvis" (or any two-three words) in Settings ▸
+  Voice & wake word and train it on your Mac in about 90 s, from system voices plus optional takes of your own
+  voice. Checked before it is used (93% of unseen voices, ~1 false wake an hour in testing); "Hey Mint" can stay
+  on too. Both the Python detector and the Swift Mint Ear load it.
+- **Reliability benchmark** (`bench/reliability/`): 50 sandboxed long-horizon tasks with complications (typos,
+  locked files, interruptions, slow and failing pages, two-turn follow-ups), each set up, run against the live
+  app and checked by its end state. Mint prints `[done]` when a request is finished.
+- **Deaf-session watchdog:** a typed request that gets nothing back in 30 s reconnects with a fresh session and
+  is sent again (seen after a voice-change reconnect: the resumed session accepted requests but never answered).
+- **Automatic updates** (`mint/app/updater.py`): the packaged app checks GitHub releases at launch and twice a
+  day, downloads in the background, verifies the checksum and that the new app is signed with the same
+  certificate, then swaps it in place while the Mac is idle and reopens it. No second copy; permissions stay. A
+  free self-signed release certificate (`packaging/make_release_cert.sh`) keeps macOS permissions across updates
+  without a paid Apple Developer ID.
+- **Settings, redesigned:** a sidebar of pages like System Settings, with grouped cards. New pages: Accounts &
+  keys (Gemini required; OpenAI and TypeSafe optional; Google via Internet Accounts), Usage, and Updates & Help.
+- **Usage** (`mint/core/usage.py`): tokens per model per day (requests, input, output, thinking), counted from
+  every Gemini request, the Live session and the OpenAI agents. Counts only, never content.
+- **Language:** Mint answers in the language you speak, or always in one you pick (Settings ▸ Speaking, or "always
+  answer in Hindi").
+- **Notifications** (`mint/tools/notifications.py`): "what did I miss?", read, filter, open, dismiss and clear
+  notifications, and reply where the app allows (read back first, sent only when asked). Through Accessibility:
+  no new permission.
+- **Undo** (`mint/tools/undo.py`): "undo that", "undo the last 3 things", "redo". A 24-hour journal of Mint's own
+  reversible actions: Mac switches, window layouts, rewritten and typed text, reminders, notes, file moves and
+  renames, clipboard changes, settings changed by voice.
+- **Report a problem:** the menu bar and Settings open a prefilled GitHub issue; recent errors (paths, emails,
+  keys and speech removed) go on the clipboard to paste in if you choose.
+- **Google, locally:** Settings shows which Google accounts Mail and Calendar have, with a button to add one in
+  Internet Accounts. No Mint sign-in, no server.
+
 ## 0.2.0 (2026-09-29)
 
 - **Welcome window** (`mint/ui/onboarding.py`): the first launch opens a guided setup. It covers:

@@ -84,8 +84,10 @@ def declarations() -> list[types.FunctionDeclaration]:
             ["path"]),
         _fn("write_file",
             "Create or change a text file (notes, code, Markdown, CSV, HTML...). mode: create (new file; "
-            "fails if it exists), overwrite (replace all; the old version is backed up first), append, or "
-            "replace (swap the exact text `find` for `content`; `find` must occur once). A bare file name "
+            "fails if it exists), overwrite (replace all, only when the user asked to replace what is in it; the "
+            "old version is backed up first), append, or "
+            "replace (swap the exact text `find` for `content`; `find` must occur once; also in .rtf/.rtfd "
+            "documents, keeping their formatting). A bare file name "
             "goes to Mint's Documents folder (Settings > Storage). Never put passwords or keys in a file.",
             {"path": STRING, "content": STRING,
              "mode": _enum(("create", "overwrite", "append", "replace"), "default create"),
@@ -94,11 +96,20 @@ def declarations() -> list[types.FunctionDeclaration]:
         _fn("find_files",
             "Find files and folders by name or content with Spotlight, newest first. With no query it "
             "lists `folder` (or, with no folder either, what changed recently on Desktop, Documents and "
-            "Downloads). kind narrows it: pdf, image, doc, sheet, slides, code, video, audio, folder, app.",
+            "Downloads). Each result shows its size and the date it was last modified (saved). kind narrows it: "
+            "pdf, image, doc, text (.txt/.md/.csv...), sheet, slides, code, video, audio, folder, app. "
+            "days=7 keeps only what was modified in the last 7 days; modified_from / modified_to "
+            "(YYYY-MM-DD, or YYYY-MM for a whole month, inclusive) keep a date range - use these for "
+            "'from last week' / 'saved in September'. A date printed INSIDE a document (an invoice date) is "
+            "not its modified date: read the files for that.",
             {"query": STRING, "folder": STRING,
-             "kind": _enum(("any", "pdf", "image", "doc", "sheet", "slides", "code", "video", "audio",
+             "kind": _enum(("any", "pdf", "image", "doc", "text", "sheet", "slides", "code", "video", "audio",
                             "folder", "app"), "default any"),
              "content": {**BOOLEAN, "description": "also match text inside files (default true)"},
+             "days": {**INTEGER, "description": "only items modified within the last this many days"},
+             "modified_from": {**STRING, "description": "only items modified on or after this date (YYYY-MM-DD or YYYY-MM)"},
+             "modified_to": {**STRING, "description": "only items modified on or before this date (YYYY-MM-DD or YYYY-MM)"},
+             "sort": _enum(("newest", "oldest", "biggest", "smallest", "name"), "default newest"),
              "limit": INTEGER}),
         _fn("file_action",
             "Do something with a file or folder: open (in its default app), reveal (in Finder), info, "
@@ -485,10 +496,45 @@ def _resolve(raw: str, must_exist: bool = True) -> tuple[Path | None, str]:
     if why:
         return None, why
     if must_exist and not path.exists():
+        alike = _lookalikes(path)
+        if alike:
+            listing = "\n".join(f"- {_short(p)}{'/' if p.is_dir() else ''}  ({why})" for p, why in alike)
+            single = (" Only one is close, so it is almost certainly a typo: use it and carry on, and tell the "
+                      "user which file you used." if len(alike) == 1 else "")
+            return None, (f"{_short(path)} does not exist. {_short(path.parent)} has files with similar names:\n"
+                          f"{listing}\nUse the real name from this list (the name may differ from what a document "
+                          "or spreadsheet calls it); if none of them is the one meant, ask the user." + single)
         near = _spotlight(path.name, 3)
         hint = (" Did you mean: " + ", ".join(_short(p) for p in near) + "?") if near else ""
         return None, f"{_short(path)} does not exist.{hint}"
     return path, ""
+
+
+def _lookalikes(path: Path, limit: int = 6) -> list[tuple[Path, str]]:
+    """Files next to where a missing `path` would be whose names are close to it (bench: Mint moved
+    "INV-102.pdf" when the file was INV-102.txt): [(path, why)], best first."""
+    import difflib
+    folder = path.parent
+    try:
+        if not folder.is_dir() or _blocked(folder):
+            return []
+        siblings = [Path(e.path) for e in os.scandir(folder) if not e.name.startswith(".")]
+    except OSError:
+        return []
+    stem, name = path.stem.lower(), path.name.lower()
+    scored = []
+    for p in siblings:
+        other = p.stem.lower() if p.is_file() else p.name.lower()
+        if other == stem and p.name.lower() != name:
+            scored.append((3, p, f"same name, {p.suffix or 'no extension'}" if p.is_file() else "folder"))
+        elif len(stem) >= 3 and (stem in other or (len(other) >= 3 and other in stem)):
+            scored.append((2, p, "name contains it" if stem in other else "name is part of it"))
+        else:
+            ratio = difflib.SequenceMatcher(None, stem, other).ratio()
+            if ratio >= 0.75:
+                scored.append((1 + ratio / 10, p, "similar name"))
+    scored.sort(key=lambda s: (-s[0], s[1].name.lower()))
+    return [(p, why) for _, p, why in scored[:limit]]
 
 
 def _size(n: float) -> str:
@@ -500,15 +546,26 @@ def _size(n: float) -> str:
 
 
 def _ago(stamp: float) -> str:
+    """How long ago, in whole days up to two months ("9 days ago", never a vague "1 week ago": bench, Mint
+    counted a 9-day-old note as "from the last 7 days")."""
     seconds = time.time() - stamp
     if seconds < 90:
         return "just now"
-    for size, unit in ((86400 * 365, "year"), (86400 * 30, "month"), (86400 * 7, "week"), (86400, "day"),
-                       (3600, "hour"), (60, "minute")):
+    for size, unit in ((86400 * 365, "year"), (86400 * 60, "month"), (86400, "day"), (3600, "hour"),
+                       (60, "minute")):
         if seconds >= size:
-            n = int(seconds // size)
+            n = int(seconds // (86400 * 30 if unit == "month" else size))
             return f"{n} {unit}{'s' if n > 1 else ''} ago"
     return "just now"
+
+
+def _when(stamp: float) -> str:
+    """A modification time for listings: the calendar date and how long ago ("20 Sep 2026, 9 days ago"),
+    so "saved in September" and "in the last 7 days" can be answered from the listing itself."""
+    then = datetime.datetime.fromtimestamp(stamp)
+    if then.date() == datetime.date.today():
+        return f"today {then:%H:%M}"
+    return f"{then.day} {then:%b %Y}, {_ago(stamp)}"
 
 
 # --- Files ----------------------------------------------------------------------------------
@@ -519,6 +576,7 @@ _KINDS = {
     "pdf": {".pdf"},
     "image": _IMAGES | {".svg"},
     "doc": {".docx", ".doc", ".pages", ".rtf", ".txt", ".md", ".odt"},
+    "text": {".txt", ".md", ".markdown", ".rtf", ".csv", ".tsv", ".json", ".yaml", ".yml", ".log", ".html", ".xml"},
     "sheet": {".xlsx", ".xls", ".csv", ".numbers", ".tsv"},
     "slides": {".pptx", ".ppt", ".key"},
     "code": {".py", ".js", ".ts", ".tsx", ".jsx", ".swift", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".h",
@@ -562,7 +620,10 @@ def _text_of(path: Path) -> tuple[str, str]:
         except Exception:
             dims = ""
         return "", (f"It is a {dims}image. To see it, open it (file_action open) and use look.")
-    if suffix in {".pages", ".numbers", ".key", ".xlsx", ".xls", ".pptx"}:
+    if suffix in {".xlsx", ".xlsm"}:
+        return "", (f"{suffix[1:]} files cannot be read as text here. To read or change it, use edit_spreadsheet "
+                    "with the path (only the path shows what is in it); don't type into Numbers or Excel.")
+    if suffix in {".pages", ".numbers", ".key", ".xls", ".pptx"}:
         return "", (f"{suffix[1:]} files cannot be read as text here. Open it (file_action open), then use "
                     "read_window, or export it as PDF or CSV and read that.")
     try:
@@ -599,10 +660,100 @@ def read_file(args: dict) -> str:
         chosen.append(line)
         used += len(line) + 1
         end = number + 1
-    header = (f"{_short(path)} ({_size(stat.st_size)}, modified {_ago(stat.st_mtime)}"
+    header = (f"{_short(path)} ({_size(stat.st_size)}, modified {_when(stat.st_mtime)}"
               f"{', ' + note if note else ''}; {len(lines)} lines, showing {start}-{end})")
     more = f"\n[{len(lines) - end} more lines: read_file start_line={end + 1}]" if end < len(lines) else ""
     return header + "\n" + "\n".join(chosen) + more
+
+
+# Words in the request that let overwrite drop lines a file already holds ("make plan.md" does not).
+_REPLACE_ASKED = ("overwrite", "replace", "rewrite", "redo", "re-do", "start over", "from scratch", "fresh",
+                  "clear", "wipe", "reset", "instead", "edit", "change", "update", "fix", "correct", "modify",
+                  "remove", "delete", "rename", "reword", "rephrase", "tidy", "clean", "sort", "reorder",
+                  "reorganize", "reorganise", "format", "shorten", "trim", "translate", "convert", "merge",
+                  "yes", "go ahead", "shorter", "longer", "condense", "summari", "simplif", "tighten")
+_WROTE: dict[str, float] = {}      # path -> its mtime right after Mint last wrote it
+
+
+def _would_lose(path: Path, content: str) -> str:
+    """Why overwriting `path` with `content` would lose lines the user did not ask to replace, or ''."""
+    try:
+        if _WROTE.get(str(path)) == path.stat().st_mtime:
+            return ""                  # only what Mint wrote, unchanged since: redoing its own work is fine
+        old = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    new = " ".join(content.split())
+    lost = [" ".join(line.split()) for line in old.splitlines() if line.strip()]
+    lost = [line for line in lost if line not in new]
+    if not lost:
+        return ""
+    from mint.app import live
+    request = " ".join(live.request().lower().replace("’", "'").split())
+    if not request or any(_asked(request, word) for word in _REPLACE_ASKED):
+        return ""
+    return (f"FAILED: {_short(path)} already exists and overwriting would lose {len(lost)} line(s) the user "
+            f"did not ask to replace (e.g. {lost[0][:80]!r}). Keep them: use mode=append to add below, or "
+            "replace to change one part. If they might want the file replaced, ask them first.")
+
+
+def _other_format(query: str, folder: Path | None) -> str:
+    """Asked for scores.pdf, and only scores.csv is there: say so (bench: Mint found nothing, then gave up)."""
+    name = Path(query.strip())
+    if not name.suffix or len(name.suffix) > 6 or "/" in query:
+        return ""
+    places = [folder] if folder is not None else [HOME / d for d in ("Desktop", "Documents", "Downloads")]
+    matches = []
+    for place in places:
+        if place is None or not place.is_dir():
+            continue
+        deadline = time.monotonic() + 2
+        for root, dirs, files in os.walk(place):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"node_modules", ".git", ".venv"}]
+            matches += [Path(root) / f for f in files if Path(f).stem.lower() == name.stem.lower()
+                        and Path(f).suffix.lower() != name.suffix.lower()]
+            if time.monotonic() > deadline or len(matches) > 5:
+                break
+    if not matches:
+        return ""
+    listed = "\n".join(f"- {_short(p)}" for p in matches[:5])
+    return (f"There is no {name.name}" + (f" in {_short(folder)}" if folder else "") + f", but the same name in "
+            f"another format:\n{listed}\nIf there is only one, use it and tell the user you used that one; if "
+            "there are several, ask which.")
+
+
+def _asked_fresh() -> bool:
+    """The user asked for a new, empty or replaced file ("a fresh plan.md", "start over", "replace it")."""
+    from mint.app import live
+    request = (live.request() or "").lower()
+    return any(_asked(request, w) for w in ("overwrite", "replace", "start over", "from scratch", "fresh",
+                                             "new file", "wipe", "instead of"))
+
+
+def _meant_existing(path: Path) -> str:
+    """The user asked to add to a file that isn't there, while a file with a similar name is ("add a line to
+    agenda.md" when only agenda-draft.md exists): ask, don't quietly start a new file (bench: Mint made an
+    empty agenda.md, then lost track of which one it was editing)."""
+    from mint.app import live
+    request = " ".join((live.request() or "").lower().split())
+    if not request or path.name.lower() not in request:
+        return ""
+    if not re.search(r"\b(add|append|insert|put)\b|\bend of\b|\bbottom of\b|\bto the\b", request) or \
+            re.search(r"\b(create|make|new file|start a)\b", request):
+        return ""
+    import difflib
+    stem = path.stem.lower()
+    try:
+        siblings = [p for p in path.parent.iterdir() if p.is_file() and not p.name.startswith(".")]
+    except OSError:
+        return ""
+    close = [p for p in siblings if stem in p.stem.lower() or p.stem.lower() in stem
+             or difflib.SequenceMatcher(None, stem, p.stem.lower()).ratio() >= 0.75]
+    if not close:
+        return ""
+    names = ", ".join(p.name for p in close[:4])
+    return (f"FAILED: there is no {path.name} in {_short(path.parent)}, but there is {names}. The user asked to add "
+            "to an existing file: ask them whether they meant that one (don't create a new file).")
 
 
 def write_file(args: dict) -> str:
@@ -619,13 +770,36 @@ def write_file(args: dict) -> str:
     if has_secret(content):
         return ("REFUSED: the text looks like it holds a password, key or card number. Mint does not write "
                 "secrets into files; the user can paste it in themselves.")
+    if mode == "replace" and path.suffix.lower() in RICH_EDIT:
+        return _replace_rich(path, str(args.get("find") or ""), content)
     if path.suffix.lower() in {".pdf", ".docx", ".pages", ".xlsx", ".numbers", ".key", ".pptx", ".png", ".jpg"}:
         return (f"FAILED: write_file writes plain text; {path.suffix} is not. For a PDF use create_pdf; "
                 "for other documents write .md, .txt, .csv or .html.")
     if path.is_dir():
         return f"FAILED: {_short(path)} is a folder. Give a file name inside it."
+    added_note = ""
+    if mode == "create" and path.exists() and path.is_file() and not _asked_fresh():
+        # "Make plan.md with a checklist" when plan.md is already there: add it below, keep what was there,
+        # and say so (undo takes it out). Stopping to ask left the checklist unmade (bench err-write-conflict).
+        shown = _preview(path, 80).strip()
+        old = path.read_text(encoding="utf-8", errors="replace")
+        if content.strip() and content.strip() in old:
+            return f"{_short(path)} already has that text; nothing was changed."
+        mode = "append"
+        added_note = (f" {_short(path)} already existed{', starting ' + shown if shown else ''}, so the new text "
+                      "was added below what was there (nothing lost). Tell the user that; 'undo that' takes it out.")
     exists = path.exists()
-    backup = ""
+    size_before = path.stat().st_size if exists else 0
+    mine = not exists or _WROTE.get(str(path)) == path.stat().st_mtime     # holds only text Mint wrote
+    if not exists and mode in {"create", "append"}:
+        lookalike = _meant_existing(path)
+        if lookalike:
+            return lookalike
+    backup, copy = "", None
+    if exists and mode == "overwrite":
+        why = _would_lose(path, content)
+        if why:
+            return why
     if exists and mode in {"overwrite", "replace"}:
         BACKUPS.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -635,8 +809,12 @@ def write_file(args: dict) -> str:
     try:
         if mode == "create":
             if exists:
-                return (f"FAILED: {_short(path)} already exists. Use mode=append to add to it, replace to "
-                        "change part of it, or overwrite to replace it.")
+                shown = _preview(path, 160).strip()
+                return (f"FAILED: {_short(path)} already exists ({_size(size_before)}"
+                        f"{', starting ' + shown if shown else ''}). "
+                        "Don't lose what is in it: add the new text with mode=append (it keeps what is there) and "
+                        "tell the user you added it below the existing text, or use replace to change one part. "
+                        "Overwrite only if the user asked for a fresh file.")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             verb = "Created"
@@ -672,7 +850,160 @@ def write_file(args: dict) -> str:
     except OSError as error:
         return f"FAILED: could not write {_short(path)}: {error.strerror or error}"
     _remember_made(path)
-    return f"{verb} {_short(path)} ({_size(path.stat().st_size)}).{backup}"
+    from mint.tools import undo
+    stat = path.stat()
+    if mine and verb in {"Created", "Overwrote"}:
+        _WROTE[str(path)] = stat.st_mtime
+    else:
+        _WROTE.pop(str(path), None)             # the user's text is (still) in it
+    doing = {"Created": "creating", "Overwrote": "overwriting", "Appended to": "appending to", "Edited": "editing"}
+    undo.record("file", f"{doing.get(verb, verb.lower())} {_short(path)}",
+                {"kind": "file_trash", "path": str(path), "mtime": stat.st_mtime} if not exists else
+                {"kind": "file_restore", "path": str(path), "backup": str(copy), "mtime": stat.st_mtime} if copy else
+                {"kind": "file_truncate", "path": str(path), "size": size_before, "after": stat.st_size})
+    return f"{verb} {_short(path)} ({_size(path.stat().st_size)}).{backup}{added_note}"
+
+
+RICH_EDIT = {".rtf", ".rtfd"}          # write_file mode=replace edits these through the Cocoa text system
+
+
+def _replace_rich(path: Path, find: str, content: str) -> str:
+    """mode=replace in an .rtf/.rtfd document. The text is changed through the Cocoa text system (as TextEdit
+    saves it), so fonts, styles and pictures stay - a raw edit of the RTF source breaks on escapes and style
+    runs. A TextEdit window showing the file is reloaded, so it shows the change and nothing needs saving."""
+    import AppKit
+    from Foundation import NSURL
+    if not path.exists():
+        return f"FAILED: {_short(path)} does not exist, so there is nothing to replace."
+    if not find:
+        return "FAILED: mode=replace needs `find`, the exact text to replace."
+    if not os.access(path / "TXT.rtf" if path.is_dir() else path, os.W_OK):
+        return f"FAILED: could not write {_short(path)}: it is read-only (locked)."
+    open_in = _textedit_docs(path)
+    if any(modified for _, modified in open_in):
+        return (f"FAILED: {path.name} is open in TextEdit with unsaved changes, and changing the file would clash "
+                "with them, so nothing was changed. Save or close it in TextEdit first, or make the change there "
+                "(menu Edit > Find > Find and Replace…, then File > Save).")
+    url = NSURL.fileURLWithPath_(str(path))
+    text, attrs, error = AppKit.NSMutableAttributedString.alloc().initWithURL_options_documentAttributes_error_(
+        url, {}, None, None)
+    if text is None:
+        return f"FAILED: could not read {path.name} as a rich text document ({error})."
+    count = str(text.string()).count(find)
+    if count == 0:
+        return (f"FAILED: that text is not in {path.name}. read_file it and copy the exact text "
+                "(spaces and line breaks included).")
+    if count > 1:
+        return f"FAILED: that text occurs {count} times in {path.name}; include more around it so it is unique."
+    text.replaceCharactersInRange_withString_(text.string().rangeOfString_(find), content)
+    rtfd = path.suffix.lower() == ".rtfd"
+    keep = dict(attrs or {})
+    keep[AppKit.NSDocumentTypeDocumentAttribute] = AppKit.NSRTFDTextDocumentType if rtfd else AppKit.NSRTFTextDocumentType
+    whole = (0, text.length())
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    copy = BACKUPS / f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{path.name}"
+    try:
+        if rtfd:
+            wrapper, error = text.fileWrapperFromRange_documentAttributes_error_(whole, keep, None)
+            shutil.copytree(path, copy, dirs_exist_ok=True)
+            done = wrapper is not None and wrapper.writeToURL_options_originalContentsURL_error_(url, 1, None, None)[0]
+        else:
+            data, error = text.dataFromRange_documentAttributes_error_(whole, keep, None)
+            shutil.copy2(path, copy)
+            done = data is not None
+            if done:
+                path.write_bytes(bytes(data))           # in place: keeps its permissions, tags and identity
+    except OSError as err:
+        return f"FAILED: could not write {_short(path)}: {err.strerror or err}"
+    if not done:
+        return f"FAILED: could not write {_short(path)} ({error})."
+    _WROTE.pop(str(path), None)
+    _remember_made(path)
+    from mint.tools import undo
+    if rtfd:
+        undo.record("file", f"editing {_short(path)}", None,
+                    f"it is an .rtfd package; its previous version is at {_short(copy)}.")
+    else:
+        undo.record("file", f"editing {_short(path)}",
+                    {"kind": "file_restore", "path": str(path), "backup": str(copy), "mtime": path.stat().st_mtime})
+    shown = ""
+    if open_in:
+        shown = (" TextEdit had it open, so its window was reloaded and shows the change (nothing to save there)."
+                 if _textedit_reload(path, open_in) else
+                 " TextEdit has it open and may still show the old text; close and reopen it there.")
+    return (f"Edited {_short(path)}: '{find[:60]}' is now '{content[:60]}', formatting kept. The previous version "
+            f"is saved at {_short(copy)}.{shown}")
+
+
+def _textedit_docs(path: Path) -> list[tuple[str, bool]]:
+    """(TextEdit's path, has unsaved changes) of each TextEdit document open on `path`; [] when TextEdit is not
+    running (it is never started for this)."""
+    # (pgrep, not NSRunningApplication: that list only refreshes with a run loop, so it can miss TextEdit.)
+    if subprocess.run(["pgrep", "-xq", "TextEdit"], check=False).returncode != 0:
+        return []
+    ok, out = _osascript('tell application "TextEdit"\nset out to ""\nrepeat with d in documents\ntry\n'
+                         'set out to out & (path of d) & tab & (modified of d as text) & linefeed\n'
+                         'end try\nend repeat\nreturn out\nend tell', 8)
+    if not ok:
+        return []
+    real = os.path.realpath(path)
+    found = []
+    for line in out.splitlines():
+        where, _, modified = line.rpartition("\t")
+        if where and os.path.realpath(where) == real:
+            found.append((where, modified.strip() == "true"))
+    return found
+
+
+def _as_applescript(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _textedit_reload(path: Path, open_in: list[tuple[str, bool]], front: bool = False) -> bool:
+    """Close TextEdit's (unchanged) windows on `path` and open the file again, so they show what is on disk."""
+    for where in {w for w, modified in open_in if not modified}:
+        ok, _ = _osascript(f'tell application "TextEdit" to close (every document whose path is '
+                           f'{_as_applescript(where)}) saving no', 8)
+        if not ok:
+            return False
+    done = subprocess.run(["open", "-a", "TextEdit", *([] if front else ["-g"]), str(path)], capture_output=True,
+                          timeout=15, check=False)
+    return done.returncode == 0
+
+
+_TEXTEDIT_KINDS = {".rtf", ".rtfd", ".txt", ".text", ".md", ".markdown", ".html", ".htm", ".doc", ".docx", ".odt",
+                   ".xml", ".csv", ".log", ".json", ".webarchive"}
+
+
+def _textedit_stale(path: Path) -> str:
+    """Before opening a file: TextEdit may still have a window on it from before the file changed (it does not
+    reload a file that was replaced), and "open" would only bring that old window forward. An unchanged one is
+    closed so the file opens afresh; one with unsaved changes is left alone and mentioned."""
+    if path.suffix.lower() not in _TEXTEDIT_KINDS:
+        return ""
+    open_in = _textedit_docs(path)
+    if not open_in:
+        return ""
+    if any(modified for _, modified in open_in):
+        return (" Note: TextEdit already had it open with unsaved changes, so that window came forward; what it "
+                "shows may differ from the file on disk.")
+    try:
+        import AppKit
+        from Foundation import NSURL
+        text, _, _ = AppKit.NSAttributedString.alloc().initWithURL_options_documentAttributes_error_(
+            NSURL.fileURLWithPath_(str(path)), {}, None, None)
+        on_disk = str(text.string()) if text is not None else None
+        ok, shown = _osascript(f'tell application "TextEdit" to get text of (first document whose path is '
+                               f'{_as_applescript(open_in[0][0])})', 8)
+    except Exception as error:
+        log.info("textedit stale check: %s", error)
+        return ""
+    if on_disk is None or not ok or " ".join(shown.split()) == " ".join(on_disk.split()):
+        return ""
+    for where in {w for w, _ in open_in}:
+        _osascript(f'tell application "TextEdit" to close (every document whose path is {_as_applescript(where)}) '
+                   'saving no', 8)
+    return " (TextEdit still had an old copy of it open from before the file changed; that window was replaced.)"
 
 
 _JUNK = re.compile(r"/(node_modules|build|dist|out|target|\.venv|venv|env|site-packages|__pycache__|\.git|"
@@ -735,9 +1066,9 @@ def _listing(paths: list[Path], limit: int, preview: bool = False) -> str:
         except OSError:
             continue
         if p.is_dir() and p.suffix != ".app":
-            rows.append(f"- {_short(p)}/  (folder, {_ago(stat.st_mtime)})")
+            rows.append(f"- {_short(p)}/  (folder, modified {_when(stat.st_mtime)})")
         else:
-            rows.append(f"- {_short(p)}  ({_size(stat.st_size)}, {_ago(stat.st_mtime)})"
+            rows.append(f"- {_short(p)}  ({_size(stat.st_size)}, modified {_when(stat.st_mtime)})"
                         + (_preview(p) if preview else ""))
     return "\n".join(rows)
 
@@ -758,6 +1089,71 @@ def _contains(path: Path, text: str) -> bool:
         return False
 
 
+def _day(text: str, end: bool) -> float | None:
+    """'2026-09-12' / '2026-09' (a month) / '12 Sep 2026' -> the start (or, with end, the end) of that day or month."""
+    text = text.strip()
+    month = re.fullmatch(r"(\d{4})-(\d{1,2})", text)
+    try:
+        if month:
+            year, number = int(month.group(1)), int(month.group(2))
+            first = datetime.datetime(year, number, 1)
+            if not end:
+                return first.timestamp()
+            nxt = datetime.datetime(year + (number == 12), number % 12 + 1, 1)
+            return nxt.timestamp() - 0.001
+        for fmt in ("%Y-%m-%d", "%d %b %Y", "%d %B %Y", "%b %d %Y", "%B %d %Y", "%Y/%m/%d"):
+            try:
+                day = datetime.datetime.strptime(text.replace(",", ""), fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    except ValueError:
+        return None
+    return (day + datetime.timedelta(days=1)).timestamp() - 0.001 if end else day.timestamp()
+
+
+def _dates(args: dict) -> tuple[float | None, float | None, str, str]:
+    """(lowest mtime, highest mtime, what the filter says, error) from days / modified_from / modified_to."""
+    low = high = None
+    said = []
+    try:
+        days = float(args.get("days") or 0)
+    except (TypeError, ValueError):
+        return None, None, "", "days must be a number."
+    if days > 0:
+        low = time.time() - days * 86400
+        said.append(f"modified in the last {days:g} day{'s' if days != 1 else ''} "
+                    f"(since {datetime.datetime.fromtimestamp(low):%-d %b %Y %H:%M})")
+    for key, end in (("modified_from", False), ("modified_to", True)):
+        raw = str(args.get(key) or "").strip()
+        if not raw:
+            continue
+        stamp = _day(raw, end)
+        if stamp is None:
+            return None, None, "", f"{key} '{raw}' is not a date; use YYYY-MM-DD or YYYY-MM."
+        if end:
+            high = stamp if high is None else min(high, stamp)
+            said.append(f"modified on or before {datetime.datetime.fromtimestamp(stamp):%-d %b %Y}")
+        else:
+            low = stamp if low is None else max(low, stamp)
+            said.append(f"modified on or after {datetime.datetime.fromtimestamp(stamp):%-d %b %Y}")
+    return low, high, " and ".join(said), ""
+
+
+_SORTS = {"newest": (lambda p: _mtime(p), True), "oldest": (lambda p: _mtime(p), False),
+          "biggest": (lambda p: _bytes(p), True), "smallest": (lambda p: _bytes(p), False),
+          "name": (lambda p: p.name.lower(), False)}
+
+
+def _bytes(path: Path) -> int:
+    try:
+        return path.stat().st_size if path.is_file() else 0
+    except OSError:
+        return 0
+
+
 def find_files(args: dict) -> str:
     query = str(args.get("query") or "").strip()
     kind = str(args.get("kind") or "any").lower()
@@ -770,6 +1166,14 @@ def find_files(args: dict) -> str:
             return f"FAILED: {why}"
         if not folder.is_dir():
             return f"FAILED: {_short(folder)} is a file, not a folder."
+    low, high, dated, why = _dates(args)
+    if why:
+        return f"FAILED: {why}"
+    order = str(args.get("sort") or "newest").lower()
+    if order not in _SORTS:
+        order = "newest"
+    if dated or order != "newest":
+        return _find_filtered(args, query, kind, limit, folder, low, high, dated, order)
 
     if not query:
         if folder is None:
@@ -797,19 +1201,86 @@ def find_files(args: dict) -> str:
             entries = [Path(e.path) for e in os.scandir(folder) if not e.name.startswith(".")]
         except OSError as error:
             return f"FAILED: could not list {_short(folder)}: {error.strerror or error}"
-        entries = [p for p in entries if _kind_ok(p, kind)]
-        entries.sort(key=_mtime, reverse=True)
-        more = f"\n({len(entries) - limit} more not shown)" if len(entries) > limit else ""
-        return (f"{_short(folder)}: {len(entries)} items, newest first:\n" + _listing(entries, limit) + more) \
-            if entries else f"{_short(folder)} is empty" + (f" of {kind} files." if kind != "any" else ".")
+        chosen = [p for p in entries if _kind_ok(p, kind)]
+        chosen.sort(key=_mtime, reverse=True)
+        more = f"\n({len(chosen) - limit} more not shown)" if len(chosen) > limit else ""
+        if chosen:
+            return f"{_short(folder)}: {len(chosen)} items, newest first:\n" + _listing(chosen, limit) + more
+        return f"{_short(folder)} is empty" + (f" of {kind} files{_others(entries)}" if kind != "any" else ".")
 
+    found = _search_paths(query, folder, kind, limit, args.get("content", True) is not False)
+    needle = query.lower()
+    other = _other_format(query, folder) if not any(p.name.lower() == needle for p in found) else ""
+    if other:
+        return other
+    if not found:
+        return f"Nothing found for '{query}'" + (f" in {_short(folder)}" if folder else "") + \
+            ". Try a shorter part of the name, or another folder."
+    return f"{len(found)} found for '{query}' (name matches first, newest first):\n" + _listing(found, limit)
+
+
+def _others(entries: list[Path]) -> str:
+    """'(it has 7 other files: .md, .txt)' when a kind filter hid everything in a folder."""
+    if not entries:
+        return "."
+    kinds = sorted({p.suffix.lower() or ("folder" if p.is_dir() else "no extension") for p in entries})
+    return f" (it has {len(entries)} other item(s): {', '.join(kinds[:8])} - list it without kind to see them)."
+
+
+def _find_filtered(args: dict, query: str, kind: str, limit: int, folder: Path | None, low, high,
+                   dated: str, order: str) -> str:
+    """find_files with a date range and/or another order (oldest, biggest...)."""
+    where = _short(folder) if folder is not None else "your documents"
+    if query:
+        found = _search_paths(query, folder, kind, limit * 3, args.get("content", True) is not False)
+        what = f"'{query}' in {where}"
+    elif folder is not None:
+        try:
+            found = [Path(e.path) for e in os.scandir(folder) if not e.name.startswith(".")]
+        except OSError as error:
+            return f"FAILED: could not list {_short(folder)}: {error.strerror or error}"
+        found = [p for p in found if _kind_ok(p, kind)]
+        what = where + (f" ({kind} files)" if kind not in ("", "any") else "")
+    else:
+        back = max(1, min(366, int((time.time() - low) // 86400) + 1)) if low else 14
+        try:
+            lines = subprocess.run(
+                ["mdfind", "-onlyin", str(HOME),
+                 f'kMDItemFSContentChangeDate >= $time.today(-{back}) && kMDItemContentTypeTree == "public.content"'],
+                capture_output=True, text=True, timeout=8, check=False).stdout.splitlines()
+        except subprocess.TimeoutExpired:
+            lines = []
+        found = [Path(n) for n in lines if n.strip()]
+        found = [p for p in found if not _JUNK.search(str(p)) and "/." not in str(p)[len(str(HOME)):]
+                 and not _blocked(p) and _kind_ok(p, kind) and (_place_score(p) > 0 or p.suffix.lower() in _DOCS)]
+        what = "your documents"
+    total = len(found)
+    if low is not None:
+        found = [p for p in found if _mtime(p) >= low]
+    if high is not None:
+        found = [p for p in found if _mtime(p) <= high]
+    key, backwards = _SORTS[order]
+    found.sort(key=key, reverse=backwards)
+    ordered = {"newest": "newest first", "oldest": "oldest first", "biggest": "biggest first",
+               "smallest": "smallest first", "name": "by name"}[order]
+    if not found:
+        return (f"Nothing in {what} is {dated}" if dated else f"Nothing found in {what}") + \
+            (f" ({total} other item(s) are outside that range)." if total else ".")
+    more = f"\n({len(found) - limit} more not shown)" if len(found) > limit else ""
+    left_out = f"; {total - len(found)} other item(s) left out by the date filter" if dated and total > len(found) else ""
+    return (f"{what}: {len(found)} item(s){' ' + dated if dated else ''}{left_out}, {ordered}:\n"
+            + _listing(found, limit) + more)
+
+
+def _search_paths(query: str, folder: Path | None, kind: str, limit: int, content: bool = True) -> list[Path]:
+    """Spotlight (then a short walk) for `query` by name and, with content, inside files; best first."""
     scope = str(folder or HOME)
     found: list[Path] = []
     try:
         names = subprocess.run(["mdfind", "-onlyin", scope, "-name", query], capture_output=True, text=True,
                                timeout=8, check=False).stdout.splitlines()
         found = [Path(n) for n in names if n.strip()]
-        if args.get("content", True) is not False and len(found) < limit:
+        if content and len(found) < limit:
             inside = subprocess.run(["mdfind", "-onlyin", scope, query], capture_output=True, text=True,
                                     timeout=8, check=False).stdout.splitlines()
             known = set(map(str, found))
@@ -832,14 +1303,16 @@ def find_files(args: dict) -> str:
         unique.setdefault(str(p), p)
     found = [p for p in unique.values() if not _blocked(p) and not _JUNK.search(str(p))
              and "/." not in str(p)[len(str(HOME)):] and _kind_ok(p, kind)]
+    from mint.app import live
+    asked = (live.request() or "").lower()
+    if re.search(r"\bmarkdown\b", asked) and not re.search(r"\b(text|txt) files?\b", asked):
+        # "the Markdown notes": .md only (bench, a .txt note slipped into a Markdown digest).
+        found = [p for p in found if p.is_dir() or p.suffix.lower() in (".md", ".markdown")]
     needle = query.lower()
     # Name matches, then documents in the user's own places, then the rest; newest first within each.
     found.sort(key=lambda p: (needle in p.name.lower(), p.suffix.lower() in _DOCS or p.is_dir(),
                               _place_score(p), _mtime(p)), reverse=True)
-    if not found:
-        return f"Nothing found for '{query}'" + (f" in {_short(folder)}" if folder else "") + \
-            ". Try a shorter part of the name, or another folder."
-    return f"{len(found)} found for '{query}' (name matches first, newest first):\n" + _listing(found, limit)
+    return found
 
 
 def file_action(args: dict) -> str:
@@ -855,15 +1328,25 @@ def file_action(args: dict) -> str:
         why = _blocked(path, write=True)
         if why:
             return f"FAILED: {why}"
+        existed = path.exists()
         path.mkdir(parents=True, exist_ok=True)
+        if not existed:
+            from mint.tools import undo
+            undo.record("file", f"making the folder {_short(path)}", {"kind": "folder_remove", "path": str(path)})
         return f"Folder ready: {_short(path)}"
     path, why = _resolve(str(args.get("path", "")))
     if path is None:
         return f"FAILED: {why}"
     workspace = AppKit.NSWorkspace.sharedWorkspace()
     if action == "open":
+        stale = _textedit_stale(path)
         ok = workspace.openURL_(NSURL.fileURLWithPath_(str(path)))
-        return f"Opened {_short(path)}." if ok else f"FAILED: macOS could not open {_short(path)}."
+        if not ok:
+            return f"FAILED: macOS could not open {_short(path)}."
+        hint = (" To change words in it, write_file mode=replace (find = the old words) edits the file itself, "
+                "keeping its formatting; a TextEdit window on it is reloaded to show the change, with nothing to "
+                "save." if path.suffix.lower() in RICH_EDIT and "unsaved changes" not in stale else "")
+        return f"Opened {_short(path)}.{stale}{hint}"
     if action == "reveal":
         workspace.activateFileViewerSelectingURLs_([NSURL.fileURLWithPath_(str(path))])
         return f"Showing {path.name} in Finder."
@@ -886,7 +1369,11 @@ def file_action(args: dict) -> str:
         if why:
             return f"FAILED: {why}"
         manager = AppKit.NSFileManager.defaultManager()
-        ok, _, error = manager.trashItemAtURL_resultingItemURL_error_(NSURL.fileURLWithPath_(str(path)), None, None)
+        ok, trashed, error = manager.trashItemAtURL_resultingItemURL_error_(NSURL.fileURLWithPath_(str(path)), None, None)
+        if ok and trashed is not None:
+            from mint.tools import undo
+            undo.record("file", f"moving {_short(path)} to the Trash",
+                        {"kind": "file_untrash", "trashed": str(trashed.path()), "to": str(path)})
         return f"Moved {_short(path)} to the Trash (it can be put back from there)." if ok else \
             f"FAILED: could not move it to the Trash: {error}"
     if action in {"move", "copy", "rename"}:
@@ -921,6 +1408,12 @@ def file_action(args: dict) -> str:
                 shutil.move(str(path), str(destination))
         except OSError as error:
             return f"FAILED: {error.strerror or error}"
+        if action == "copy" and destination.is_file():
+            _WROTE[str(destination)] = destination.stat().st_mtime   # Mint's own copy: rewriting it loses nothing
+        from mint.tools import undo
+        undo.record("file", f"{dict(copy='copying', move='moving', rename='renaming')[action]} {_short(path)} -> {_short(destination)}",
+                    {"kind": "file_trash", "path": str(destination), "mtime": destination.stat().st_mtime}
+                    if action == "copy" else {"kind": "file_move", "from": str(destination), "to": str(path)})
         return f"{action.capitalize()}d {_short(path)} -> {_short(destination)}." if action != "copy" else \
             f"Copied {_short(path)} -> {_short(destination)}."
     return "FAILED: action must be open, reveal, info, move, copy, rename, make_folder or trash."
@@ -1577,12 +2070,67 @@ def menu(args: dict) -> str:
     top_item = _match(tops_named, trail[0]) if trail else None
     if top_item is not None:
         _highlight(top_item, " › ".join(trail), seconds=1.2)
+    saving = _norm(title) == "save"
+    before = _document_state(app) if saving else None
     err = AX.AXUIElementPerformAction(item, "AXPress")
     keys = _shortcut(item)
     tip = f" (shortcut {keys})" if keys else ""
     if err != 0:
         return f"FAILED: {name} did not accept '{' > '.join(trail)}' (AX error {err})."
-    return f"Chose {name} > {' > '.join(trail)}{tip}."
+    after = _after_save(app, before) if saving else ""
+    return f"Chose {name} > {' > '.join(trail)}{tip}.{after}"
+
+
+def _document_state(app) -> tuple[str, float | None]:
+    """(file path, its modification time) of the document in the app's focused window; ("", None) if none."""
+    try:
+        from urllib.parse import unquote, urlparse
+        window = _attr(app, "AXFocusedWindow") or _attr(app, "AXMainWindow")
+        url = str(_attr(window, "AXDocument") or "") if window is not None else ""
+        path = unquote(urlparse(url).path) if url.startswith("file://") else url
+        return path, (os.stat(path).st_mtime if path and os.path.exists(path) else None)
+    except Exception:
+        return "", None
+
+
+def _sheet_text(app) -> str | None:
+    """The words in a sheet or dialog now on the app's focused window, or None when there is none."""
+    window = _attr(app, "AXFocusedWindow") or _attr(app, "AXMainWindow")
+    if window is None:
+        return None
+    sheets = [c for c in (_attr(window, "AXChildren") or []) if _attr(c, "AXRole") == "AXSheet"]
+    if not sheets and _attr(window, "AXSubrole") not in {"AXDialog", "AXSystemDialog"}:
+        return None
+    words = []
+    for node in _walk_limited(sheets[0] if sheets else window, 300):
+        if _attr(node, "AXRole") in {"AXStaticText", "AXButton"}:
+            text = str(_attr(node, "AXValue") or _attr(node, "AXTitle") or "").strip()
+            if text and text not in words:
+                words.append(text)
+    return " / ".join(words)[:300]
+
+
+def _after_save(app, before: tuple[str, float | None]) -> str:
+    """After File > Save: did the file on disk change? A save that opens a sheet ("the file has been changed
+    by another application", where to save an untitled one) has not saved anything yet, and saying "Chose
+    Save" alone made the model report a save that never happened."""
+    path, was = before
+    deadline = time.monotonic() + 2.5
+    while time.monotonic() < deadline:
+        time.sleep(0.3)
+        try:
+            if path and os.path.exists(path) and os.stat(path).st_mtime != was:
+                return f" Saved: {_short(Path(path))} on disk changed just now."
+            sheet = _sheet_text(app)
+        except Exception:
+            return ""
+        if sheet is not None:
+            return (f" NOT SAVED YET: a dialog opened instead ({sheet or 'no text'}). Read it (ui_elements) and "
+                    "answer it as the user asked, then check the file.")
+    if path:
+        return (f" WARNING: {_short(Path(path))} on disk did not change - it may have had nothing new to save, or "
+                "the save did not happen. Check before saying it is saved.")
+    return ""
 
 
 # --- wait_for_text --------------------------------------------------------------------------

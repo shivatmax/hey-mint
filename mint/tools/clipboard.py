@@ -83,17 +83,20 @@ def declarations() -> list[types.FunctionDeclaration]:
             "(paste into the front app - first putting `text` on the clipboard if given); open (the clipboard "
             "window: everything copied and screenshotted, with filters and multi-select); history (recent "
             "copies, shown as a card; kind filters: text, image, screenshot, files); restore (put history item "
-            "`index` back); paste_many (paste several history items into the front app one after another: the "
-            "last `count` of `kind`, e.g. the last 5 screenshots, or `indexes`); pin (keep what is on the "
-            "clipboard, or history item `index`, under `label`); pins; paste_pin / copy_pin (`label`); unpin; "
+            "`index` back - 1 is the newest copy, so 'the one before the last two' is 3; call history first "
+            "unless you already have the numbered list); to_file (write copied texts into a text file exactly as copied - `path`, the newest `count` or `indexes`, oldest first, "
+            "added below what is there; use it instead of retyping them); paste_many (paste several history items into the front "
+            "app one after another: the last `count` of `kind`, e.g. the last 5 screenshots, or `indexes`); "
+            "pin (keep what is on the clipboard, or history item `index`, under `label`); pins; paste_pin / "
+            "copy_pin (`label`); unpin; "
             "save_secret (put what is ON THE CLIPBOARD NOW into the macOS Keychain as `label` - a password, API "
             "key or token; the value never reaches you); copy_secret (`label`: back on the clipboard, hidden, "
             "cleared after a minute); secrets (their names only); forget_secret; clear.",
-            {"action": _enum(("get", "copy", "copy_file", "copy_image", "copy_path", "copy_selection", "paste",
+            {"action": _enum(("get", "copy", "copy_file", "copy_image", "copy_path", "copy_selection", "paste", "to_file",
                               "open", "history", "restore", "paste_many", "pin", "pins", "paste_pin", "copy_pin", "unpin",
                               "save_secret", "copy_secret", "secrets", "forget_secret", "clear"), "what to do"),
              "text": STRING, "path": STRING,
-             "index": {**INTEGER, "description": "for restore / pin: the number from history"},
+             "index": {**INTEGER, "description": "for restore / pin: the number from history (1 = newest)"},
              "count": {**INTEGER, "description": "for paste_many: how many (newest ones, pasted oldest first)"},
              "kind": _enum(("any", "text", "image", "screenshot", "files"), "for history / paste_many"),
              "indexes": {"type": types.Type.ARRAY, "items": types.Schema(type=types.Type.INTEGER),
@@ -112,8 +115,8 @@ PROMPT = """
   Say where it was saved, and that it is on the clipboard.
 - "Copy X" = clipboard copy; "copy the path / link of this" = copy_path (no path: Finder selection, browser page,
   or the open document); "copy this file" = copy_file; "copy what I selected" = copy_selection; "paste it
-  (here)" = paste; "what did I copy before" / "show my clipboard" = history, then restore. Never paste into a
-  password field.
+  (here)" = paste; "what did I copy before" / "show my clipboard" = history, then restore. Numbers count from the
+  newest (1): "the one I copied before the last two" = 3. Never paste into a password field.
 - "Open my clipboard" / "show the clipboard window" = open.
 - "Paste the last 5 screenshots (into the chat)" = paste_many kind=screenshot count=5 (items 2 and 4 = indexes).
   "Whenever I say screenshot, just put it on the clipboard" = set_preference screenshot_to=clipboard (or file,
@@ -492,11 +495,69 @@ def _path_arg(raw: str) -> tuple[Path | None, str]:
     return _resolve(raw)
 
 
+# Clipboard actions that replace what is on it: each can be undone (the old content goes back).
+_CHANGES = {"copy", "copy_file", "copy_image", "copy_path", "copy_selection", "restore", "copy_pin", "clear"}
+
+
 def clipboard(args: dict) -> str:
     start_watching()
     from mint.tools.everyday import BOARD_LOCK
     with BOARD_LOCK:
-        return _clipboard(args)
+        action = str(args.get("action") or "get").lower()
+        if action not in _CHANGES:
+            return _clipboard(args)
+        before = undo_snapshot()
+        result = _clipboard(args)
+        if not result.startswith(("FAILED", "REFUSED", "No ")):
+            from mint.tools import undo
+            undo.record("clipboard", f"the clipboard change ({action.replace('_', ' ')})",
+                        {"kind": "clipboard", "was": before} if before else None,
+                        "" if before else "what was on it before was a password or hidden item, which Mint never keeps.")
+        return result
+
+
+def undo_snapshot() -> dict | None:
+    """What is on the clipboard now, as data that can put it back; None for a hidden item or a secret."""
+    from mint.tools.everyday import BOARD_LOCK
+    with BOARD_LOCK:
+        board = _board()
+        if not _types(board):
+            return {"type": "empty"}
+        entry = _snapshot(board)
+    if entry is None:
+        return None
+    if entry["kind"] == "image":
+        from mint.tools import undo
+        return {"type": "image", "image": undo.clip_image(entry["png"])}
+    return {"type": entry["kind"], **({"text": entry["text"]} if entry["kind"] == "text" else {"files": entry["files"]})}
+
+
+def undo_put(was: dict) -> str:
+    """Put a snapshot back on the clipboard (not a new copy in the history)."""
+    kind = was.get("type")
+    _restoring[0] = True
+    try:
+        if kind == "text":
+            _put_text(was["text"])
+            text = " ".join(was["text"].split())
+            return f"the clipboard holds \"{text[:50]}{'…' if len(text) > 50 else ''}\" again."
+        if kind == "files":
+            missing = [f for f in was["files"] if not Path(f).exists()]
+            if missing:
+                return f"FAILED: {Path(missing[0]).name}, which was on the clipboard, is gone."
+            _put_files(was["files"])
+            return f"the clipboard holds {', '.join(Path(f).name for f in was['files'][:3])} again."
+        if kind == "image":
+            if not Path(was["image"]).exists():
+                return "FAILED: the picture that was on the clipboard is no longer kept."
+            _put_png(Path(was["image"]).read_bytes())
+            return "the picture is back on the clipboard."
+        from mint.tools.everyday import BOARD_LOCK
+        with BOARD_LOCK:
+            _board().clearContents()
+        return "the clipboard is empty again, as it was."
+    finally:
+        _restoring[0] = False
 
 
 def _clipboard(args: dict) -> str:
@@ -587,26 +648,35 @@ def _clipboard(args: dict) -> str:
             return ("No clipboard history yet (hidden items and secrets are never kept)." if kind == "any"
                     else f"No {kind} in the clipboard history.")
         _history_card(rows, kind)
-        lines = []
-        for i, h in rows:
-            age = int(time.time() - h["at"])
-            when = f"{age // 3600} h ago" if age >= 3600 else f"{age // 60} min ago" if age >= 60 else "just now"
-            lines.append(f"{i}. [{h.get('source') or h['kind']}] {h['label']}  ({when})")
-        return "Recent copies, newest first (shown on screen as a card):\n" + "\n".join(lines)
+        return ("Recent copies, newest first (1 = the newest copy; shown on screen as a card):\n"
+                + _history_lines(rows))
 
     if action == "restore":
         _load()
         index = int(args.get("index") or 0)
         if not 1 <= index <= len(HISTORY):
             return f"FAILED: history has {len(HISTORY)} items; give index 1-{len(HISTORY)}."
-        problem = _put_back(HISTORY[index - 1])
-        return problem or f"Put back on the clipboard: {HISTORY[0]['label'] if HISTORY else ''}"
+        chosen = HISTORY[index - 1]
+        problem = _put_back(chosen)
+        if problem:
+            return problem
+        # Say which item went back (not the newest), with its neighbours, so a wrong number shows at once.
+        rows = list(enumerate(HISTORY, 1))[:max(5, index + 1)]
+        return (f"Put back on the clipboard: #{index} {chosen['label']}. The history, newest first (the order "
+                f"does not change):\n{_history_lines(rows, mark=index)}\nIf that is not the one the user meant, "
+                "restore the right number.")
 
     if action == "open":
         from mint.ui import clipboard_window
         clipboard_window.show()
+        _load()
+        rows = list(enumerate(HISTORY, 1))[:6]
         return ("Opened the clipboard window: everything copied (by the user or you), every screenshot, pinned clips; "
-                "filters, multi-select, paste, copy, pin, delete, drag out.")
+                "filters, multi-select, paste, copy, pin, delete, drag out."
+                + (f" The newest copies (1 = the newest):\n{_history_lines(rows)}" if rows else ""))
+
+    if action == "to_file":
+        return _to_file(args)
 
     if action == "paste_many":
         return _paste_many(args)
@@ -622,6 +692,16 @@ def _clipboard(args: dict) -> str:
         return "Cleared the clipboard."
 
     return "FAILED: unknown clipboard action."
+
+
+def _history_lines(rows: list, mark: int = 0) -> str:
+    lines = []
+    for i, h in rows:
+        age = int(time.time() - h["at"])
+        when = f"{age // 3600} h ago" if age >= 3600 else f"{age // 60} min ago" if age >= 60 else "just now"
+        lines.append(f"{i}. [{h.get('source') or h['kind']}] {h['label']}  ({when})"
+                     + ("  <- put back now" if i == mark else ""))
+    return "\n".join(lines)
 
 
 def _is_kind(h: dict, kind: str) -> bool:
@@ -670,6 +750,29 @@ def _history_card(rows: list, kind: str) -> None:
                    tint="teal", more=max(0, len(rows) - 7))
     except Exception:
         pass
+
+
+def _to_file(args: dict) -> str:
+    """Write copied texts into a file exactly as copied (the model retyping them changed "MintBench" to "Mint",
+    bench hard-clip-three): the newest `count` (or `indexes`), oldest first, one per line, added below what is
+    there."""
+    _load()
+    indexes = [int(i) for i in (args.get("indexes") or []) if str(i).lstrip("-").isdigit()]
+    if indexes:
+        picked = [HISTORY[i - 1] for i in indexes if 1 <= i <= len(HISTORY)]
+    else:
+        count = max(1, min(int(args.get("count") or 1), 20))
+        picked = [h for h in HISTORY if h.get("kind") == "text"][:count]
+        picked.reverse()                      # oldest first, the order they were copied in
+    texts = [h.get("text", "") for h in picked if h.get("kind") == "text" and h.get("text")]
+    if not texts:
+        return "FAILED: no copied text to write (pictures and files can't go into a text file)."
+    path = str(args.get("path") or "")
+    if not path:
+        return "FAILED: to_file needs `path`."
+    from mint.tools import harness as harness_tools
+    result = harness_tools.write_file({"path": path, "content": "\n".join(texts) + "\n", "mode": "append"})
+    return f"{result} Wrote {len(texts)} copied item(s), exactly as copied, oldest first."
 
 
 def _paste_many(args: dict) -> str:
@@ -881,7 +984,9 @@ def _as_png(path: Path) -> bytes:
 
 
 def _front_window_info(app_name: str = ""):
-    """(window id, (x, y, w, h), app name) of the front window, or of `app_name`'s."""
+    """(window id, (x, y, w, h), app name) of the front window, or of `app_name`'s. `app_name` may also be
+    words from a window's title ("Poster": the browser window showing that page). A window on another
+    Space is used when it is the one meant (screencapture -l takes it from there too)."""
     import Quartz
     front = _front_app()
     pid = None
@@ -894,36 +999,73 @@ def _front_window_info(app_name: str = ""):
             if (app.localizedName() or "").lower() == (resolved or app_name).lower():
                 pid, name = app.processIdentifier(), app.localizedName()
                 break
-        if pid is None:
-            return None
     elif front is not None:
         pid, name = front.processIdentifier(), front.localizedName()
-    windows = Quartz.CGWindowListCopyWindowInfo(
-        Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
-        Quartz.kCGNullWindowID) or []
-    mine = []
-    for window in windows:
-        if window.get("kCGWindowOwnerPID") != pid or window.get("kCGWindowLayer", 0) != 0:
-            continue
-        b = window.get("kCGWindowBounds") or {}
-        if b.get("Width", 0) < 60 or b.get("Height", 0) < 60:
-            continue
-        mine.append((int(window["kCGWindowNumber"]), (b["X"], b["Y"], b["Width"], b["Height"])))
-    if not mine:
-        return None
-    # The window the app calls focused (its AX frame), not a bubble or popup listed first.
+    options = Quartz.kCGWindowListExcludeDesktopElements
+    on_screen = _windows(Quartz.CGWindowListCopyWindowInfo(options | Quartz.kCGWindowListOptionOnScreenOnly,
+                                                           Quartz.kCGNullWindowID))
+    everywhere = _windows(Quartz.CGWindowListCopyWindowInfo(options | Quartz.kCGWindowListOptionAll,
+                                                            Quartz.kCGNullWindowID))
+    if app_name and pid is None:
+        # Not an app: words from a window title (on this Space first).
+        front_pid = front.processIdentifier() if front is not None else None
+        return _titled_window(on_screen, app_name, front_pid) or _titled_window(everywhere, app_name, front_pid)
+    mine = [w for w in on_screen if w["pid"] == pid]
+    # The window the app calls focused (its AX frame and title), not a bubble or popup listed first.
     try:
         import ApplicationServices as AX
         from mint.screen.axkit import attr, frame
         app = AX.AXUIElementCreateApplication(pid)
-        focused = frame(attr(app, "AXFocusedWindow") or attr(app, "AXMainWindow"))
+        window = attr(app, "AXFocusedWindow") or attr(app, "AXMainWindow")
+        focused, title = frame(window), str(attr(window, "AXTitle") or "") if window is not None else ""
     except Exception:
-        focused = None
+        focused, title = None, ""
+
+    def same_title(w) -> bool:
+        # Chrome's AX title is "Page - Google Chrome - Profile", its window-list name just "Page".
+        return bool(title and w["title"] and (title.startswith(w["title"]) or w["title"].startswith(title)))
+
+    # Same title first: several browser windows often share one frame, and the focused one may be on
+    # another Space, where the nearest on-screen frame would be a different window.
+    pool = [w for w in mine if same_title(w)]
+    if not pool and title:
+        pool = [w for w in everywhere if w["pid"] == pid and same_title(w)]
+    if not pool:
+        pool = mine or [w for w in everywhere if w["pid"] == pid and w["title"]]
+    if not pool:
+        return None
     if focused:
-        best = min(mine, key=lambda m: sum(abs(a - b) for a, b in zip(m[1], focused)))
+        best = min(pool, key=lambda w: sum(abs(a - b) for a, b in zip(w["box"], focused)))
     else:
-        best = max(mine, key=lambda m: m[1][2] * m[1][3])
-    return best[0], best[1], name
+        best = max(pool, key=lambda w: w["box"][2] * w["box"][3])
+    return best["id"], best["box"], name
+
+
+def _windows(listed) -> list[dict]:
+    """Ordinary windows (layer 0, not tiny, not Mint's own) from a CGWindowList, front to back."""
+    out = []
+    for window in listed or []:
+        b = window.get("kCGWindowBounds") or {}
+        if window.get("kCGWindowLayer", 0) != 0 or b.get("Width", 0) < 60 or b.get("Height", 0) < 60:
+            continue
+        if window.get("kCGWindowOwnerPID") == os.getpid():
+            continue
+        out.append({"id": int(window["kCGWindowNumber"]), "pid": window.get("kCGWindowOwnerPID"),
+                    "box": (b["X"], b["Y"], b["Width"], b["Height"]),
+                    "title": str(window.get("kCGWindowName") or ""),
+                    "app": str(window.get("kCGWindowOwnerName") or "app")})
+    return out
+
+
+def _titled_window(windows: list[dict], title: str, front_pid):
+    """(window id, box, app name) of the window whose title holds `title` (the front app's first, then the
+    biggest), or None."""
+    want = " ".join(title.lower().split())
+    hits = [w for w in windows if want and want in " ".join(w["title"].lower().split())]
+    if not hits:
+        return None
+    best = max(hits, key=lambda w: (w["pid"] == front_pid, w["box"][2] * w["box"][3]))
+    return best["id"], best["box"], best["app"]
 
 
 def _display_of(point) -> int:
@@ -1047,7 +1189,11 @@ def screenshot(args: dict) -> str:
     if what == "window":
         info = _front_window_info(target)
         if info is None:
-            return f"FAILED: no window of {target or 'the front app'} is on screen."
+            if not target:
+                return "FAILED: no window of the front app is on screen."
+            return (f"FAILED: no window of {target} is on screen ('{target}' is neither a running app nor in the "
+                    "title of a window on this screen). Give the app's name as target (e.g. Google Chrome), or no "
+                    "target for the front window.")
         window_id, box, app = info
         command += ["-o", "-l", str(window_id)]
         described = f"the {app} window"

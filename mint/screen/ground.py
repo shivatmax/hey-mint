@@ -1116,6 +1116,27 @@ def _sent_check(app, text: str) -> str:
             "not in the conversation). Check with look; if it was lost, type it again.")
 
 
+def _would_wipe(chosen: dict, text: str) -> str:
+    """Typing selects everything in the field first. In a document's text area (TextEdit, Notes, a mail
+    body) that replaces the whole document with `text` - on 29 Sep "change 'Dear Sir' to 'Dear Ms. Rao'"
+    left a letter holding just "Dear Ms. Rao". Say why not ("" = fine): a short field, or `text` that is a
+    rewrite of the whole thing, is typed as usual."""
+    if chosen["role"] != "AXTextArea":
+        return ""
+    raw = axkit.attr(chosen["ref"], "AXValue")
+    if not isinstance(raw, str):
+        return ""
+    old, new = _text(raw), _text(text)
+    lines = sum(1 for line in raw.splitlines() if line.strip())
+    if (len(old) < 120 and lines < 3) or len(new) >= 0.6 * len(old):
+        return ""
+    return (f"FAILED: nothing was typed. The {chosen['kind']} holds a whole document ({len(old)} characters, "
+            f"{lines} lines) and typing replaces ALL of it with '{new[:40]}'. To change a word or phrase: for a "
+            "saved file, write_file mode=replace (find = the old words; keeps .rtf formatting and reloads TextEdit), "
+            "or in the app menu Edit > Find > Find and Replace…, then File > Save. To rewrite the whole text, "
+            "give all of the new text.")
+
+
 def act(action: str, target: str, text: str = "", press_return: bool = False,
         replace: bool = True, app=None) -> str:
     """The whole thing: find it, do it like a person, check it happened."""
@@ -1149,6 +1170,9 @@ def act(action: str, target: str, text: str = "", press_return: bool = False,
         return covered
 
     if action == "type":
+        wipe = _would_wipe(chosen, text) if replace else ""
+        if wipe:
+            return wipe
         mouse_click(x, y, label=chosen["label"] or "field")
         time.sleep(0.15)
         if not axkit.attr(chosen["ref"], "AXFocused"):

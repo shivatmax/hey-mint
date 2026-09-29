@@ -112,19 +112,51 @@ def declarations() -> list[types.FunctionDeclaration]:
         _fn("calendar_events", "The user's calendar events from today onwards.",
             {"days": {**INTEGER, "description": "How many days to cover, starting today. Default 1."}}),
         _fn("create_reminder",
-            "Create a reminder in the Reminders app, optionally due at a time. Call get_status first "
-            "if you need the current time to work out the due time.",
-            {"title": {**STRING},
+            "Create a reminder in the Reminders app, optionally due at a time, in the list the user names. "
+            "To CHANGE a reminder (\"actually make it 11\", \"add a note\"), call it again with the SAME title: "
+            "it updates that reminder instead of adding a second one. Call get_status first if you need the "
+            "current time to work out the due time.",
+            {"title": {**STRING, "description": "Just the task; extra detail goes in notes."},
              "in_minutes": {**INTEGER, "description": "Due this many minutes from now."},
-             "when": {**STRING, "description": "Due at a local date-time, ISO format, e.g. 2026-09-24T09:00."}},
+             "when": {**STRING, "description": "Due at a local date-time, ISO format, e.g. 2026-09-24T09:00."},
+             "list": {**STRING, "description": "The Reminders list the user named ('my Groceries list' -> "
+                      "'Groceries'). Leave out for the default list."},
+             "notes": {**STRING, "description": "Notes for the reminder."},
+             "create_list": {"type": types.Type.BOOLEAN,
+                             "description": "Make the list if it does not exist. Only when the user asked for a new list."}},
             ["title"]),
-        _fn("create_note", "Create a note in the Notes app.",
-            {"title": {**STRING}, "body": {**STRING}}, ["title"]),
+        _fn("create_event",
+            "Add an event to the Calendar app (instant, EventKit). Use this, never run_applescript, for Calendar. "
+            "If it clashes with an event on that calendar it is NOT booked: the answer names the clash and the "
+            "next free slot; do what the user said about clashes, else ask.",
+            {"title": {**STRING},
+             "start": {**STRING, "description": "Local ISO start, e.g. 2026-10-06T15:00."},
+             "end": {**STRING, "description": "Local ISO end. Or give minutes."},
+             "minutes": {**INTEGER, "description": "Length in minutes (default 60) when there is no end."},
+             "calendar": {**STRING, "description": "The calendar the user named ('my Work calendar' -> 'Work'). "
+                          "Leave out for the default calendar."},
+             "location": {**STRING}, "notes": {**STRING},
+             "allow_overlap": {"type": types.Type.BOOLEAN,
+                               "description": "Book even if it clashes (only when the user says so)."},
+             "create_calendar": {"type": types.Type.BOOLEAN,
+                                 "description": "Make the calendar if missing. Only when the user asked."}},
+            ["title", "start"]),
+        _fn("create_note", "Create a note in the Notes app, in the folder the user names.",
+            {"title": {**STRING}, "body": {**STRING, "description": "The note's text; one item per line for a list."},
+             "folder": {**STRING, "description": "The Notes folder the user named ('my Work folder' -> 'Work'). "
+                        "Leave out for the default folder."},
+             "create_folder": {"type": types.Type.BOOLEAN,
+                               "description": "Make the folder if it does not exist. Only when the user asked."}},
+            ["title"]),
         _fn("compose_email",
-            "Open a pre-filled email draft in the user's mail app for them to review and send. "
-            "It never sends. Write the body yourself from what the user asked.",
+            "Make a pre-filled email draft for the user to review and send. It never sends. With app='Mail' "
+            "(or when the user says the Mail app) it is a real draft in Apple Mail, saved in Drafts, with the "
+            "recipient and subject checked; otherwise it opens in the user's default mail app. Write the body "
+            "yourself from what the user asked.",
             {"to": {**STRING, "description": "Recipient address, if known."},
-             "subject": {**STRING}, "body": {**STRING}}),
+             "subject": {**STRING}, "body": {**STRING},
+             "app": {**STRING, "description": "'Mail' when the user wants the Mail app; leave out for their "
+                     "default mail app."}}),
         _fn("list_emails",
             "List the newest messages in the macOS MAIL APP's inbox. Only when the user asks about "
             "the Mail app or does not care which account. For Gmail or a named account (e.g. "
@@ -189,8 +221,10 @@ def declarations() -> list[types.FunctionDeclaration]:
         _fn("create_pdf",
             "Write a nicely formatted PDF and open it. Compose the full content yourself. Content "
             "uses light Markdown: '# Heading', '- bullet', '**bold**', blank lines between "
-            "paragraphs. Saved in Mint's Documents folder (Settings > Storage).",
+            "paragraphs. Saved where the user asks (save_to), else in Mint's Documents folder.",
             {"title": {**STRING}, "content": {**STRING},
+             "save_to": {**STRING, "description": "Where the user asked for it: a folder or a full .pdf path. "
+                                                  "Leave empty for Mint's Documents folder."},
              "open_after": {"type": types.Type.BOOLEAN, "description": "Open it when done. Default true."}},
             ["title", "content"]),
         _fn("run_routine",
@@ -222,11 +256,13 @@ def declarations() -> list[types.FunctionDeclaration]:
             "activity_timeline clear), where Mint saves what it makes ('save everything in my Dropbox' -> "
             "storage_folder = that folder's path, e.g. ~/Dropbox/Mint; 'default' resets it), instant "
             "simple commands, and where screenshots go ('whenever I say screenshot, just put it on the clipboard' -> "
-            "screenshot_to = clipboard; file; both). Confirm briefly what you changed.",
+            "screenshot_to = clipboard; file; both), and the language you answer in ('always answer in Hindi' -> "
+            "reply_language = Hindi; 'answer in whatever language I speak' -> reply_language = auto). Confirm "
+            "briefly what you changed.",
             {"setting": {**STRING, "enum": ["spoken_replies", "microphone", "theme", "position",
                                             "face", "effects", "word_animation", "listen_while_working",
                                             "activity_timeline", "storage_folder", "instant_commands",
-                                            "screenshot_to"]},
+                                            "screenshot_to", "reply_language"]},
              "value": {**STRING, "description":
                        "on/off for switches (activity_timeline also: clear); theme: mint (green), blue, aurora (teal/violet), sunset "
                        "(orange), rose (pink), mono (white); position: top-right, "
@@ -356,9 +392,15 @@ _SYNC = {
     "notify": lambda a: skills.notify(a["title"], a.get("message", "")),
     "system_action": lambda a: skills.system_action(a["action"]),
     "calendar_events": lambda a: _calendar_tool(a),
-    "create_reminder": lambda a: skills.create_reminder(a["title"], a.get("in_minutes"), a.get("when")),
-    "create_note": lambda a: skills.create_note(a["title"], a.get("body", "")),
-    "compose_email": lambda a: skills.compose_email(a.get("to", ""), a.get("subject", ""), a.get("body", "")),
+    "create_reminder": lambda a: skills.create_reminder(a["title"], a.get("in_minutes"), a.get("when"),
+                                                        a.get("list"), a.get("notes"), bool(a.get("create_list"))),
+    "create_event": lambda a: skills.create_event(a["title"], a["start"], a.get("end"), a.get("minutes"),
+                                                  a.get("calendar"), a.get("location"), a.get("notes"),
+                                                  bool(a.get("allow_overlap")), bool(a.get("create_calendar"))),
+    "create_note": lambda a: skills.create_note(a["title"], a.get("body", ""), a.get("folder"),
+                                                bool(a.get("create_folder"))),
+    "compose_email": lambda a: skills.compose_email(a.get("to", ""), a.get("subject", ""), a.get("body", ""),
+                                                    a.get("app")),
     "list_emails": lambda a: skills.list_emails(a.get("count", 5)),
     "read_email": lambda a: skills.read_email(a["number"]),
     "list_accounts": lambda a: apps.list_accounts(),
@@ -371,7 +413,8 @@ _SYNC = {
     "list_open": lambda a: workspace.describe(),
     "switch_to": lambda a: workspace.switch_to(a["what"]),
     "export_doc_pdf": lambda a: documents.export_doc_pdf(a.get("open_after", True) is not False),
-    "create_pdf": lambda a: documents.create_pdf(a["title"], a["content"], a.get("open_after", True) is not False),
+    "create_pdf": lambda a: documents.create_pdf(a["title"], a["content"], a.get("open_after", True) is not False,
+                                                 str(a.get("save_to") or "")),
     "click_at": lambda a: vision.click_at(
         float(a["x"]), float(a["y"]), a.get("button", "left"), bool(a.get("double", False))),
 }
@@ -620,13 +663,16 @@ _tools_before_power = tools
 def _power_modules():
     from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import briefing
+    from mint.tools import calc
     from mint.tools import cards
+    from mint.tools import merge
     from mint.tools import convert
     from mint.voice import dictation
     from mint.tools import mac as macctl
     from mint.tools import mailtriage
     from mint.tools import meetings
     from mint.tools import rewrite
+    from mint.tools import notifications
     from mint.tools import screenrec
     from mint.tools import screenshots
     from mint.tools import sheets
@@ -635,9 +681,12 @@ def _power_modules():
     from mint.tools import trackers
     from mint.tools import translate
     from mint.ui import tutor
+    from mint.tools import undo
+    from mint.app import updater
     from mint.tools import video_edit
+    from mint.tools import agentapps
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -654,10 +703,10 @@ def _power(name: str):
     return run
 
 
-_SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "tidy", "teach",
+_SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "edit_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
-                                                  "screen_record", "track", "show_card",
+                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "agent_app",
                                                   "dictation", "edit_video", "video_info", "ocr_copy",
                                                   "data_to_sheet", "convert_document")})
 

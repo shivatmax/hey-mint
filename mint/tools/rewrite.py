@@ -82,6 +82,9 @@ def edit_selection(instruction: str, replace: bool = True) -> str:
                 f"The rewrite:\n{new}\nOffer to paste it when they are back with the text selected.")
     _paste(new)
     _last.update(original=selected, new=new, app=app, at=time.time())
+    from mint.tools import undo as undo_log
+    undo_log.record("edit_selection", f"rewriting the selection in {app or 'the app'} ({instruction[:40]})",
+                    {"kind": "edit_selection", "original": selected, "new": new, "app": app})
     return (f"Replaced the selection in {app or 'the app'} ({len(selected)} → {len(new)} characters). "
             f"New text: {new[:600]}{'…' if len(new) > 600 else ''}\n⌘Z in the app, or edit_selection action=undo, "
             "brings the original back. Tell the user briefly what changed; don't read it all out.")
@@ -99,12 +102,19 @@ def undo() -> str:
             from mint.tools import fastinput
             fastinput.press_key("z", ["command"])
             _last.clear()
+            _settled()
             return "Undid the edit with the app's own undo (⌘Z)."
         return ("The edited text is no longer selected and a different app is in front. Go back to it and "
                 "press ⌘Z, or select the text and ask again.")
     _paste(_last["original"])
     _last.clear()
+    _settled()
     return "Put the original text back."
+
+
+def _settled() -> None:
+    from mint.tools import undo as undo_log
+    undo_log.settled("edit_selection")
 
 
 PROMPT = """Selected text: when the user asks to change text they have selected - "make this more formal", \

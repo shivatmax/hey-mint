@@ -46,7 +46,33 @@ def fixes() -> list[dict]:
 
 def _wake_phrases() -> set[str]:
     name = prefs.name().lower()
-    return {f"hey {name}", f"hi {name}", f"hey, {name}", f"hi, {name}", name}
+    return {f"hey {name}", f"hi {name}", f"hey, {name}", f"hi, {name}", name} | _custom_phrases()
+
+
+def _custom_phrases() -> set[str]:
+    """The wake phrases actually on ("Hey Jarvis" set in Settings), as a transcript
+    may write them: "hey jarvis", "hey, jarvis"."""
+    try:
+        from mint.voice import wake
+        phrases = wake.active_phrases()
+    except Exception:
+        return set()
+    out = set()
+    for phrase in phrases:
+        words = _clean(phrase).lower().split()
+        if words:
+            out.add(" ".join(words))
+            if len(words) > 1:
+                out.add(f"{words[0]}, {' '.join(words[1:])}")
+    return out
+
+
+def _main_phrase() -> str:
+    try:
+        from mint.voice import wake
+        return wake.active_phrases()[0]
+    except Exception:
+        return f"Hey {prefs.name()}"
 
 
 def _is_wake(meant: str) -> bool:
@@ -58,6 +84,11 @@ def teach(heard: str, meant: str, forget: bool = False) -> str:
     heard, meant = _clean(heard), _clean(meant)
     if not heard:
         return "Say which word was misheard (heard) and what the user said (meant)."
+    if not forget:
+        from mint.app import live
+        if live.was_typed() and not re.search(r"hear|heard|misheard|mishear", live.request().lower()):
+            return ("Not saved: this request was typed, so nothing in it was misheard. Only save a correction "
+                    "when the user says you heard a spoken word wrong.")
     current = fixes()
     kept = [f for f in current if _clean(f["heard"]).lower() != heard.lower()]
     if forget:
@@ -87,6 +118,7 @@ def _pattern(word: str) -> re.Pattern:
 def strip_wake(text: str) -> tuple[str, bool]:
     """Drop a leading scrap of the wake phrase. -> (text, dropped)"""
     lead = [w for w in WAKE_LOOKALIKES] + [_clean(f["heard"]) for f in fixes() if _is_wake(f["meant"])]
+    lead += sorted(_custom_phrases())
     for word in sorted(set(lead), key=len, reverse=True):
         match = re.match(r"\s*" + _pattern(word).pattern + r"[\s,.!?]*", text, re.I)
         if match:
@@ -127,17 +159,18 @@ def meant_words() -> list[str]:
 
 
 def prompt_text() -> str:
-    name = prefs.name()
-    lines = [f"The wake phrase \"Hey {name}\" is caught on the Mac and cut from the audio you get, so a "
+    phrase = _main_phrase()
+    heard_as = " - 'payment', 'hymen', 'Hey man' -" if phrase.lower() == "hey mint" else ""
+    lines = [f"The wake phrase \"{phrase}\" is caught on the Mac and cut from the audio you get, so a "
              "turn normally starts with the request itself. If a turn still starts with a stray word that "
-             f"sounds like it - 'payment', 'hymen', 'Hey man' - that is the wake phrase, not a request: "
+             f"sounds like it{heard_as} that is the wake phrase, not a request: "
              "ignore it, and if nothing else was said, just ask briefly what they need."]
     pairs = [f for f in fixes() if not _is_wake(f["meant"])]
     if pairs:
         lines.append("Words you have misheard before, and what the user actually says: "
                      + "; ".join(f"'{_clean(f['heard'])}' is '{_clean(f['meant'])}'" for f in pairs) + ".")
     lines.append("When the user corrects how you heard a word or name (\"I said Aman, not Amen\", "
-                 f"\"it's Hey {name}, not payment\"), call fix_hearing once with what you heard and what "
+                 f"\"it's {phrase}, not payment\"), call fix_hearing once with what you heard and what "
                  "they meant, then carry on with the corrected request. Not for a change of mind.")
     return "\n".join(lines)
 
@@ -148,7 +181,9 @@ def declarations():
         name="fix_hearing",
         description=("Remember a word or name you misheard, so it is heard right from now on. Call it when "
                      "the user corrects your hearing (\"I said Aman, not Amen\"; \"it's Hey Mint, not "
-                     "payment\"; \"no, KubeCon\"). forget=true removes a saved correction."),
+                     "payment\"; \"no, KubeCon\"). Only for a word you HEARD wrong that the user corrects - never "
+                     "to link two names in a request (\"Sam (that's me)\" is not a hearing fix), and never for "
+                     "typed text. forget=true removes a saved correction."),
         parameters=types.Schema(type="OBJECT", properties={
             "heard": types.Schema(type="STRING", description="What you heard (the wrong word or phrase)."),
             "meant": types.Schema(type="STRING", description="What the user actually said."),

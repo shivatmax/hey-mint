@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Sign-up form - MintBench</title>
+<style>body{font:17px/1.5 -apple-system,Helvetica,sans-serif;max-width:640px;margin:40px auto;padding:0 20px}
+label{display:block;margin:14px 0 4px}input,select,textarea{font-size:17px;padding:6px;width:100%}</style></head>
+<body>
+<h1>Join the newsletter</h1>
+<form id="f" onsubmit="submitted(); return false;">
+<label for="name">Full name</label><input id="name" name="name" placeholder="Your full name">
+<label for="email">Email</label><input id="email" name="email" placeholder="you@example.com">
+<label for="colour">Favourite colour</label>
+<select id="colour" name="colour"><option value="">Choose…</option><option>Red</option><option>Green</option><option>Blue</option></select>
+<label for="notes">Notes</label><textarea id="notes" name="notes" rows="3"></textarea>
+<p><button type="submit">Submit</button></p>
+</form>
+<script>
+// The benchmark reads what is in the fields from the local server, so no clicks are needed to check.
+function report(extra) {
+  // By id, not the bare globals: a bare `name` is window.name (a string), not the #name field.
+  const v = id => document.getElementById(id).value;
+  const q = new URLSearchParams({name: v("name"), email: v("email"), colour: v("colour"),
+                                 notes: v("notes"), submitted: extra || ""});
+  fetch("/record?" + q.toString()).catch(() => {});
+}
+function submitted() { report("yes"); }
+setInterval(report, 1000);
+</script>
+</body></html>

@@ -94,7 +94,25 @@ if [[ -d "$ROOT/guide/media" ]]; then
 fi
 cp "$ROOT/requirements.txt" "$RUNTIME/"
 if [[ -f "$ROOT/.env" ]]; then
-  cp "$ROOT/.env" "$RUNTIME/.env"
+  # Merge, never overwrite: keys saved in Settings (a Telegram bot token, a changed API key) live only in the
+  # installed copy, and copying the checkout's .env over it wiped them on every install.
+  /usr/bin/python3 - "$ROOT/.env" "$RUNTIME/.env" <<'PY'
+import os, sys
+def read(path):
+    keys, lines = {}, []
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8").read().splitlines():
+            name = line.strip().removeprefix("export ").split("=", 1)[0].strip()
+            if "=" in line and name and not line.lstrip().startswith("#"):
+                keys[name] = line
+            lines.append(line)
+    return keys, lines
+repo, _ = read(sys.argv[1])
+installed, lines = read(sys.argv[2])
+lines += [line for name, line in repo.items() if name not in installed]
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    out.write("\n".join(lines).strip("\n") + "\n")
+PY
   chmod 600 "$RUNTIME/.env"
 fi
 cp "$ROOT/custom.example.json" "$RUNTIME/custom.example.json"

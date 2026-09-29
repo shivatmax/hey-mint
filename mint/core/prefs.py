@@ -103,6 +103,14 @@ DEFAULTS: dict = {
     # How Mint sounds: a Gemini live voice ("" = config.VOICE) and a free-text style.
     "voice_name": "",
     "speaking_style": "",
+    # The language Mint answers in: "auto" follows the user; otherwise always this one.
+    "reply_language": "auto",
+    # The wake phrase ("" = "Hey <assistant name>"); wake_models: more phrases that also wake it.
+    "wake_phrase": "",
+    "wake_models": [],
+    # Updates of the packaged app: checked at launch and every 12 h, installed while the Mac is idle.
+    "auto_update": True,
+    "update_channel": "stable",
     # Mishearings the user corrected (hearing.py; the fix_hearing tool).
     "hearing_fixes": [],
     # Minutes asleep and idle before Mint unloads and Mint Ear listens instead
@@ -117,6 +125,11 @@ DEFAULTS: dict = {
     "share_mic_apps": [],              # extra bundle ids to step aside for
     # Voice lock strictness: relaxed | balanced | strict.
     "lock_strictness": "balanced",
+    # Telegram remote control (telegram.py): on only with a bot token and this switch; read-only
+    # phone requests never send, delete or buy; notify sends tracker and agent news to the chat.
+    "telegram_enabled": False,
+    "telegram_read_only": False,
+    "telegram_notify": True,
     "stop_words": ["stop", "stop it", "stop everything", "cancel", "cancel that", "abort",
                    "enough", "hold on", "never mind", "nevermind", "shut up"],
 }

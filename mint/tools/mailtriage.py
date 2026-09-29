@@ -159,15 +159,20 @@ def draft_reply(number: int, instruction: str = "") -> str:
     address = re.search(r"<([^>]+)>", msg["from"])
     to = address.group(1) if address else msg["from"].strip()
     subject = msg["subject"] if msg["subject"].lower().startswith("re:") else f"Re: {msg['subject']}"
-    skills.compose_email(to, subject, body)
-    return (f"Opened a draft reply to {to} ('{subject}') in the mail app - NOT sent; the user reads and sends it. "
+    # The message came from Mail, so the reply is drafted in Mail (a real, saved draft), not through the
+    # default mailto: handler - which may be a browser (29 Sep: Chrome), far from the message it answers.
+    made = skills.compose_email(to, subject, body, app="Mail")
+    if made.startswith("FAILED"):
+        return f"{made} The reply would have said: {body[:600]}"
+    return (f"Made a draft reply to {to} ('{subject}') in the Mail app - NOT sent; the user reads and sends it. "
             f"It says: {body[:600]}")
 
 
 PROMPT = """Email: "what needs my attention in my inbox?", "triage my email" -> mail action=triage (sorted: \
 needs a reply, to do, FYI, newsletters). "Draft a reply to #2 saying …", "reply to Priya's email" -> mail \
 action=draft_reply with the number from triage/list_emails and what to say. Replies are drafts in the user's \
-own style; Mint never sends email."""
+own style; Mint never sends email. A NEW email "in the Mail app" -> compose_email: when the user names the Mail \
+app it makes a real draft there (recipient, subject, body; saved in Drafts), never sent."""
 
 
 def declarations():

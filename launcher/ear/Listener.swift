@@ -153,7 +153,7 @@ final class Listener {
         let prefs = Settings.read()
         do {
             try handoff.listen()
-            try loadDetector(name: Settings.name(prefs))
+            try loadDetector(prefs: prefs)
         } catch {
             Log.write("[ear] listener could not start: \(error)")
             say("FAILED")
@@ -176,7 +176,7 @@ final class Listener {
         RunLoop.main.run()
     }
 
-    func loadDetector(name: String) throws {
+    func loadDetector(prefs: [String: Any]) throws {
         let site = try Settings.sitePackages()
         let capi = site + "/onnxruntime/capi"
         guard let dylib = try FileManager.default.contentsOfDirectory(atPath: capi)
@@ -185,8 +185,11 @@ final class Listener {
         }
         let ort = try Ort(library: capi + "/" + dylib)
         self.ort = ort
+        let models = try WakeModel.loadAll(root: Bundled.root, prefs: prefs, name: Settings.name(prefs))
+        Log.write("[ear] wake: " + models.map { "\($0.phrase) (\(($0.path as NSString).lastPathComponent))" }
+            .joined(separator: ", "))
         detector = WakeDetector(features: try WakeFeatures(ort: ort, models: site + "/openwakeword/resources/models"),
-                                model: try WakeModel.load(root: Bundled.root, name: name))
+                                models: models)
     }
 
     var nearMiss: Float = 0

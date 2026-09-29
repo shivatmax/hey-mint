@@ -1,0 +1,1609 @@
+{
+ "version": 1,
+ "about": "Mint reliability benchmark. {root} = the sandbox (~/MintBench), {site} = the local test site; other {names} come from the task's setup (ctx.data).",
+ "tasks": [
+  {
+   "id": "files-organize",
+   "category": "files",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/Inbox, sort the files into three folders inside Inbox: Images for pictures, Documents for PDFs, and Text for text and Markdown files."
+    }
+   ],
+   "setup": "files_organize",
+   "check": "files_organize_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "files-typo-folder",
+   "category": "files",
+   "difficulty": "medium",
+   "complications": [
+    "name typo"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/Reciepts, move the March receipts into a new folder called March inside it."
+    }
+   ],
+   "setup": "files_typo",
+   "check": "files_typo_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "The folder is really Receipts."
+  },
+  {
+   "id": "files-missing-file",
+   "category": "files",
+   "difficulty": "medium",
+   "complications": [
+    "missing file",
+    "two-turn follow-up",
+    "ambiguous"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Add a line 'Budget review' to the end of {root}/notes/agenda.md."
+    },
+    {
+     "say": "Yes, the draft one is the right file. Add it there."
+    }
+   ],
+   "setup": "files_missing",
+   "check": "files_missing_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "agenda.md does not exist; agenda-draft.md does."
+  },
+  {
+   "id": "files-locked-file",
+   "category": "files",
+   "difficulty": "medium",
+   "complications": [
+    "locked/readonly file",
+    "two-turn follow-up"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/config/settings.txt, change theme=dark to theme=light."
+    },
+    {
+     "say": "If you couldn't change it, save the changed version as settings-light.txt in the same folder instead, and leave the original alone."
+    }
+   ],
+   "setup": "files_readonly",
+   "check": "files_readonly_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "settings.txt is locked (chflags uchg)."
+  },
+  {
+   "id": "files-dedupe",
+   "category": "files",
+   "difficulty": "medium",
+   "complications": [
+    "same-name trap"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Delete the duplicate files in {root}/Downloads - keep one copy of each."
+    }
+   ],
+   "setup": "files_dedupe",
+   "check": "files_dedupe_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "'photo (1).jpg' is NOT a duplicate of photo.jpg (different content)."
+  },
+  {
+   "id": "files-tidy-undo",
+   "category": "files",
+   "difficulty": "hard",
+   "complications": [
+    "three-turn follow-up",
+    "undo"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Tidy up my {root}/Desk folder by kind."
+    },
+    {
+     "say": "Yes, go ahead.",
+     "check": "files_tidy_applied"
+    },
+    {
+     "say": "Hmm, I don't like it. Undo that tidy-up."
+    }
+   ],
+   "setup": "files_tidy",
+   "check": "files_tidy_undone",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "docs-action-items",
+   "category": "documents",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Read meeting-notes.txt in {root}/Docs and write just the action items into action-items.md in the same folder, one bullet per item, with the owner's name."
+    }
+   ],
+   "setup": "docs_action_items",
+   "check": "docs_action_items_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "docs-convert-docx",
+   "category": "documents",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Convert proposal.md in {root}/Docs into a Word document."
+    }
+   ],
+   "setup": "docs_convert",
+   "check": "docs_convert_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 90,
+   "markers": []
+  },
+  {
+   "id": "docs-translate",
+   "category": "documents",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Translate welcome.txt in {root}/Docs into Spanish and save it as a Word document."
+    }
+   ],
+   "setup": "docs_translate",
+   "check": "docs_translate_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 180,
+   "markers": []
+  },
+  {
+   "id": "docs-pdf-report",
+   "category": "documents",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Using status.txt in {root}/Reports, make a PDF called 'MintBench Weekly Report' with three sections - Wins, Risks and Next steps - and save it in {root}/Reports."
+    }
+   ],
+   "setup": "docs_pdf_report",
+   "check": "docs_pdf_report_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 30,
+   "markers": [
+    "weekly report"
+   ]
+  },
+  {
+   "id": "docs-textedit-edit",
+   "category": "documents",
+   "difficulty": "medium",
+   "complications": [
+    "app not open"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Open letter.rtf from {root}/Docs in TextEdit, change 'Dear Sir' to 'Dear Ms. Rao', and save it."
+    }
+   ],
+   "setup": "docs_textedit",
+   "check": "docs_textedit_ok",
+   "cleanup": [
+    "close_textedit_docs"
+   ],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "TextEdit is usually not running; it is asked to quit afterwards only if the task started it."
+  },
+  {
+   "id": "sheets-receipts",
+   "category": "spreadsheets",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make a spreadsheet of my receipts in {root}/Receipts with the vendor, date and total of each."
+    }
+   ],
+   "setup": "sheets_receipts",
+   "check": "sheets_receipts_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "sheets-web-table",
+   "category": "spreadsheets",
+   "difficulty": "medium",
+   "complications": [
+    "web"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Put the fruit price table from {site}/prices.html into a spreadsheet."
+    }
+   ],
+   "setup": "sheets_web_table",
+   "check": "sheets_web_table_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "sheets-edit-existing",
+   "category": "spreadsheets",
+   "difficulty": "hard",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/budget.xlsx, add a row 'Travel' with 1200, and a Total row at the bottom that adds up all the amounts."
+    }
+   ],
+   "setup": "sheets_edit_existing",
+   "check": "sheets_edit_existing_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "sheets-birthdays",
+   "category": "spreadsheets",
+   "difficulty": "easy",
+   "complications": [
+    "ambiguous"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make me a spreadsheet of the birthdays in team.txt in my MintBench folder."
+    }
+   ],
+   "setup": "sheets_birthdays",
+   "check": "sheets_birthdays_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 60,
+   "markers": [],
+   "note": "Where to save and which columns are left to Mint."
+  },
+  {
+   "id": "pim-reminder",
+   "category": "calendar-reminders-notes",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [
+    "reminders"
+   ],
+   "turns": [
+    {
+     "say": "Add a reminder 'MintBench: renew passport' to my Mint Bench list in Reminders, due tomorrow at 10 am."
+    }
+   ],
+   "setup": "pim_reminder",
+   "check": "pim_reminder_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "passport"
+   ]
+  },
+  {
+   "id": "pim-reminder-followup",
+   "category": "calendar-reminders-notes",
+   "difficulty": "medium",
+   "complications": [
+    "two-turn follow-up"
+   ],
+   "needs": [
+    "reminders"
+   ],
+   "turns": [
+    {
+     "say": "Add 'MintBench: call the plumber' to my Mint Bench list in Reminders for tomorrow at 9 am."
+    },
+    {
+     "say": "Actually, make it 11, and put 'bring the invoice' in its notes."
+    }
+   ],
+   "setup": "pim_followup",
+   "check": "pim_followup_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "plumber"
+   ]
+  },
+  {
+   "id": "pim-notes-to-reminders",
+   "category": "calendar-reminders-notes",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon"
+   ],
+   "needs": [
+    "notes",
+    "reminders"
+   ],
+   "turns": [
+    {
+     "say": "Turn each line of my 'MintBench todo' note (in the Mint Bench folder in Notes) into its own reminder in my Mint Bench list in Reminders."
+    }
+   ],
+   "setup": "pim_notes_to_reminders",
+   "check": "pim_notes_to_reminders_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "printer ink",
+    "landlord",
+    "dentist"
+   ]
+  },
+  {
+   "id": "pim-calendar-event",
+   "category": "calendar-reminders-notes",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [
+    "calendar"
+   ],
+   "turns": [
+    {
+     "say": "Put 'MintBench sync' on my Mint Bench calendar on {day}, from 3 to 4 pm."
+    }
+   ],
+   "setup": "pim_event",
+   "check": "pim_event_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "pim-calendar-conflict",
+   "category": "calendar-reminders-notes",
+   "difficulty": "hard",
+   "complications": [
+    "ambiguous",
+    "conflict"
+   ],
+   "needs": [
+    "calendar"
+   ],
+   "turns": [
+    {
+     "say": "Book 'MintBench 1:1 with Sam' tomorrow at 2 pm for 30 minutes on my Mint Bench calendar. If that clashes with something on that calendar, use the next free half hour instead."
+    }
+   ],
+   "setup": "pim_calendar_conflict",
+   "check": "pim_calendar_conflict_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "pim-note",
+   "category": "calendar-reminders-notes",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [
+    "notes"
+   ],
+   "turns": [
+    {
+     "say": "Make a note called 'MintBench groceries' in the Mint Bench folder in Notes, with eggs, milk and rice as a list."
+    }
+   ],
+   "setup": "pim_note",
+   "check": "pim_note_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "groceries"
+   ]
+  },
+  {
+   "id": "pim-email-draft",
+   "category": "calendar-reminders-notes",
+   "difficulty": "medium",
+   "complications": [
+    "never send"
+   ],
+   "needs": [
+    "mail"
+   ],
+   "turns": [
+    {
+     "say": "In the Mail app, draft an email to bench@example.com with the subject '[MintBench] Weekly status' that summarises {root}/status.txt. Don't send it."
+    }
+   ],
+   "setup": "pim_email",
+   "check": "pim_email_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "web-local-fact",
+   "category": "web",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "What is the refund window on {site}/policy.html? Write just the answer into {root}/answer.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "web_local_fact_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "web-compare",
+   "category": "web",
+   "difficulty": "medium",
+   "complications": [
+    "multi-page"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Compare the three laptops on {site}/products/index.html and save a Markdown table with price, weight and battery life to {root}/laptops.md, cheapest first."
+    }
+   ],
+   "setup": "nothing",
+   "check": "web_compare_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "web-slow-page",
+   "category": "web",
+   "difficulty": "medium",
+   "complications": [
+    "slow network page"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Read {site}/slow/report.html and save its three headline numbers (revenue, new customers and churn) to {root}/q3.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "web_slow_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "The page takes 12 s to load."
+  },
+  {
+   "id": "web-flaky-page",
+   "category": "web",
+   "difficulty": "medium",
+   "complications": [
+    "server error, retry"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Get the current release version from {site}/flaky/status.html and write it to {root}/version.txt."
+    }
+   ],
+   "setup": "web_flaky",
+   "check": "web_flaky_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "The first two requests get 503."
+  },
+  {
+   "id": "web-public-fact",
+   "category": "web",
+   "difficulty": "easy",
+   "complications": [
+    "public page"
+   ],
+   "needs": [
+    "internet"
+   ],
+   "turns": [
+    {
+     "say": "Using python.org, find the year Python 3.0 was released and write 'Python 3.0: <year>' into {root}/python.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "web_public_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "web-follow-links",
+   "category": "web",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "multi-page"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "On {site}/wiki/index.html, find Zembla's capital, then the city it is twinned with, and the year that city was founded. Write 'city, year' into {root}/wiki.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "web_follow_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "clip-copy-path",
+   "category": "clipboard",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Copy the full path of the contract PDF in {root}/Docs to my clipboard."
+    }
+   ],
+   "setup": "clip_path",
+   "check": "clip_path_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "clip-pin",
+   "category": "clipboard",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Pin what's on my clipboard as 'MintBench template'."
+    }
+   ],
+   "setup": "clip_pin",
+   "check": "clip_pin_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "clip-history",
+   "category": "clipboard",
+   "difficulty": "medium",
+   "complications": [
+    "ambiguous"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Put the MintBench code I copied before the last two back on my clipboard."
+    }
+   ],
+   "setup": "clip_history",
+   "check": "clip_history_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "Copies ALPHA, BRAVO, CHARLIE 2.5 s apart; ALPHA is wanted."
+  },
+  {
+   "id": "clip-to-file",
+   "category": "clipboard",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Save what's on my clipboard into a file {root}/scores.csv."
+    }
+   ],
+   "setup": "clip_to_file",
+   "check": "clip_to_file_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "video-trim",
+   "category": "video",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Cut the first 5 seconds off demo.mp4 in {root}/Video."
+    }
+   ],
+   "setup": "video_demo",
+   "check": "video_trim_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 180,
+   "markers": []
+  },
+  {
+   "id": "video-extract-audio",
+   "category": "video",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Extract the audio from demo.mp4 in {root}/Video as an MP3."
+    }
+   ],
+   "setup": "video_demo",
+   "check": "video_audio_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 180,
+   "markers": []
+  },
+  {
+   "id": "video-vertical",
+   "category": "video",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make {root}/Video/demo.mp4 vertical for Instagram Reels, 9 by 16."
+    }
+   ],
+   "setup": "video_demo",
+   "check": "video_vertical_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 180,
+   "markers": []
+  },
+  {
+   "id": "video-info-file",
+   "category": "video",
+   "difficulty": "easy",
+   "complications": [
+    "two tools"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Write the resolution and length of clip.mov in {root}/Video into video-info.txt next to it."
+    }
+   ],
+   "setup": "video_info",
+   "check": "video_info_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "mem-remember-recall",
+   "category": "memory",
+   "difficulty": "easy",
+   "complications": [
+    "two-turn follow-up"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Remember this: my MintBench project's staging server is called kestrel-7."
+    },
+    {
+     "say": "What's my MintBench staging server called? Write the name into {root}/server.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "mem_recall_ok",
+   "cleanup": [
+    "forget_bench_memories"
+   ],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "kestrel"
+   ]
+  },
+  {
+   "id": "mem-update",
+   "category": "memory",
+   "difficulty": "medium",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "My MintBench standup moved to 10:15. Update what you remember about it."
+    }
+   ],
+   "setup": "mem_update",
+   "check": "mem_update_ok",
+   "cleanup": [
+    "forget_bench_memories"
+   ],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "standup"
+   ]
+  },
+  {
+   "id": "mem-forget",
+   "category": "memory",
+   "difficulty": "easy",
+   "complications": [],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Forget what you know about my favourite MintBench test fruit."
+    }
+   ],
+   "setup": "mem_forget",
+   "check": "mem_forget_ok",
+   "cleanup": [
+    "forget_bench_memories"
+   ],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "durian"
+   ]
+  },
+  {
+   "id": "mem-preference-applied",
+   "category": "memory",
+   "difficulty": "medium",
+   "complications": [
+    "two-turn follow-up",
+    "ambiguous"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Remember: for MintBench work I always want files as Markdown, saved in {root}/Notes."
+    },
+    {
+     "say": "Make a MintBench file listing my three favourite colours: teal, amber and plum."
+    }
+   ],
+   "setup": "nothing",
+   "check": "mem_preference_ok",
+   "cleanup": [
+    "forget_bench_memories"
+   ],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [
+    "markdown",
+    "teal"
+   ]
+  },
+  {
+   "id": "err-write-conflict",
+   "category": "error-recovery",
+   "difficulty": "medium",
+   "complications": [
+    "existing file",
+    "ambiguous"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make a file plan.md in {root} with a checklist: book the venue, send the invites, order the cake."
+    }
+   ],
+   "setup": "err_write_conflict",
+   "check": "err_write_conflict_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "plan.md already exists with a line that must not be lost."
+  },
+  {
+   "id": "err-interrupt-resume",
+   "category": "error-recovery",
+   "difficulty": "hard",
+   "complications": [
+    "interruption",
+    "three-turn follow-up"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/Week make five files, day1.txt to day5.txt, each containing the name of its weekday, Monday to Friday.",
+     "wait": false,
+     "delay": 6
+    },
+    {
+     "say": "stop",
+     "wait": false,
+     "delay": 5
+    },
+    {
+     "say": "OK, carry on and finish the day files."
+    }
+   ],
+   "setup": "err_interrupt",
+   "check": "err_interrupt_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "err-path-typo",
+   "category": "error-recovery",
+   "difficulty": "easy",
+   "complications": [
+    "name typo",
+    "missing file"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Read {root}/Docs/budgte-2026.txt and write its total into {root}/total.txt."
+    }
+   ],
+   "setup": "err_path_typo",
+   "check": "err_path_typo_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "The file is budget-2026.txt."
+  },
+  {
+   "id": "err-wrong-format",
+   "category": "error-recovery",
+   "difficulty": "medium",
+   "complications": [
+    "missing file"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make a spreadsheet from {root}/Data/scores.pdf."
+    }
+   ],
+   "setup": "err_wrong_format",
+   "check": "err_wrong_format_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 60,
+   "markers": [],
+   "note": "There is no PDF; scores.csv has the data."
+  },
+  {
+   "id": "err-rename-collision",
+   "category": "error-recovery",
+   "difficulty": "medium",
+   "complications": [
+    "would overwrite",
+    "two-turn follow-up"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Rename draft.txt in {root}/Drafts to final.txt."
+    },
+    {
+     "say": "There's already a final.txt there - keep that old one as final-old.txt, then do the rename."
+    }
+   ],
+   "setup": "err_rename_collision",
+   "check": "err_rename_collision_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": [],
+   "note": "final.txt exists. Mint should not overwrite it; the follow-up says what to do."
+  },
+  {
+   "id": "multi-research-report",
+   "category": "multi-app",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "web",
+    "notes"
+   ],
+   "needs": [
+    "notes"
+   ],
+   "turns": [
+    {
+     "say": "Research the three laptops on {site}/products/index.html. Make a spreadsheet comparing price, weight and battery life in {root}/Research, write a short recommendation.md next to it recommending the one with the longest battery life, and make a note called 'MintBench laptop pick' in my Mint Bench folder in Notes naming the winner."
+    }
+   ],
+   "setup": "multi_research",
+   "check": "multi_research_ok",
+   "cleanup": [],
+   "timeout": 420,
+   "settle": 60,
+   "markers": [
+    "laptop pick"
+   ]
+  },
+  {
+   "id": "multi-invoice-pipeline",
+   "category": "multi-app",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "never send"
+   ],
+   "needs": [
+    "mail"
+   ],
+   "turns": [
+    {
+     "say": "Make a spreadsheet of the invoices in {root}/Invoices with number, client and amount. Then move every invoice over $1000 into a subfolder called Large. Then, in the Mail app, draft an email to bench@example.com with the subject '[MintBench] Large invoices' listing them. Don't send it."
+    }
+   ],
+   "setup": "multi_invoices",
+   "check": "multi_invoices_ok",
+   "cleanup": [],
+   "timeout": 420,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "multi-screenshot-ocr",
+   "category": "multi-app",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "browser"
+   ],
+   "needs": [
+    "browser"
+   ],
+   "turns": [
+    {
+     "say": "Open {site}/ocr.html in the browser, take a screenshot of that window, save it as mintbench-poster.png in {root}, then read the text in the screenshot and save it to {root}/poster.txt."
+    }
+   ],
+   "setup": "nothing",
+   "check": "multi_ocr_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [
+    "poster"
+   ]
+  },
+  {
+   "id": "multi-browser-form",
+   "category": "multi-app",
+   "difficulty": "medium",
+   "complications": [
+    "browser",
+    "never submit"
+   ],
+   "needs": [
+    "browser"
+   ],
+   "turns": [
+    {
+     "say": "Open {site}/form.html, fill in the full name 'MintBench Tester', the email 'tester@example.com', and choose Blue as the favourite colour. Don't submit it."
+    }
+   ],
+   "setup": "multi_form",
+   "check": "multi_form_ok",
+   "cleanup": [],
+   "timeout": 240,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "multi-agent-astra",
+   "category": "multi-app",
+   "difficulty": "hard",
+   "complications": [
+    "background agent"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Ask Astra to write a 150-word explainer on local-first software and save it as {root}/Agents/local-first.md."
+    }
+   ],
+   "setup": "nothing",
+   "check": "multi_agent_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 480,
+   "markers": [
+    "local-first"
+   ]
+  },
+  {
+   "id": "hard-shop-cheapest",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "multi-page",
+    "web",
+    "constraint"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Find the 3 cheapest products that are in stock across all the department pages of the shop at {site}/shop/index.html. Put them in a spreadsheet {root}/Shop/cheapest.xlsx with the columns Product and Price, cheapest first, and a Total row. Then write a 2-line summary into {root}/Shop/summary.md: the cheapest item on line 1 and the total on line 2."
+    }
+   ],
+   "setup": "hard_shop",
+   "check": "hard_shop_ok",
+   "cleanup": [],
+   "timeout": 420,
+   "settle": 60,
+   "markers": [],
+   "note": "4 pages. Traps: an out-of-stock whisk ($2.95), out-of-stock labels ($2.60), pre-order clips ($1.95). Want Seed Tray 3.15, Bamboo Spatula 3.49, Sticky Notes 3.75 = 10.39."
+  },
+  {
+   "id": "hard-branch-404",
+   "category": "error-recovery",
+   "difficulty": "hard",
+   "complications": [
+    "page 404",
+    "renamed page",
+    "near-name trap"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Get the opening hours of our Riverside branch from {site}/branches/riverside.html and save them to {root}/hours.txt, one line per day or group of days."
+    }
+   ],
+   "setup": "nothing",
+   "check": "hard_branch_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "riverside.html is a 404. The branch list (/branches/) says Riverside is now Riverside Quay; Riverdale is a different branch."
+  },
+  {
+   "id": "hard-sales-clean",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "messy data",
+    "duplicates",
+    "don't touch originals",
+    "long horizon"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "{root}/Data/sales-raw.csv is a mess. Make a clean copy at {root}/Data/sales-clean.csv: one row per order (some orders are in there twice, written differently), sorted by order number, dates as YYYY-MM-DD, amounts as plain numbers with two decimals (no $, USD or commas), customer names trimmed. Keep the same four columns, and don't change sales-raw.csv. Then write the total of all the amounts into {root}/Data/total.txt."
+    }
+   ],
+   "setup": "hard_sales",
+   "check": "hard_sales_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "Five date formats, $ / USD / thousands commas, a blank line, an exact duplicate and a reformatted duplicate."
+  },
+  {
+   "id": "hard-recon-pdf-csv",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "messy data",
+    "sources disagree",
+    "pdf"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Reconcile the supplier statement {root}/Recon/supplier-statement.pdf against our ledger {root}/Recon/our-ledger.csv. Write every invoice where they disagree, including any invoice that is only on one side, into {root}/Recon/mismatches.csv with the columns invoice, statement, ledger, difference (statement minus ledger; leave a missing side empty)."
+    }
+   ],
+   "setup": "hard_recon",
+   "check": "hard_recon_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "NW-2202 has transposed digits (1275.40 vs 1257.40), NW-2205 460.25 vs 406.25, NW-2206 is missing from the ledger."
+  },
+  {
+   "id": "hard-acme-merge",
+   "category": "files",
+   "difficulty": "hard",
+   "complications": [
+    "near-duplicate folders",
+    "same-name files",
+    "leave alone",
+    "nested folders"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "My Acme files are spread over {root}/Clients/Acme, {root}/Clients/acme_old and '{root}/Clients/Acme Corp (copy)'. Merge them all into {root}/Clients/Acme, flat, including files in subfolders. When two files have the same name, keep the most recently modified one in Acme and move the older one into {root}/Clients/Acme/older - don't delete anything. Then remove the emptied folders. Don't touch Acme-Widgets, that's a different client."
+    }
+   ],
+   "setup": "hard_acme",
+   "check": "hard_acme_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "contract.pdf and brief.txt exist twice (mtimes decide); acme_old/2025/notes.txt is nested; Acme-Widgets has the newest contract.pdf of all."
+  },
+  {
+   "id": "hard-week-digest",
+   "category": "files",
+   "difficulty": "hard",
+   "complications": [
+    "only last week (mtimes)",
+    "don't touch originals",
+    "ordering"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Combine the Markdown notes in {root}/Logs that were modified in the last 7 days into {root}/Logs/this-week.md, oldest first, each under a heading with its file name. Don't change, move or re-save the originals."
+    }
+   ],
+   "setup": "hard_week",
+   "check": "hard_week_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "7 files; 3 .md in the window (5, 2 and 1 days old), a .txt 3 days old, older .md files at 9, 20 and 40 days."
+  },
+  {
+   "id": "hard-spanish-brief",
+   "category": "documents",
+   "difficulty": "hard",
+   "complications": [
+    "in Spanish",
+    "word limit",
+    "keep exact values"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Write a summary of {root}/Docs/release-notes.md in Spanish, under 100 words, and save it as {root}/Docs/resumen.md. Keep the version number and both dates exactly as written."
+    }
+   ],
+   "setup": "hard_spanish",
+   "check": "hard_spanish_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "hard-trip-euros",
+   "category": "spreadsheets",
+   "difficulty": "hard",
+   "complications": [
+    "three-turn follow-up",
+    "correction",
+    "currency"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Make a spreadsheet {root}/Trip/lisbon.xlsx for my Lisbon trip budget with the columns Item and Amount: flights 420, hotel 3 nights at 95 a night, food 40 a day for 4 days, the museum pass 29, and a Total row at the bottom."
+    },
+    {
+     "say": "Add the airport taxi, 35, above the total.",
+     "check": "hard_trip_usd"
+    },
+    {
+     "say": "Actually use euros - those were dollar prices. Convert every amount at 1 USD = 0.92 EUR, rounded to cents, and make the header say EUR."
+    }
+   ],
+   "setup": "hard_trip",
+   "check": "hard_trip_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 60,
+   "markers": [],
+   "note": "Mid-check after turn 2: 5 items, Total 929. End: 386.40, 262.20, 147.20, 26.68, 32.20, Total 854.68, EUR shown."
+  },
+  {
+   "id": "hard-second-draft",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "four-turn follow-up",
+    "refers back",
+    "word limit",
+    "don't touch originals"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Which text files in {root}/Pitches are the biggest? List them biggest first."
+    },
+    {
+     "say": "Copy the second one to {root}/Pitches/pitch-short.md."
+    },
+    {
+     "say": "Now make that file much shorter - at most 3 sentences - but keep the product name and the price."
+    },
+    {
+     "say": "And put the title '# Pitch' on its first line."
+    }
+   ],
+   "setup": "hard_second",
+   "check": "hard_second_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "By size: draft-b (Tamsin) > draft-c (Orbitra, $49) > draft-a (Kelvo) > draft-d (Pruna). The names don't give the order away."
+  },
+  {
+   "id": "hard-invoice-dated",
+   "category": "error-recovery",
+   "difficulty": "hard",
+   "complications": [
+    "wrong assumption corrected",
+    "two-turn follow-up",
+    "mtimes vs content"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Move the invoices in {root}/Invoices that I saved in September into a new subfolder called 2026-09."
+    },
+    {
+     "say": "Sorry, I got that wrong: I meant the invoices dated September - the date printed on each invoice - not when I saved the file. Fix the 2026-09 folder so it holds exactly those, and put the others back."
+    }
+   ],
+   "setup": "hard_invoice_dated",
+   "check": "hard_invoice_dated_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "Saved in Sept: 01-04; dated Sept: 01, 03, 05. Dates are printed in 5 different formats."
+  },
+  {
+   "id": "hard-undo-replace",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "undo",
+    "three-turn follow-up",
+    "then differently"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/Plan/q-plan.md, change every Q3 to Q4."
+    },
+    {
+     "say": "Undo that.",
+     "check": "hard_undo_restored"
+    },
+    {
+     "say": "Only change the heading to say Q4 - leave every other Q3 as it is."
+    }
+   ],
+   "setup": "hard_undo_replace",
+   "check": "hard_undo_replace_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "Mid-check after the undo: the file is the original again."
+  },
+  {
+   "id": "hard-undo-move-copy",
+   "category": "files",
+   "difficulty": "hard",
+   "complications": [
+    "undo",
+    "two-turn follow-up",
+    "then differently"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Move report-final.pdf from {root}/Share to {root}/Archive."
+    },
+    {
+     "say": "Undo that - it has to stay in Share. Put a copy in Archive instead, named report-final-2026-09.pdf."
+    }
+   ],
+   "setup": "hard_undo_move",
+   "check": "hard_undo_move_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": []
+  },
+  {
+   "id": "hard-specs-locked",
+   "category": "error-recovery",
+   "difficulty": "hard",
+   "complications": [
+    "locked/readonly file",
+    "partway failure",
+    "carry on"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Add the line 'Reviewed: 2026-09-29' at the end of every .md file in {root}/Specs. If a file can't be changed, don't force it: skip it, carry on with the rest, and list the skipped file names in {root}/Specs/skipped.txt."
+    }
+   ],
+   "setup": "hard_specs",
+   "check": "hard_specs_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "spec-c.md is locked (uchg) and spec-e.md is read-only (0444); they must stay unchanged and protected."
+  },
+  {
+   "id": "hard-astra-grinders",
+   "category": "multi-app",
+   "difficulty": "hard",
+   "complications": [
+    "background agent",
+    "handoff",
+    "two-turn follow-up",
+    "web"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Ask Astra to research the three coffee grinders on {site}/grinders/index.html and save a Markdown comparison table (name, price, burr material, number of grind settings) as {root}/Research/grinders.md."
+    },
+    {
+     "say": "When Astra has saved grinders.md, add a last line to that file: 'Pick: ' and the cheapest grinder with steel burrs. Don't change the table."
+    }
+   ],
+   "setup": "nothing",
+   "check": "hard_astra_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 480,
+   "markers": [
+    "grinder"
+   ],
+   "note": "Ember Mill is cheapest but ceramic; Tidewell Pro ($159, steel) is the pick. Turn 2 may arrive before Astra is done."
+  },
+  {
+   "id": "hard-clip-three",
+   "category": "clipboard",
+   "difficulty": "hard",
+   "complications": [
+    "clipboard history",
+    "order",
+    "existing file"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Paste the last three things I copied into {root}/notes.md, below what's already there, in the order I copied them, one per line."
+    }
+   ],
+   "setup": "hard_clip",
+   "check": "hard_clip_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "Four copies 2.5 s apart; the first (oldest) is a decoy. notes.md already has a heading that must stay."
+  },
+  {
+   "id": "hard-inventory-edit",
+   "category": "spreadsheets",
+   "difficulty": "hard",
+   "complications": [
+    "edit in place",
+    "two sheets",
+    "leave alone"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "In {root}/Shop/inventory.xlsx, on the Stock sheet: set Blue Mug's stock to 14, add Green Mug with stock 20 and price 8.50, and add a Total row at the bottom that sums the Stock column. Leave the Notes sheet and everything else as it is."
+    }
+   ],
+   "setup": "hard_inventory",
+   "check": "hard_inventory_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 60,
+   "markers": []
+  },
+  {
+   "id": "hard-video-chain",
+   "category": "video",
+   "difficulty": "hard",
+   "complications": [
+    "long horizon",
+    "three tools",
+    "don't touch originals"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "From {root}/Video/talk.mp4, cut out the part from 0:05 to 0:15 as clip.mp4 in the same folder, then extract that clip's audio as clip.mp3, and write the durations of both files into {root}/Video/durations.txt. Don't change talk.mp4."
+    }
+   ],
+   "setup": "hard_video",
+   "check": "hard_video_ok",
+   "cleanup": [],
+   "timeout": 420,
+   "settle": 180,
+   "markers": [],
+   "note": "talk.mp4's tone is 300 Hz, then 700 Hz from 0:05 to 0:15, then 1100 Hz: the check hears which part was cut."
+  },
+  {
+   "id": "hard-accountant-memory",
+   "category": "memory",
+   "difficulty": "hard",
+   "complications": [
+    "two-turn follow-up",
+    "memory + files",
+    "decoy file"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Remember this: my MintBench accountant is Farida Okonkwo, farida@example.com."
+    },
+    {
+     "say": "Write a short note to my MintBench accountant in {root}/Receipts/for-accountant.md: greet her by her first name, and give the total of the receipts in {root}/Receipts (just the .txt ones) and how many there are."
+    }
+   ],
+   "setup": "hard_accountant",
+   "check": "hard_accountant_ok",
+   "cleanup": [
+    "forget_bench_memories"
+   ],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [
+    "farida",
+    "okonkwo"
+   ],
+   "note": "4 receipts = 209.45; old-summary.csv (180.00) is a decoy."
+  },
+  {
+   "id": "hard-reminders-csv",
+   "category": "calendar-reminders-notes",
+   "difficulty": "hard",
+   "complications": [
+    "messy data",
+    "filter",
+    "duplicates",
+    "long horizon"
+   ],
+   "needs": [
+    "reminders"
+   ],
+   "turns": [
+    {
+     "say": "Read {root}/tasks.csv. For every task that is still open and belongs to Sam (that's me), add a reminder to my Mint Bench list in Reminders with the task as its title, due on its due date at 9 am. Skip duplicates."
+    }
+   ],
+   "setup": "hard_reminders",
+   "check": "hard_reminders_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [
+    "renew the domain",
+    "Q3 deck",
+    "order toner",
+    "book the venue",
+    "pay the invoice"
+   ],
+   "note": "Owner and status in mixed case with spaces; one task is Priya's, one is done, one row is duplicated."
+  },
+  {
+   "id": "hard-rates-convert",
+   "category": "hard-mixed",
+   "difficulty": "hard",
+   "complications": [
+    "web",
+    "don't touch originals",
+    "wrong-table trap"
+   ],
+   "needs": [],
+   "turns": [
+    {
+     "say": "Using today's USD to GBP rate from {site}/rates.html, make {root}/Shop/prices-gbp.csv from {root}/Shop/prices-usd.csv with the same columns, except that the price column is price_gbp, rounded to 2 decimals. Don't change prices-usd.csv."
+    }
+   ],
+   "setup": "hard_rates",
+   "check": "hard_rates_ok",
+   "cleanup": [],
+   "timeout": 300,
+   "settle": 10,
+   "markers": [],
+   "note": "Today's rate is 0.79; the page also has last month's table (0.81)."
+  }
+ ]
+}

@@ -11,6 +11,8 @@ automatic ones, and the language it is spoken in) follows `select_caption` in
 [claude-video](https://github.com/bradautomates/claude-video) (MIT).
 
 **Ideas, not code**, from these open-source projects (all MIT or BSD):
+- **ChatGPT and Claude app control** (`mint/tools/agentapps.py`): driving the apps through native accessibility - the Stop button and Claude's "Running …" sidebar rows as the busy signal, "Show N more" paging, and checking the pasted prompt before sending - follows
+  [m'kay](https://github.com/maxipesfix/mkay)'s `multi-agent-cli` (BSD-2).
 - **Meeting recorder** (`launcher/recorder`): the Core Audio process tap follows
   [AudioCap](https://github.com/insidegui/AudioCap) (BSD-2) and
   [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT).

@@ -228,12 +228,16 @@ def _inline(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
 
 
-def create_pdf(title: str, content: str, open_after: bool = True) -> str:
-    """Write a formatted PDF to Mint's Documents folder and optionally open it."""
+def create_pdf(title: str, content: str, open_after: bool = True, save_to: str = "") -> str:
+    """Write a formatted PDF where the user asked (else Mint's Documents folder) and optionally open it."""
     if not Path(CHROME).exists():
         return "FAILED: Google Chrome is needed to render PDFs and was not found."
-    slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")[:60] or "document"
-    target = _output() / f"{slug}-{time.strftime('%Y%m%d-%H%M')}.pdf"
+    from mint.tools import saveto
+    name = re.sub(r"\.pdf$", "", re.sub(r"[^\w .()-]", "", title).strip(), flags=re.I)[:60] or "document"
+    target, moved = saveto.destination(_output() / f"{name}.pdf", ".pdf", save_to)
+    if target.parent == _output():
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", title).strip("-")[:60] or "document"
+        target = _output() / f"{slug}-{time.strftime('%Y%m%d-%H%M')}.pdf"
 
     work = Path(tempfile.mkdtemp(prefix="mint-pdf-"))
     try:
@@ -265,4 +269,4 @@ def create_pdf(title: str, content: str, open_after: bool = True) -> str:
         return "FAILED: the PDF was not produced."
     if open_after:
         subprocess.run(["open", str(target)], check=False)
-    return f"Saved the PDF to {target}" + (" and opened it." if open_after else ".")
+    return f"Saved the PDF to {target}" + (" and opened it." if open_after else ".") + (f" {moved}" if moved else "")

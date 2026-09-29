@@ -1,7 +1,8 @@
 """What sub-agents can do. Each tool is a JSON schema plus a plain function
 returning a string (never raising for an expected failure).
 
-Files are confined to the agent's workspace. `ask_user` and `report_progress`
+Files are confined to the agent's workspace, except the finished result at the
+destination the user named (see deliver.py). `ask_user` and `report_progress`
 are handled by the runtime (they talk to Mint, not to the world).
 """
 
@@ -35,9 +36,12 @@ SCHEMAS = {
         "parameters": {"type": "object", "properties": {
             "source": {"type": "string"}, "question": {"type": "string"}}, "required": ["source"]}},
     "write_file": {
-        "description": "Write a text file in your workspace (creates folders). Overwrites.",
+        "description": ("Write a text file in your workspace (creates folders; overwrites). When your task names "
+                        "a DESTINATION outside the workspace, write the finished deliverable there with its full "
+                        "path."),
         "parameters": {"type": "object", "properties": {
-            "path": {"type": "string", "description": "Relative path, e.g. 'report.md' or 'env/grid.py'"},
+            "path": {"type": "string", "description": ("Relative path in your workspace, e.g. 'report.md' or "
+                                                       "'env/grid.py'; or the full path of your DESTINATION")},
             "content": {"type": "string"}}, "required": ["path", "content"]}},
     "read_file": {
         "description": "Read a text file from your workspace.",
@@ -73,16 +77,52 @@ def schemas(names: list[str]) -> list[dict]:
 
 # --- implementations ----------------------------------------------------------------
 
+def _real(raw: str) -> Path | None:
+    """A full path the model gave (~/... or /Users/...), or None for a workspace-relative one.
+    ('/report.md' still means the workspace, as it always did.)"""
+    text = raw.strip()
+    if text.startswith("~"):
+        return Path(os.path.expanduser(text))
+    home = str(Path.home())
+    if text == home or text.startswith(home + "/") or text.startswith("/Volumes/"):
+        return Path(text)
+    return None
+
+
 def _inside(workspace: Path, relative: str) -> Path:
-    target = (workspace / relative.lstrip("/")).resolve()
+    full = _real(relative)
+    target = (full if full is not None else workspace / relative.lstrip("/")).resolve()
     if workspace.resolve() not in (target, *target.parents):
         raise ValueError("outside the workspace")
     return target
 
 
-def run(name: str, args: dict, workspace: Path, team_root: Path | None = None) -> str:
+def _write(args: dict, workspace: Path, destination) -> str:
+    raw, content = str(args["path"]), str(args.get("content", ""))
+    full = _real(raw)
+    if full is not None and destination is not None and destination.covers(full):
+        from mint.agents import deliver
+        said = deliver.put(full, content)
+        if said.startswith("Wrote"):
+            destination.written.append(full)
+        return said
+    try:
+        path = _inside(workspace, raw)
+    except ValueError:
+        where = (f" The user's destination is {destination}; write there with its full path, or use a path "
+                 "relative to your workspace." if destination is not None else
+                 " Use a path relative to your workspace; tell Mint in your answer if the user wanted it "
+                 "elsewhere.")
+        return f"write_file failed: {raw} is outside your workspace ({workspace}).{where}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return f"Wrote {path} ({len(content)} characters)."
+
+
+def run(name: str, args: dict, workspace: Path, team_root: Path | None = None, destination=None) -> str:
     """`team_root`: the mission folder - read_file and list_files may look anywhere
-    in it (teammates' files); writing stays inside the agent's own workspace."""
+    in it (teammates' files); writing stays inside the agent's own workspace, except
+    the finished result at `destination` (a deliver.Destination the user named)."""
     readable = team_root if team_root is not None and (workspace.resolve() == team_root.resolve()
                                                          or team_root.resolve() in workspace.resolve().parents) \
         else workspace
@@ -95,10 +135,7 @@ def run(name: str, args: dict, workspace: Path, team_root: Path | None = None) -
             from mint.tools import video
             return video.watch_for_agent(str(args.get("source", "")), str(args.get("question", "")), workspace)
         if name == "write_file":
-            path = _inside(workspace, str(args["path"]))
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(str(args.get("content", "")))
-            return f"Wrote {path} ({len(str(args.get('content', '')))} characters)."
+            return _write(args, workspace, destination)
         if name == "read_file":
             try:
                 path = _inside(workspace, str(args["path"]))

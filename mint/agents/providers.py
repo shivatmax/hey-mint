@@ -42,13 +42,83 @@ class KeyProblem(RuntimeError):
 
 # provider -> (the key that failed, why). Cleared by itself when the key in .env changes.
 BAD_KEYS: dict[str, tuple[str, str]] = {}
+# provider -> (key, why, when noticed): the account has no credits left (OpenAI 429
+# insufficient_quota, OpenRouter 402). The key is fine (GET /models still answers 200, so
+# check_keys cannot see it), but every model call fails until the user adds credits.
+# Found live: two bench agent runs "started", then each crashed ~30 s later after four
+# rounds of retries on an error that retrying cannot fix.
+NO_CREDIT: dict[str, tuple[str, str, float]] = {}
+RECHECK = 60          # seconds before a no-credit account is asked again (the user may have topped up)
 
 
-def key_problem(provider: str) -> str:
+def _no_credit(status: int, data) -> bool:
+    """Is this error 'the account is out of credits' (not a passing rate limit)?"""
+    error = data.get("error") if isinstance(data, dict) else None
+    fields = " ".join(str(error.get(k, "")) for k in ("type", "code")) if isinstance(error, dict) else str(error or "")
+    return status == 402 or "insufficient_quota" in fields
+
+
+def _flag_no_credit(provider: str, data) -> str:
+    error = data.get("error") if isinstance(data, dict) else None
+    message = str(error.get("message", "") if isinstance(error, dict) else error or "")[:160]
+    where = "platform.openai.com/settings/organization/billing" if provider == "openai" else "openrouter.ai/settings/credits"
+    problem = (f"The {provider} account behind the agents has no credits left ({message or 'insufficient quota'}). "
+               f"The user must add credits at {where} (or put another key in .env as {KEYS[provider]}); no agent "
+               "can run until then.")
+    NO_CREDIT[provider] = (os.environ.get(KEYS[provider], ""), problem, time.monotonic())
+    log.warning("agents: %s", problem)
+    return problem
+
+
+
+def _count(model, input_tokens, output_tokens, thinking=0) -> None:
+    """Settings ▸ Usage: tokens per model (counts only)."""
+    try:
+        from mint.core import usage
+        usage.record(str(model or "openai"), input_tokens or 0, output_tokens or 0, thinking or 0)
+    except Exception:
+        pass
+
+def key_problem(provider: str, recheck: bool = False) -> str:
+    """Why `provider` cannot run agents now ('' if it can): a refused key, or no credits.
+
+    recheck=True (blocking - not on the event loop): a no-credit account last seen more
+    than RECHECK s ago is asked again with a tiny call, so a top-up is noticed at once."""
+    key = os.environ.get(KEYS.get(provider, ""), "")
     bad = BAD_KEYS.get(provider)
-    if bad and bad[0] == os.environ.get(KEYS.get(provider, ""), ""):
+    if bad and bad[0] == key:
         return bad[1]
-    return ""
+    broke = NO_CREDIT.get(provider)
+    if not broke or broke[0] != key:
+        NO_CREDIT.pop(provider, None)
+        return ""
+    if recheck and time.monotonic() - broke[2] > RECHECK:
+        NO_CREDIT.pop(provider, None)
+        _probe(provider)                     # flags it again if there are still no credits
+        broke = NO_CREDIT.get(provider)
+    return broke[1] if broke else ""
+
+
+def _probe(provider: str) -> None:
+    """The smallest real model call: does the account have credits? (Flags NO_CREDIT if not.)"""
+    if provider not in BASES or not available(provider):
+        return
+    env, default = BASES[provider]
+    base = os.environ.get(env, default).rstrip("/")
+    headers = {"Authorization": f"Bearer {os.environ[KEYS[provider]]}"}
+    try:
+        if provider == "openai":
+            response = _client().post(f"{base}/responses", headers=headers, timeout=30, json={
+                "model": "gpt-6-luna", "input": "Say ok.", "max_output_tokens": 16, "reasoning": {"effort": "none"}})
+        else:
+            response = _client().post(f"{base}/chat/completions", headers=headers, timeout=30, json={
+                "model": "openai/gpt-6-luna", "messages": [{"role": "user", "content": "Say ok."}], "max_tokens": 16})
+        data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+    except Exception:
+        log.debug("credit probe for %s failed", provider, exc_info=True)
+        return                               # unreachable is not "no credits"; the run will say
+    if _no_credit(response.status_code, data):
+        _flag_no_credit(provider, data)
 
 
 def available(provider: str) -> bool:
@@ -158,6 +228,9 @@ def chat(agent: dict, system: str, messages: list[dict], tools: list[dict], effo
 
     `effort` is the reasoning effort for models that think: none, low or medium."""
     provider, models, note = route(agent)
+    known = key_problem(provider, recheck=True)      # a refused key or no credits: fail at once, not after retries
+    if known:
+        raise KeyProblem(known)
     last, transient = None, True
     for round_, wait in enumerate(BACKOFF):
         if round_ and not transient:
@@ -294,6 +367,8 @@ def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
                    f"{KEYS[provider]}, then restart Mint.")
         BAD_KEYS[provider] = (os.environ.get(KEYS[provider], ""), problem)
         raise KeyProblem(problem)
+    if _no_credit(response.status_code, data):
+        raise KeyProblem(_flag_no_credit(provider, data))      # retrying cannot help
     if response.status_code >= 400 or (isinstance(data, dict) and data.get("error")):
         raise RuntimeError(f"{response.status_code} {str(data.get('error') if isinstance(data, dict) else '')[:300] or response.text[:300]}")
     message = data["choices"][0]["message"]
@@ -305,6 +380,7 @@ def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
             args = {}
         calls.append({"id": call["id"], "name": call["function"]["name"], "args": args})
     usage = data.get("usage") or {}
+    _count(body.get("model"), usage.get("prompt_tokens"), usage.get("completion_tokens"))
     return {"text": (message.get("content") or "").strip(), "tool_calls": calls,
             "_reasoning_details": message.get("reasoning_details"),
             "usage": {"reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
@@ -346,6 +422,8 @@ def _responses(model: str, system: str, messages: list[dict], tools: list[dict],
                    "and put it in .env as OPENAI_API_KEY, then restart Mint.")
         BAD_KEYS["openai"] = (os.environ.get("OPENAI_API_KEY", ""), problem)
         raise KeyProblem(problem)
+    if _no_credit(response.status_code, data):
+        raise KeyProblem(_flag_no_credit("openai", data))      # retrying cannot help
     if response.status_code >= 400 or (isinstance(data, dict) and data.get("error")):
         raise RuntimeError(f"{response.status_code} {str((data or {}).get('error'))[:300] or response.text[:300]}")
     text, calls = [], []
@@ -359,6 +437,8 @@ def _responses(model: str, system: str, messages: list[dict], tools: list[dict],
         elif item.get("type") == "message":
             text += [c.get("text", "") for c in item.get("content", []) if c.get("type") == "output_text"]
     usage = data.get("usage") or {}
+    _count(body.get("model"), usage.get("input_tokens"), usage.get("output_tokens"),
+           (usage.get("output_tokens_details") or {}).get("reasoning_tokens"))
     return {"text": "".join(text).strip(), "tool_calls": calls, "_response_id": data.get("id"),
             "usage": {"reasoning_tokens": (usage.get("output_tokens_details") or {}).get("reasoning_tokens"),
                       "output_tokens": usage.get("output_tokens")}}

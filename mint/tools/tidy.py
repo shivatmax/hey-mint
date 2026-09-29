@@ -63,17 +63,30 @@ def _snippet(path: Path) -> str:
 
 def _scan(folder: Path) -> list[dict]:
     now = time.time()
-    items = []
+    items, fresh = [], []
     for entry in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
         if not entry.is_file() or entry.name.startswith(".") or entry.suffix.lower() in {".part", ".crdownload",
                                                                                           ".download", ".tmp"}:
             continue
         st = entry.stat()
-        if now - st.st_mtime < 120:            # still arriving
-            continue
-        items.append({"path": entry, "name": entry.name, "size": st.st_size, "mtime": st.st_mtime})
+        item = {"path": entry, "name": entry.name, "size": st.st_size, "mtime": st.st_mtime}
+        items.append(item)
+        if now - st.st_mtime < 120:
+            fresh.append(item)
         if len(items) >= MAX_FILES:
             break
+    if fresh:
+        # A file still being written (a download, an export) keeps growing: leave only those out. Skipping
+        # everything under two minutes old left a folder of just-made files "with no loose files" (bench).
+        time.sleep(0.6)
+        for item in fresh:
+            try:
+                st = item["path"].stat()
+            except OSError:
+                items.remove(item)
+                continue
+            if st.st_size != item["size"] or st.st_mtime != item["mtime"]:
+                items.remove(item)
     with ThreadPoolExecutor(6) as pool:
         for item, snippet in zip(items, pool.map(lambda i: _snippet(i["path"]), items)):
             item["snippet"] = snippet
@@ -207,6 +220,10 @@ def apply() -> str:
         path.write_text(json.dumps({"folder": str(folder), "moves": journal}, indent=1, ensure_ascii=False))
         os.chmod(path, 0o600)
         _plan.clear()
+    if journal:
+        from mint.tools import undo as undo_log
+        undo_log.record("tidy", f"tidying {folder.name} ({len(journal)} files moved)",
+                        {"kind": "tidy", "journal": str(path)})
     folders = Counter(Path(j["to"]).parent.name for j in journal)
     return (f"Tidied {folder.name}: moved {len(journal)} file(s) into "
             + ", ".join(f"{k} ({v})" for k, v in folders.most_common(8))
@@ -215,11 +232,14 @@ def apply() -> str:
             + ". Nothing was deleted. \"Undo that\" puts everything back (tidy action=undo).")
 
 
-def undo() -> str:
+def undo(journal: str = "") -> str:
+    """Put the last tidy-up back - or the one in `journal` (the undo tool names it)."""
     journals = sorted(JOURNALS.glob("*.json")) if JOURNALS.exists() else []
-    if not journals:
+    if journal and not Path(journal).exists():
+        return "FAILED: that tidy-up has already been put back."
+    if not journals and not journal:
         return "There is no tidy-up to undo."
-    last = journals[-1]
+    last = Path(journal) if journal else journals[-1]
     data = json.loads(last.read_text())
     back, missing = 0, 0
     for move in reversed(data["moves"]):
@@ -238,13 +258,55 @@ def undo() -> str:
         except OSError:
             pass
     last.rename(last.with_suffix(".undone"))
+    from mint.tools import undo as undo_log
+    undo_log.settled("tidy")
     return (f"Put {back} file(s) back where they were in {Path(data['folder']).name}"
             + (f"; {missing} had been moved or renamed since and were left alone" if missing else "") + ".")
 
 
+def duplicates(folder_text: str, remove: bool = False) -> str:
+    """Exact duplicates in a folder - the same bytes, never just a similar name ("photo (1).jpg" can be a different
+    photo). remove=True moves the extra copies to the Trash (undoable), keeping the one with the real name."""
+    folder = _folder(folder_text)
+    if folder is None:
+        return f"FAILED: no folder '{folder_text}'."
+    items = _scan(folder.resolve())
+    extra = [it for it in items if it.get("duplicate_of")]
+    if not extra:
+        similar = [it["name"] for it in items if re.search(r"\(\d+\)|\bcopy\b", Path(it["name"]).stem, re.I)]
+        return (f"No exact duplicates in {folder.name}." + (f" {', '.join(similar[:6])} only look like copies by "
+                "name; their contents differ, so they are different files - keep them." if similar else ""))
+    listing = "; ".join(f"{it['name']} = {it['duplicate_of']}" for it in extra)
+    if not remove:
+        return f"{len(extra)} exact duplicate(s) in {folder.name} (same contents): {listing}."
+    from mint.tools import harness as harness_tools
+    if harness_tools._risky("delete"):
+        return f"{len(extra)} exact duplicate(s): {listing}. The user did not ask to delete; ask them first."
+    import AppKit
+    manager = AppKit.NSFileManager.defaultManager()
+    gone = []
+    from mint.tools import undo as undo_log
+    with undo_log.together("file", f"removing {len(extra)} duplicate(s) from {folder.name}"):
+        for it in extra:
+            ok, trashed, _error = manager.trashItemAtURL_resultingItemURL_error_(
+                AppKit.NSURL.fileURLWithPath_(str(it["path"])), None, None)
+            if ok:
+                gone.append(it["name"])
+                if trashed is not None:
+                    undo_log.record("file", f"moving {it['name']} to the Trash",
+                                    {"kind": "file_untrash", "trashed": str(trashed.path()), "to": str(it["path"])})
+    kept = sorted({it["duplicate_of"] for it in extra})
+    return (f"Moved {len(gone)} exact duplicate(s) to the Trash: {', '.join(gone)}. Kept {', '.join(kept)}. Files "
+            "that only have similar names but different contents were left alone.")
+
+
 PROMPT = """Tidying folders: "clean up / organise / sort my Downloads (Desktop, a folder)" -> tidy action=plan \
 (with the user's wish in `how`), tell them the plan briefly and ASK before moving anything; "yes / go ahead" -> \
-tidy action=apply; "undo that" -> tidy action=undo. It never deletes: duplicates go to a Duplicates folder."""
+tidy action=apply; "undo that" -> tidy action=undo. It never deletes: duplicates go to a Duplicates folder. \
+"Delete / remove the duplicates (keep one of each)" -> tidy action=remove_duplicates (exact same contents only; \
+action=duplicates just lists them). Never decide duplicates by file name: "photo (1).jpg" may be a different photo. \
+When the user names the exact sub-folders ("Images for pictures, Documents for PDFs"), don't use tidy: list the folder \
+and move each file with file_action move, making the folders first."""
 
 
 def declarations():
@@ -254,9 +316,12 @@ def declarations():
         name="tidy",
         description=("Organise a folder's loose files into sub-folders (by kind, topic, project or month) with a "
                      "preview: plan (nothing moves), apply (after the user agrees), undo (put the last tidy-up "
-                     "back). Never deletes; duplicates go to a Duplicates folder; unhelpful names can be improved."),
+                     "back). Never deletes; duplicates go to a Duplicates folder; unhelpful names can be improved. "
+                     "duplicates: list exact duplicates (same contents); remove_duplicates: move the extra copies to "
+                     "the Trash when the user asked to delete them."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=S, enum=["plan", "apply", "undo", "cancel"]),
+            "action": types.Schema(type=S, enum=["plan", "apply", "undo", "cancel", "duplicates",
+                                                  "remove_duplicates"]),
             "folder": types.Schema(type=S, description="plan: which folder (default ~/Downloads)"),
             "how": types.Schema(type=S, description="plan: the user's wish, e.g. 'by project', 'invoices by month', "
                                                     "'leave the screenshots'")},
@@ -269,6 +334,8 @@ def tool(args: dict) -> str:
         return apply()
     if action == "undo":
         return undo()
+    if action in ("duplicates", "remove_duplicates"):
+        return duplicates(str(args.get("folder") or "~/Downloads"), remove=action == "remove_duplicates")
     if action == "cancel":
         _plan.clear()
         return "Dropped the plan; nothing was moved."

@@ -38,6 +38,7 @@ _KIND = {
     "open_url": "web",
     "desktop": "click", "click_text": "click", "click_at": "click", "press_key": "type",
     "type_text": "type", "write_clipboard": "type",
+    "notifications": "read", "update": "system", "agent_app": "read",
     "read_window": "read", "get_selected_text": "read", "read_clipboard": "read",
     "list_open": "read", "list_windows": "read", "frontmost_app": "read", "list_accounts": "read",
     "look": "look",
@@ -187,6 +188,23 @@ def phrase(name: str, args: dict) -> str:
             return f"Editing the video · {_quote(a.get('instruction') or '', 30)}".rstrip(" ·")
         case "show_card":
             return f"Showing · {_quote(a.get('title') or '', 30)}".rstrip(" ·")
+        case "edit_spreadsheet":
+            return f"Editing · {_quote(str(a.get('path', '')).rsplit('/', 1)[-1], 34)}".rstrip(" ·")
+        case "agent_app":
+            app = {"chatgpt": "ChatGPT", "claude": "Claude"}.get(str(a.get("app") or ""), "the app")
+            return {"status": f"Checking {app}", "read": f"Reading {app}'s reply", "list": f"Listing {app} chats",
+                    "open": f"Opening {_quote(a.get('name') or '', 24)} in {app}", "new": f"New {app} chat",
+                    "ask": f"Asking {app} · {_quote(a.get('prompt') or '', 26)}", "wait": f"Waiting for {app}",
+                    "stop": f"Stopping {app}"}.get(str(a.get("action") or "status"), app)
+        case "undo":
+            return {"list": "Checking what I can undo", "redo": "Redoing"}.get(str(a.get("action") or "last"),
+                                                                                "Undoing")
+        case "notifications":
+            return {"summary": "Checking what you missed",
+                    "list": f"Reading notifications{' · ' + _quote(a.get('app'), 20) if a.get('app') else ''}",
+                    "open": "Opening the notification", "dismiss": "Dismissing a notification",
+                    "clear_all": "Clearing notifications", "reply": "Typing a reply"}.get(
+                str(a.get("action") or "summary"), "Notifications")
         case "track":
             action = str(a.get("action") or "start")
             if action == "start":

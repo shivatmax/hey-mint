@@ -3,8 +3,9 @@
 //
 // Features: openWakeWord's two ONNX models (mel spectrogram, speech embedding)
 // streamed exactly as mint/voice/features.py streams them, one 80 ms frame at a time.
-// Classifier: the logistic regression in hey_<name>[_personal].json over the last
-// 16 embeddings. Checked against the Python detector on the user's recordings
+// Classifier: the logistic regression in hey_<name>[_personal].json or
+// models/wake_<phrase>.json (a phrase trained on this Mac, mint/voice/wake_train.py) over
+// the last 16 embeddings; one per wake phrase that is on. Checked against the Python detector on the user's recordings
 // (launcher/ear_check.swift via `Mint --ear-check`).
 
 import Foundation
@@ -70,41 +71,91 @@ struct WakeModel {
     let mean: [Float], scale: [Float], coef: [Float]
     let bias: Float, threshold: Float, need: Int
     let path: String
+    let phrase: String
 
-    /// The model for the assistant's name, as MintWake.load picks it: the user's
-    /// own if trained, else the general one, else "Hey Mint".
-    static func load(root: String, name: String) throws -> WakeModel {
-        func slug(_ text: String) -> String {
-            let lowered = text.lowercased()
-            var out = ""
-            var gap = false
-            for ch in lowered {
-                if ch.isLetter && ch.isASCII || ch.isNumber && ch.isASCII { out.append(ch); gap = false }
-                else if !gap && !out.isEmpty { out.append("_"); gap = true }
+    static func slug(_ text: String) -> String {
+        var out = ""
+        var gap = false
+        for ch in text.lowercased() {
+            if ch.isLetter && ch.isASCII || ch.isNumber && ch.isASCII { out.append(ch); gap = false }
+            else if !gap && !out.isEmpty { out.append("_"); gap = true }
+        }
+        while out.hasSuffix("_") { out.removeLast() }
+        return out.isEmpty ? "mint" : out
+    }
+
+    /// The wake phrases, main one first - as mint/voice/wake.py phrases(): "wake_phrase"
+    /// (blank: "Hey <assistant name>") plus any in "wake_models".
+    static func phrases(_ prefs: [String: Any], name: String) -> [String] {
+        let main = (prefs["wake_phrase"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        var out: [String] = []
+        var seen = Set<String>()
+        for phrase in [main.isEmpty ? "Hey \(name)" : main] + (prefs["wake_models"] as? [String] ?? []) {
+            let clean = phrase.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            if !clean.isEmpty && seen.insert(slug(clean)).inserted { out.append(clean) }
+        }
+        return out
+    }
+
+    /// Model files for a phrase, best first, as wake.py _candidates: the user's own
+    /// (personal, or trained on this Mac with their takes; the newer), then the general one.
+    static func candidates(root: String, phrase: String) -> [String] {
+        let word = slug(phrase)
+        let fm = FileManager.default
+        func modified(_ path: String) -> Date {
+            (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? .distantPast
+        }
+        let own = [root + "/\(word)_personal.json", root + "/models/wake_\(word).json"]
+            .filter { fm.fileExists(atPath: $0) }
+            .sorted { modified($0) > modified($1) }
+        return own + [word == "hey_mint" ? root + "/models/hey_mint.json" : root + "/wake/\(word).json"]
+    }
+
+    /// Every configured phrase that has a usable model; with none, "Hey Mint" (the
+    /// user's own, else the shipped one), so a missing or broken custom model never
+    /// leaves the Ear deaf.
+    static func loadAll(root: String, prefs: [String: Any], name: String) throws -> [WakeModel] {
+        var models: [WakeModel] = []
+        for phrase in phrases(prefs, name: name) {
+            if let model = candidates(root: root, phrase: phrase).lazy.compactMap({ read($0, phrase: phrase) }).first {
+                models.append(model)
             }
-            while out.hasSuffix("_") { out.removeLast() }
-            return out.isEmpty ? "mint" : out
         }
-        func candidates(_ word: String) -> [String] {
-            let generic = word == "mint" ? root + "/models/hey_mint.json" : root + "/wake/hey_\(word).json"
-            return [root + "/hey_\(word)_personal.json", generic]
+        if models.isEmpty, let model = [root + "/hey_mint_personal.json", root + "/models/hey_mint.json"]
+            .lazy.compactMap({ read($0, phrase: "Hey Mint") }).first {
+            models.append(model)
         }
-        let word = slug(name)
-        let paths = candidates(word) + (word == "mint" ? [] : candidates("mint"))
-        guard let path = paths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
-            throw OrtError.load("no wake word model under \(root)")
+        if models.isEmpty { throw OrtError.load("no wake word model under \(root)") }
+        return models
+    }
+
+    /// The model at `path`, or nil if it is missing, unreadable or the wrong shape.
+    static func read(_ path: String, phrase: String) -> WakeModel? {
+        guard FileManager.default.fileExists(atPath: path),
+              let raw = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let data = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] else {
+            if FileManager.default.fileExists(atPath: path) { Log.write("[ear] wake model \(path) unreadable; skipped") }
+            return nil
         }
-        let data = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [String: Any]
         func floats(_ key: String) -> [Float] {
             (data[key] as? [Any] ?? []).flatMap { item -> [Float] in
                 if let row = item as? [Any] { return row.compactMap { ($0 as? NSNumber)?.floatValue } }
-                return [(item as? NSNumber)?.floatValue ?? 0]
+                return [(item as? NSNumber)?.floatValue ?? .nan]
             }
         }
-        return WakeModel(mean: floats("mean"), scale: floats("scale"), coef: floats("coef"),
-                         bias: (data["intercept"] as? NSNumber)?.floatValue ?? 0,
-                         threshold: (data["threshold"] as? NSNumber)?.floatValue ?? 0.9,
-                         need: (data["need"] as? NSNumber)?.intValue ?? 2, path: path)
+        let model = WakeModel(mean: floats("mean"), scale: floats("scale"), coef: floats("coef"),
+                              bias: (data["intercept"] as? NSNumber)?.floatValue ?? .nan,
+                              threshold: (data["threshold"] as? NSNumber)?.floatValue ?? 0.9,
+                              need: (data["need"] as? NSNumber)?.intValue ?? 2, path: path, phrase: phrase)
+        let size = 16 * 96
+        let values = model.mean + model.scale + model.coef + [model.bias, model.threshold]
+        guard model.mean.count == size, model.scale.count == size, model.coef.count == size,
+              values.allSatisfy({ $0.isFinite }), model.scale.allSatisfy({ $0 > 0 }),
+              model.threshold > 0, model.threshold < 1, (1...8).contains(model.need) else {
+            Log.write("[ear] wake model \(path) has the wrong shape or values; skipped")
+            return nil
+        }
+        return model
     }
 
     func probability(_ rows: ArraySlice<[Float]>) -> Float {
@@ -120,44 +171,57 @@ struct WakeModel {
     }
 }
 
-/// Streaming detector: feed 80 ms frames; `heard` says when the phrase fired.
+/// Streaming detector: feed 80 ms frames; `heard` says when a phrase fired.
+/// Several phrases share the features; each is one more dot product.
 final class WakeDetector {
     let features: WakeFeatures
-    var model: WakeModel
-    private var run = 0
+    let models: [WakeModel]
+    /// The main phrase's model (for the near-miss log).
+    var model: WakeModel { models[0] }
+    private var runs: [Int]
     private var lastFire = Date.distantPast
     private var consumed = 0
-    private var recent: [(Int, Float)] = []
+    private var recent: [[(Int, Float)]]
     /// At a fire: samples since the scores began to rise (see wake.phrase_cut).
     private(set) var phraseEndLag: Int?
+    private(set) var heardPhrase: String?
     private(set) var lastScore: Float = 0
 
-    init(features: WakeFeatures, model: WakeModel) {
+    init(features: WakeFeatures, models: [WakeModel]) {
         self.features = features
-        self.model = model
+        self.models = models
+        runs = Array(repeating: 0, count: models.count)
+        recent = Array(repeating: [], count: models.count)
     }
 
     func reset() throws {
         try features.reset()
-        run = 0
-        recent = []
+        runs = Array(repeating: 0, count: models.count)
+        recent = Array(repeating: [], count: models.count)
     }
 
     func heard(_ frame: [Float]) throws -> Bool {
         try features.feed(frame)
         consumed += frame.count
         guard features.rows.count >= 16 else { return false }
-        let p = model.probability(features.rows.suffix(16))
-        lastScore = p
-        recent.append((consumed, p))
-        if recent.count > 16 { recent.removeFirst() }
-        run = p >= model.threshold ? run + 1 : 0
-        guard run >= model.need, Date().timeIntervalSince(lastFire) >= 2 else { return false }
+        let rows = features.rows.suffix(16)
+        var fired: Int?
+        lastScore = 0
+        for (k, model) in models.enumerated() {
+            let p = model.probability(rows)
+            lastScore = max(lastScore, p)
+            recent[k].append((consumed, p))
+            if recent[k].count > 16 { recent[k].removeFirst() }
+            runs[k] = p >= model.threshold ? runs[k] + 1 : 0
+            if fired == nil && runs[k] >= model.need { fired = k }
+        }
+        guard let k = fired, Date().timeIntervalSince(lastFire) >= 2 else { return false }
         lastFire = Date()
-        run = 0
-        var j = recent.count - 1
-        while j > 0 && recent[j - 1].1 >= 0.3 { j -= 1 }
-        phraseEndLag = consumed - recent[j].0
+        runs = Array(repeating: 0, count: models.count)
+        heardPhrase = models[k].phrase
+        var j = recent[k].count - 1
+        while j > 0 && recent[k][j - 1].1 >= 0.3 { j -= 1 }
+        phraseEndLag = consumed - recent[k][j].0
         return true
     }
 }

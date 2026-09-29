@@ -228,6 +228,8 @@ class Mint:
         self._turn_levels: list[float] = []
         self._ignored_at = 0.0
         self._pending_text: list[str] = []   # typed while reconnecting; sent once connected
+        self._server_at = 0.0                 # the last real message from the server (the answer watchdog)
+        self._unanswered = ""                # the last typed request, until the server answers it
         self._wake_cut = 0                  # bytes of an unsure wake's held audio that are the phrase
         self._woke_at = 0.0                 # when the wake word last woke Mint
         # Mint Ear (mint/app/ear.py): the hand-over from the launcher, and unloading when idle.
@@ -318,6 +320,8 @@ class Mint:
             self.ui.set_state(name, note)
         except Exception:
             log.debug("ui update failed", exc_info=True)
+        from mint.app import telegram
+        telegram.on_event("state", {"name": name, "note": note})     # for /status
 
     def _idle_state(self) -> str:
         if self.paused:
@@ -493,6 +497,10 @@ class Mint:
             self._mic_alive = True
             return
         from mint.voice import dictation
+        from mint.voice import wake_train
+        if wake_train.capturing():
+            wake_train.feed(pcm)                  # Settings ▸ Voice & wake word is recording a take
+            return
         if dictation.capturing():
             # The user is dictating text (dictation.py): the words are theirs to type, not a
             # request - Mint neither hears nor answers them.
@@ -724,6 +732,8 @@ class Mint:
         self._typed_turn = True               # typed on purpose: always answered
         self._filler_checked = True
         self._print(f"[typed: {text[:120]}]")
+        from mint.app import telegram
+        telegram.on_event("request", {"text": text})    # its own request from the phone, or one typed here
         # Close any open stretch of microphone audio first: in testing, a typed
         # request sent while the mic was streaming room noise went unanswered -
         # the server was still waiting for that "speech" to end.
@@ -731,6 +741,9 @@ class Mint:
             await self._end_audio_stream()
         else:
             await self._close_user_audio()
+        self._unanswered = text
+        if self.loop is not None:
+            self.loop.create_task(self._answer_watch(text, time.monotonic(), self._stop_epoch))
         session = self.session
         try:
             # Realtime text is how the 3.x Live models take a typed turn
@@ -746,6 +759,24 @@ class Mint:
                 # The session closed under us: send it on the next one.
                 self._pending_text.append(text)
                 self._print("[typed while reconnecting - sending once connected]")
+
+    async def _answer_watch(self, text: str, sent_at: float, epoch: int, wait: float = 30.0) -> None:
+        """A typed request that gets nothing at all back - no words, no tool call - within `wait`
+        seconds: the session is connected but deaf. Seen after a voice-change reconnect (resumed with
+        its handle): 13 minutes of requests went unanswered until the server dropped it. Reconnect
+        with a fresh session (memory is kept) and send the request again."""
+        await asyncio.sleep(wait)
+        if epoch != self._stop_epoch or self._server_at > sent_at or self.session is None:
+            return
+        if self._tool_task is not None and not self._tool_task.done():
+            return
+        self._print(f"[no answer in {wait:.0f} s: reconnecting with a fresh session and sending it again]")
+        self._resume_handle = None
+        self._pending_text.append(text)
+        try:
+            await self.session.close()
+        except Exception:
+            log.debug("closing the deaf session", exc_info=True)
 
     async def _close_user_audio(self) -> None:
         """Silence, then end-of-stream: closes any stretch of user speech the
@@ -802,11 +833,15 @@ class Mint:
                 await self._handle(response)
 
     async def _handle(self, response) -> None:
+        if (meta := getattr(response, "usage_metadata", None)) is not None:
+            from mint.core import usage
+            usage.live(config.MODEL, meta)
         if update := getattr(response, "session_resumption_update", None):
             if getattr(update, "resumable", False) and getattr(update, "new_handle", None):
                 self._resume_handle = update.new_handle
             return
-        self._last_active = time.monotonic()
+        self._last_active = self._server_at = time.monotonic()
+        self._unanswered = ""
 
         if response.data or response.tool_call is not None or (
                 response.server_content is not None and response.server_content.output_transcription):
@@ -912,6 +947,8 @@ class Mint:
                         self._expect_command = False
                     if self._said.strip():
                         self._print(f"mint: {' '.join(self._said.split())}")
+                        from mint.app import telegram
+                        telegram.on_event("reply", {"text": " ".join(self._said.split())})
                         memory.add("mint", self._said)
                         self._last_said = self._said
                 finished_said = "" if self._suppress_turn else self._said
@@ -1079,7 +1116,16 @@ class Mint:
         except Exception:
             pass
         note = autopilot.decide(said, step, asking)
-        if not note or self.session is None or epoch != self._stop_epoch:
+        if not note:
+            # Only after a turn that ended with Mint's reply: a turn that ends in a tool call is
+            # followed by the model's answer to the tool, a few seconds later.
+            if epoch == self._stop_epoch and said.strip():
+                # Finished: quiet, nothing running, nothing to carry on. bench/reliability waits for this line.
+                self._print("[done]")
+                from mint.app import telegram
+                telegram.on_event("done", {})
+            return
+        if self.session is None or epoch != self._stop_epoch:
             return
         self._print(f"[autopilot: carrying on - {step or 'the rest of the request'}]")
         self._turn_open = True
@@ -1097,6 +1143,7 @@ class Mint:
             return
         self._last_stop = now
         self._stop_epoch += 1
+        self._unanswered = ""                 # a stopped request is not sent again after a reconnect
         from mint.app import autopilot
         from mint.app import control
         from mint.tools import desktop
@@ -1129,6 +1176,8 @@ class Mint:
         self.ui.progress(0, 0)
         self.ui.stopped()
         self._print(f"[STOP ({source})" + (f": cancelled {', '.join(n for _, n in pending)}" if pending else "") + "]")
+        from mint.app import telegram
+        telegram.on_event("stop", {"source": source})
         from mint.knowledge.conversation import memory
         memory.add("tool", "The user said stop; everything in progress was stopped.")
         if pending and self.session is not None:
@@ -1377,6 +1426,8 @@ class Mint:
                         if send_key:
                             sends[send_key] = (time.monotonic(), result)
                 self._print(f"[{name}] {result[:160]}")
+                from mint.app import telegram
+                telegram.on_event("tool_end", {"name": name, "args": args, "result": result})
                 from mint.knowledge.conversation import memory
                 memory.add("tool", f"{name}({_describe(name, args)}) -> {result[:240]}")
                 self._last_voice = time.monotonic()
@@ -1407,6 +1458,14 @@ class Mint:
         await self.session.send_tool_response(function_responses=responses)
 
     async def _run_one(self, name: str, args: dict) -> tuple[str, dict | None]:
+        from mint.app import telegram
+        refused = telegram.gate(name, args)     # a read-only request from the phone: no sends, deletes or purchases
+        if not refused:
+            from mint.app import live
+            refused = telegram.send_guard(name, args, live.request() or "")    # no sending unless asked, ever
+        if refused:
+            return refused, None
+        telegram.on_event("tool_start", {"name": name, "args": args})
         if name == "set_preference":
             return self._set_preference(str(args.get("setting", "")), str(args.get("value", ""))), None
 
@@ -1558,6 +1617,13 @@ class Mint:
             prefs.set("storage_folder", path)
             return (f"From now on Mint saves meetings, videos, documents, spreadsheets and agent work in {config.storage()} "
                     f"(one sub-folder each). Files saved before stay where they are.")
+        if setting == "reply_language":
+            language = value.strip()
+            auto = language.lower() in {"auto", "automatic", "default", "same", "any", "whatever i speak"}
+            prefs.set("reply_language", "auto" if auto else language[:40].title())
+            return ("From now on you answer in whatever language the user speaks." if auto else
+                    f"From now on you always speak and write in {prefs.get('reply_language')} (it applies after a "
+                    "quick reconnect).")
         if setting == "screenshot_to":
             where = value.strip().lower()
             where = "clipboard" if "clip" in where else "file" if where in ("file", "files", "desktop", "disk") else "both"
@@ -1744,6 +1810,12 @@ class Mint:
         timeline.start()                    # the activity timeline (does nothing unless it is on)
         from mint.tools import trackers
         trackers.start_service()            # "let me know when ..." trackers left running before a restart
+        from mint.app import telegram
+        telegram.start(self)                # Telegram remote control: idle until a bot token is set and it is on
+        from mint.core import usage
+        usage.install()                     # token counts per model for Settings ▸ Usage
+        from mint.app import updater
+        updater.start(can_install=self._can_unload)   # "Updated to vX" card, checks, idle install
         from mint.tools import clipboard as clip_tools
         clip_tools.start_watching()         # the clipboard history, from the start (it survives restarts)
         from mint.knowledge import teach
@@ -1772,6 +1844,7 @@ class Mint:
         else:
             self._own_mic.set()
         self._unload_task = asyncio.create_task(self._unload_watch())
+        self._date_task = asyncio.create_task(self._date_watch())
         while True:
             try:
                 settings = _live_config()
@@ -1780,6 +1853,7 @@ class Mint:
                         handle=self._resume_handle)
                 async with client.aio.live.connect(model=config.MODEL, config=settings) as session:
                     self.session = session
+                    self._session_day = dt.date.today()   # the date the instructions give
                     attempt = 0
                     typing = " Type to send text; Ctrl-C to stop." if sys.stdin and sys.stdin.isatty() else ""
                     if self.hands_free:
@@ -1789,6 +1863,11 @@ class Mint:
                     else:
                         print(f"\nMint is listening (connected to {config.MODEL}).{typing}\n", flush=True)
                     self._state(self._idle_state())
+                    if self._unanswered and self._unanswered not in self._pending_text:
+                        # The last session dropped (1011) before answering: it never heard it. Send it again.
+                        self._print(f"[sending again after the drop: {self._unanswered[:80]}]")
+                        self._pending_text.append(self._unanswered)
+                    self._unanswered = ""
                     if self._pending_text:
                         asyncio.create_task(self._send_pending_text())
                     from mint.agents.runtime import hub as _hub
@@ -2021,6 +2100,22 @@ class Mint:
         except Exception:
             pass
         return True
+
+    async def _date_watch(self) -> None:
+        """The instructions carry the date the session started. After midnight "tomorrow" meant the wrong
+        day (bench, a run that crossed midnight). Once the date changes and Mint is idle, reconnect - the
+        conversation is kept - so the instructions carry the new date."""
+        while True:
+            await asyncio.sleep(60)
+            day = getattr(self, "_session_day", None)
+            if day is None or day == dt.date.today() or self.session is None:
+                continue
+            if self._busy or self._turn_open or (self._tool_task is not None and not self._tool_task.done()):
+                continue
+            self._session_day = dt.date.today()
+            self._print("[a new day: reconnecting so the date is right]")
+            from mint.tools import extra as extra_tools
+            extra_tools.schedule_voice_reconnect(self)
 
     async def _unload_watch(self) -> None:
         """Asleep and idle long enough: unload, and let Mint Ear listen (~30 MB)."""

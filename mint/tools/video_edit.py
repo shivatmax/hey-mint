@@ -264,7 +264,9 @@ REQUEST: "{instruction}"
 Operations - use ONLY these. All times are seconds (numbers) on the ORIGINAL video's timeline (0 to {duration:.2f}).
 - trim {{"start": s, "end": s}}  keep only this part ("trim it to 0:30-1:45" = 30..105, "just the first minute" = 0..60)
 - cut {{"start": s, "end": s}}  remove this part ("cut the first 10 seconds" = 0..10, "remove the last 5 seconds" = \
-{duration:.2f}-5..{duration:.2f}). Repeatable.
+{duration:.2f}-5..{duration:.2f}). Repeatable. BUT "cut out 0:05 to 0:15 as clip.mp4", "cut the part \
+from X to Y into a new file", "clip 0:05-0:15", "extract / grab / save the part from X to Y" mean KEEP that part as the \
+new file: that is trim, not cut. Use cut only when the part should disappear from the result.
 - remove_silence {{"threshold_db": -35, "min_silence": 0.6}}  drop pauses and silent parts ("tighten it", "remove \
 dead air"); a lower threshold (-45) removes only near-total silence
 - speed {{"factor": 1.5}}  0.25 to 4 ("speed it up" with no number = 1.5, "double speed" = 2, "slow motion" = 0.5)
@@ -297,6 +299,37 @@ If only part of the request is possible, plan that part and name the rest in "un
 return an empty "ops"."""
 
 
+def _seconds(text: str) -> float:
+    parts = [float(x) for x in text.split(":")]
+    return parts[0] * 60 + parts[1] if len(parts) == 2 else parts[0]
+
+
+def _keep_named_part(answer: dict) -> None:
+    """"Cut out 0:05 to 0:15 as clip.mp4" means keep that part as the new file. The model passed it on as
+    "remove the segment" (bench hard-video-chain), so a planned cut of exactly the range the user named for
+    a new file becomes a trim."""
+    try:
+        from mint.app import live
+        said = (live.request() or "").lower()
+    except Exception:
+        return
+    if not re.search(r"\bas\s+[\w .()-]+\.(mp4|mov|m4v)\b|\binto a (new )?(file|clip)\b|\bnew (file|clip)\b", said):
+        return
+    ranges = [(_seconds(a), _seconds(b)) for a, b in
+              re.findall(r"(\d+:\d{2}|\d+(?:\.\d+)?)\s*(?:to|-|–|until)\s*(\d+:\d{2}|\d+(?:\.\d+)?)", said)]
+    ops = answer.get("ops") if isinstance(answer, dict) else None
+    if not ranges or not isinstance(ops, list):
+        return
+    for op in ops:
+        if isinstance(op, dict) and op.get("op") == "cut":
+            try:
+                a, b = float(op.get("start", -1)), float(op.get("end", -1))
+            except (TypeError, ValueError):
+                continue
+            if any(abs(a - x) < 0.6 and abs(b - y) < 0.6 for x, y in ranges):
+                op["op"] = "trim"
+
+
 def plan(instruction: str, info: dict, extras: list[dict]) -> dict:
     from mint.core import llm
     extra_text = "; ".join(f"{i + 1}: {e['name']} ({'video' if e['has_video'] else 'audio'}, "
@@ -308,6 +341,7 @@ def plan(instruction: str, info: dict, extras: list[dict]) -> dict:
     if isinstance(answer, list):         # sometimes the whole answer comes wrapped in a list
         answer = answer[0] if len(answer) == 1 and isinstance(answer[0], dict) and "ops" in answer[0] \
             else {"ops": answer}
+    _keep_named_part(answer)
     if not isinstance(answer, dict):
         raise ValueError("the plan was not understood")
     answer["model"] = model

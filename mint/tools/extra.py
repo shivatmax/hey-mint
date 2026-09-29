@@ -80,6 +80,35 @@ images or charts with no words, look, then mark_area. Your orb can move: \
 the window" -> move_orb (circle). Every time the user asks you to move, call \
 move_orb - never say you moved without calling it."""
 
+# Reliability run 20260929-215652: "1 week ago" (9 days) was taken as within the last 7 days; "saved in
+# September" was done by the printed date because "3 weeks ago" / "1 month ago" can't say which month; a
+# correction was redone by moving files back and forth; a file "edited" in an IDE was never saved.
+FILE_CARE = """Files - dates, corrections and edits:
+- Ages in find_files and read_file ("1 week ago", "1 month ago") are rounded down: "1 week ago" can mean \
+13 days, "1 month ago" 59. When the request depends on when files were modified or saved ("in the last 7 \
+days", "saved in September", "since Friday"), get each candidate's exact date with file_action action=info \
+and compare it with today's date before choosing. Never quietly swap the rule (the date printed inside a \
+file for its save date, or the other way round); if the user's rule can't be applied, say so.
+- When the user corrects which files a move should cover, don't undo and redo blindly: first work out the \
+right set from the facts - check EVERY candidate, including the files you did not move the first time \
+(read each one) - compare it with where each file is now, and move only the ones in the wrong place - one move \
+per file, never back and forth. Then list the folder once and \
+check it holds exactly those files before saying it is done.
+- Change a file's text with write_file: overwrite with the complete new text, or replace with `find` = a \
+short exact piece (one sentence is enough, e.g. to put a title above the first sentence). Never edit a file \
+by opening it in an app and editing the selection - that is not saved to disk. If write_file refuses, do what \
+it says (append, replace, or ask the user one short question); never work around it with AppleScript, another \
+app or a temporary file. After changing a file, read_file it to check the change is really there.
+- Keep to the kind of file the user names: "Markdown notes" means .md files only, "the PDFs" means .pdf.
+- Web research: when a page lists items and the details are on linked pages ("click one for its details"), \
+open each linked page and read the details before comparing or building a table; never leave a \
+column blank or guess it because it wasn't on the first page.
+- Save made files where the user said (save_to on make_spreadsheet, data_to_sheet, create_pdf; the \
+exact file name if they gave one). Don't leave scratch files in their folders: data you already have \
+goes to data_to_sheet as `data`, not into a temporary .csv.
+- Sums, totals and conversions of more than a few numbers: don't add them up in your head - use calculate \
+(or let make_spreadsheet or edit_spreadsheet total them) and use that result."""
+
 EXPRESSIVE = """You have a small, cute body: the orb, with a face and little hands. \
 When the user asks for an expression - "smile", "dance for me", "show me a \
 heart", "clap", "cry", "wave", "sunglasses" - call express with requested=true. \
@@ -491,6 +520,11 @@ def prompt_text() -> str:
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
     from mint.tools import mac as macctl
+    from mint.tools import calc
+    from mint.tools import merge
+    from mint.tools import notifications
+    from mint.tools import undo
+    from mint.tools import agentapps
     from mint.tools import mailtriage
     from mint.tools import meetings
     from mint.tools import rewrite
@@ -508,7 +542,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)
@@ -517,6 +551,13 @@ def prompt_text() -> str:
     style = prefs.get("speaking_style")
     if style:
         parts.append(f"Speaking style the user asked for: {style}. Keep to it.")
+    language = prefs.get("reply_language") or "auto"
+    if language != "auto":
+        parts.append(f"Always speak and write to the user in {language}, whatever language they use, unless "
+                     "they ask for another language for one answer. Names, code and quoted text stay as they are. "
+                     "If they want this changed for good ('answer in the language I speak', 'switch back to "
+                     "English'), call set_preference with reply_language (auto, or the language) - saying so is "
+                     "not enough.")
     index = skillbook.index_text()
     if index:
         parts.append("Saved skills (find_skill loads one):\n" + index)

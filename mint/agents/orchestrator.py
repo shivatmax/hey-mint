@@ -38,6 +38,10 @@ def declarations() -> list[types.FunctionDeclaration]:
                                                    "results, research notes to build from."},
              "folder": {**STRING, "description": "Optional: an existing project folder to work in (e.g. to "
                                                  "change something Codex built before). Omit for a new one."},
+             "save_to": {**STRING, "description": "Where the user wants the result, exactly as they said it: a "
+                                                  "full file path ('~/Notes/plan.md') or folder ('~/Desktop/'). "
+                                                  "The result is saved there (the agent keeps its own folder for "
+                                                  "drafts). Omit if the user did not say."},
              "helpers": {"type": types.Type.ARRAY, "items": types.Schema(type=types.Type.STRING),
                          "description": "Optional: the only teammates it may bring in, e.g. ['Astra'], or "
                                         "['none'] for no helpers. Omit to let it choose any."},
@@ -56,7 +60,8 @@ def declarations() -> list[types.FunctionDeclaration]:
                         "task": types.Schema(type=types.Type.STRING),
                         "thinking": types.Schema(type=types.Type.STRING, enum=["none", "low", "medium"]),
                         "context": types.Schema(type=types.Type.STRING),
-                        "folder": types.Schema(type=types.Type.STRING)}))})),
+                        "folder": types.Schema(type=types.Type.STRING),
+                        "save_to": types.Schema(type=types.Type.STRING)}))})),
         _fn("agent_status", "What your sub-agents are doing, or have finished, right now.",
             {"agent": {**STRING, "description": "Optional: one agent's name."}}),
         _fn("message_agent",
@@ -147,7 +152,8 @@ HANDLERS = {
     "list_agents": _list,
     "delegate_task": lambda a: hub.delegate(str(a.get("agent", "")), str(a.get("task", "")),
                                             _with_window(a), a.get("thinking"), str(a.get("why", "")),
-                                            str(a.get("folder", "") or ""), _helpers(a.get("helpers"))),
+                                            str(a.get("folder", "") or ""), _helpers(a.get("helpers")),
+                                            str(a.get("save_to", "") or "")),
     "delegate_tasks": lambda a: hub.delegate_many([dict(t) for t in (a.get("tasks") or [])]),
     "agent_status": lambda a: (hub.find(str(a["agent"])).brief() if a.get("agent") and hub.find(str(a["agent"]))
                                else hub.status()),
@@ -183,5 +189,7 @@ def prompt_text() -> str:
         "the lead stops its helpers. Messages starting '(A message from your sub-agent' are NOT the user: relay an "
         "agent's question to the user in your own words and pass the reply with answer_agent; if the user "
         "changes a running task, use message_agent; when results arrive, tell the user in a sentence per "
-        "agent - never read documents aloud. You can check on them (agent_status), stop them (stop_agent), "
+        "agent and where the file is - never read documents aloud. When the user says where to save the result "
+        "(a path or folder), pass it as save_to and keep it in the task; it is saved there, not only in the "
+        "agent's own folder. You can check on them (agent_status), stop them (stop_agent), "
         "and create new ones on request (create_agent).")

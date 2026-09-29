@@ -4,8 +4,17 @@
 # who download it.
 #
 #   packaging/build_app.sh                 # ad-hoc signed (users approve it once in System Settings)
+#   SIGN_IDENTITY=<SHA-1 or name> packaging/build_app.sh
+#       the self-signed "Hey Mint Release" certificate (packaging/make_release_cert.sh): every
+#       release has the same designated requirement, so updates keep macOS permissions
 #   SIGN_IDENTITY="Developer ID Application: …" packaging/build_app.sh
 #   … plus NOTARY_PROFILE=<keychain profile from `xcrun notarytool store-credentials`> to notarize
+#   SIGN_KEYCHAIN=<path>   look for the identity in this keychain (as well as the search list)
+#   SIGN_TIMESTAMP=0       skip the secure timestamp (it needs timestamp.apple.com; it works for a
+#                          self-signed certificate too, and keeps signatures valid past its expiry)
+#
+# dist/ gets the app, Hey-Mint-<version>-arm64.dmg, its .sha256 and latest.json (what the app's
+# updater reads: version, DMG name, sha256, notes, minimum macOS).
 #
 # Needs on the build Mac: Xcode command line tools, python3 (3.11+), and Homebrew's
 # portaudio (PyAudio is compiled against it; the library is copied into the app).
@@ -22,6 +31,7 @@ PY_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$
 CAMPP_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
 CAMPP_SHA=aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2
 IDENTIFIER="io.github.shivatmax.heymint"
+MIN_MACOS=14.2
 
 CACHE="$ROOT/build/cache"
 DIST="$ROOT/dist"
@@ -98,18 +108,18 @@ cp custom.example.json .env.example "$RES/app/"
 echo "$VERSION-$(git rev-parse --short HEAD 2>/dev/null || date +%s)" > "$RES/app/BUILD_ID"
 
 # --- the launcher, icon and Info.plist ------------------------------------------------------
-xcrun swiftc -O -target arm64-apple-macos14.2 launcher/ear/*.swift -o "$APP/Contents/MacOS/Mint"
+xcrun swiftc -O -target "arm64-apple-macos$MIN_MACOS" launcher/ear/*.swift -o "$APP/Contents/MacOS/Mint"
 # The screen-control engine behind the `desktop` tool (launcher/engine), started by Mint on demand.
 echo "Building the screen-control engine…"
 (cd launcher/engine && xcrun swift build -c release >/dev/null)
 cp "$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDesktop" "$APP/Contents/MacOS/MintEngine"
 # Meeting notes: the call's audio and the mic as two tracks (launcher/recorder).
 echo "Building the meeting recorder…"
-xcrun swiftc -O -target arm64-apple-macos14.2 launcher/recorder/*.swift -o "$APP/Contents/MacOS/MintRecorder" \
+xcrun swiftc -O -target "arm64-apple-macos$MIN_MACOS" launcher/recorder/*.swift -o "$APP/Contents/MacOS/MintRecorder" \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/recorder/Info.plist
 # Screen recordings: ScreenCaptureKit into an .mp4 (launcher/screenrec).
 echo "Building the screen recorder…"
-xcrun swiftc -O -target arm64-apple-macos14.2 launcher/screenrec/*.swift -o "$APP/Contents/MacOS/MintScreen" \
+xcrun swiftc -O -target "arm64-apple-macos$MIN_MACOS" launcher/screenrec/*.swift -o "$APP/Contents/MacOS/MintScreen" \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/screenrec/Info.plist
 "$PY" launcher/make_icon.py "$RES/Mint.icns" >/dev/null
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
@@ -126,7 +136,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>         <string>APPL</string>
   <key>CFBundleShortVersionString</key>  <string>$VERSION</string>
   <key>CFBundleVersion</key>             <string>$BUILD_NUMBER</string>
-  <key>LSMinimumSystemVersion</key>      <string>14.2</string>
+  <key>LSMinimumSystemVersion</key>      <string>$MIN_MACOS</string>
   <key>LSArchitecturePriority</key>      <array><string>arm64</string></array>
   <key>LSUIElement</key>                 <true/>
   <key>NSHighResolutionCapable</key>     <true/>
@@ -158,12 +168,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # --- signing ------------------------------------------------------------------------------
-# Every executable and library inside is signed first, then the app. With a Developer ID
-# the hardened runtime is on, with the exceptions an embedded Python needs.
+# Every executable and library inside is signed first, then the app. With a certificate (a
+# Developer ID, or the self-signed release one) the hardened runtime is on, with the exceptions
+# an embedded Python needs (entitlements.plist; checked with the self-signed one: PyObjC, numpy,
+# onnxruntime and PyAudio all load).
 ENTITLEMENTS="$ROOT/packaging/entitlements.plist"
 IDENTITY="${SIGN_IDENTITY:--}"
 sign_flags=(--force --sign "$IDENTITY")
-[[ "$IDENTITY" != "-" ]] && sign_flags+=(--options runtime --timestamp --entitlements "$ENTITLEMENTS")
+[[ -n "${SIGN_KEYCHAIN:-}" ]] && sign_flags+=(--keychain "$SIGN_KEYCHAIN")
+if [[ "$IDENTITY" != "-" ]]; then
+  sign_flags+=(--options runtime --entitlements "$ENTITLEMENTS")
+  [[ "${SIGN_TIMESTAMP:-1}" == 0 ]] && sign_flags+=(--timestamp=none) || sign_flags+=(--timestamp)
+fi
 echo "Signing ($([[ "$IDENTITY" == "-" ]] && echo ad-hoc || echo "$IDENTITY"))…"
 while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q "Mach-O"; then codesign "${sign_flags[@]}" "$file" 2>/dev/null; fi
@@ -173,6 +189,8 @@ codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintrecorder" "$APP/Conten
 codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintscreen" "$APP/Contents/MacOS/MintScreen"
 codesign "${sign_flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
+# What macOS keys the permissions on: the same line in every release means they carry over.
+codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /Designated requirement: /p'
 
 # --- the DMG --------------------------------------------------------------------------------
 DMG="$DIST/Hey-Mint-$VERSION-arm64.dmg"
@@ -182,11 +200,35 @@ mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Hey Mint.app"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -quiet -volname "Hey Mint" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-[[ "$IDENTITY" != "-" ]] && codesign --force --sign "$IDENTITY" --timestamp "$DMG"
-if [[ -n "${NOTARY_PROFILE:-}" && "$IDENTITY" != "-" ]]; then
+if [[ "$IDENTITY" != "-" ]]; then
+  dmg_flags=(--force --sign "$IDENTITY")
+  [[ -n "${SIGN_KEYCHAIN:-}" ]] && dmg_flags+=(--keychain "$SIGN_KEYCHAIN")
+  [[ "${SIGN_TIMESTAMP:-1}" == 0 ]] && dmg_flags+=(--timestamp=none) || dmg_flags+=(--timestamp)
+  codesign "${dmg_flags[@]}" "$DMG"
+fi
+# Only a Developer ID can be notarized; a self-signed release skips it.
+if [[ -n "${NOTARY_PROFILE:-}" && "$IDENTITY" == "Developer ID Application:"* ]]; then
   echo "Notarizing…"
   xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DMG"
 fi
-shasum -a 256 "$DMG" | tee "$DMG.sha256"
+(cd "$DIST" && shasum -a 256 "$(basename "$DMG")") | tee "$DMG.sha256"
+
+# latest.json: what the app's updater (mint/app/updater.py) reads from the release.
+python3 -B - "$DMG" "$VERSION" "$MIN_MACOS" "$DIST/latest.json" <<'PY'
+import hashlib, json, os, re, sys
+dmg, version, min_macos, out = sys.argv[1:5]
+digest = hashlib.sha256()
+with open(dmg, "rb") as f:
+    for block in iter(lambda: f.read(1 << 20), b""):
+        digest.update(block)
+notes = ""
+if os.path.exists("CHANGELOG.md"):
+    # This version's section of CHANGELOG.md ("## 0.2.0 (date)" up to the next "## ").
+    found = re.search(rf"^## {re.escape(version)}\b[^\n]*\n(.*?)(?=^## |\Z)", open("CHANGELOG.md").read(), re.M | re.S)
+    notes = found.group(1).strip()[:4000] if found else ""
+json.dump({"version": version, "dmg": os.path.basename(dmg), "sha256": digest.hexdigest(),
+           "size": os.path.getsize(dmg), "notes": notes, "min_macos": min_macos, "arch": "arm64"},
+          open(out, "w"), indent=2)
+PY
 du -sh "$APP" "$DMG"

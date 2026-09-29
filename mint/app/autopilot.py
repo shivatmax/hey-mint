@@ -80,6 +80,10 @@ def note(name: str, args: dict, result: str) -> None:
             _state["finished"] = True       # the plan covered the whole request
         elif name == "plan_task":
             _state["finished"] = False
+    if name == "set_preference":
+        # The session changes settings itself; this is the one place that sees it happen (undo.py).
+        from mint.tools import undo
+        undo.after_preference(args, result)
 
 
 def stop() -> None:
@@ -130,4 +134,5 @@ def decide(said: str, task_step: str = "", agent_asking: bool = False) -> str:
         return (f"(Mint autopilot - this is not the user speaking. You stopped part-way: {why}. The user asked: "
                 f"\"{request[:300]}\". Carry on now with everything that is left, back to back, without asking "
                 "or waiting for them to say next. When all of it is done, say so in one short sentence. If it is "
-                "already all done, just say 'All done.')")
+                "already all done, just say 'All done.' But if a tool said to ask the user first (for example before "
+                "replacing what is in a file), ask them that one question instead.)")

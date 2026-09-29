@@ -52,6 +52,7 @@ IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".he
           ".bmp": "image/bmp"}
 RICH = {".docx", ".doc", ".rtf", ".rtfd", ".odt", ".wordml", ".webarchive"}      # textutil reads these
 PLAIN = {".txt", ".text", ".md", ".markdown", ".html", ".htm", ".csv", ".tsv"}
+SHEET_SOURCES = {".pdf", ".json"} | PLAIN | RICH | set(IMAGES)   # what data_to_sheet can read a table from
 FORMATS = ("docx", "pdf", "md", "txt", "html", "rtf")
 CHUNK = 6000                  # characters of HTML per translation request
 MAX_INLINE = 18_000_000       # Gemini's inline limit is 20 MB per request
@@ -82,9 +83,11 @@ _jobs_lock = threading.Lock()
 
 # ---------------------------------------------------------------- where things come from
 
-def _file(raw: str) -> tuple[Path | None, str]:
+def _file(raw: str, same_name: set[str] | None = None) -> tuple[Path | None, str]:
     """The file the user means: a path, a name Mint can find, or "this" (selected in Finder or open in the
-    front app)."""
+    front app). With `same_name` (suffixes): a missing file whose folder holds exactly one file of the same
+    name with one of those suffixes ("scores.pdf" when only scores.csv is there) gives that file, and the
+    second value says so."""
     text = str(raw or "").strip().strip("\"'")
     if text.lower() in {"", "this", "it", "selected", "selection", "this file", "the selected file"}:
         from mint.tools.clipboard import _this_path
@@ -96,10 +99,35 @@ def _file(raw: str) -> tuple[Path | None, str]:
     from mint.tools.harness import _resolve
     path, why = _resolve(text)
     if path is None:
+        if same_name:
+            return _same_name(text, why, same_name)
         return None, why
     if not path.is_file():
         return None, f"{path} is not a file."
     return path, ""
+
+
+def _same_name(text: str, why: str, suffixes: set[str]) -> tuple[Path | None, str]:
+    """The user named a file that is not there: the one file next to where it would be with the same name
+    and another (readable) extension, else (None, why) - listing them when there are several."""
+    from mint.tools.harness import _blocked, _resolve, _short
+    if "/" not in text:                   # a bare name: no folder the user meant to look next to
+        return None, why
+    try:
+        meant, _ = _resolve(text, must_exist=False)
+    except Exception:
+        meant = None
+    if meant is None or meant.exists() or not meant.parent.is_dir() or _blocked(meant):
+        return None, why
+    others = sorted(p for p in meant.parent.iterdir() if p.is_file() and p != meant
+                    and p.stem.lower() == meant.stem.lower() and p.suffix.lower() in suffixes)
+    if len(others) == 1:
+        return others[0], (f"There is no {meant.name} in {_short(meant.parent)}; used {others[0].name}, the file "
+                           "with that name there - tell the user.")
+    if others:
+        return None, (f"{why} That folder has {', '.join(p.name for p in others)} - ask the user which one, "
+                      "then pass its path.")
+    return None, why
 
 
 def _grab(source: str):
@@ -396,7 +424,11 @@ def _copy(text: str) -> None:
     _put_text(text)
 
 
-def ocr_copy(source: str = "window", path: str = "", exact_lines: bool = False, job: dict | None = None) -> str:
+SHOWN = 3000          # up to this many characters of recognised text go back to the model in full
+
+
+def ocr_copy(source: str = "window", path: str = "", exact_lines: bool = False, job: dict | None = None,
+             save_to: str = "") -> str:
     started = time.monotonic()
     what, pages = "", []
     try:
@@ -424,10 +456,19 @@ def ocr_copy(source: str = "window", path: str = "", exact_lines: bool = False, 
         return f"Found no text in {what}."
     _copy(text)
     from mint.knowledge.skills import has_secret
-    preview = ("(it looks like it holds a password or key, so it is not read out here)" if has_secret(text)
-               else " ".join(text.split())[:200])
-    return (f"Copied {len(text):,} characters of text from {what} to the clipboard in "
-            f"{time.monotonic() - started:.0f} s. It starts: {preview}")
+    took = f"Copied {len(text):,} characters of text from {what} to the clipboard in {time.monotonic() - started:.0f} s."
+    saved = ""
+    if save_to.strip():
+        from mint.tools.harness import write_file
+        saved = " " + write_file({"path": save_to.strip(), "content": text.rstrip("\n") + "\n", "mode": "create"})
+    if has_secret(text):
+        return f"{took}{saved} (It looks like it holds a password or key, so it is not read out here.)"
+    # The whole text, not just its start: a window's first lines are often only tabs and toolbars, and the
+    # model may need the rest (to save it, answer from it, or check it).
+    if len(text) <= SHOWN:
+        return f"{took}{saved} The text:\n{text}"
+    return (f"{took}{saved} The first {SHOWN:,} characters:\n{text[:SHOWN]}\n[... {len(text) - SHOWN:,} more "
+            "characters are on the clipboard.]")
 
 
 def _file_blocks(path: Path, job: dict | None = None) -> tuple[str, list[list[dict]]]:
@@ -500,9 +541,128 @@ def _table_from_rows(rows: list[list[str]], name: str) -> dict:
     return {"name": name, "columns": rows[0], "rows": rows[1:]}
 
 
+class _HTMLTables(HTMLParser):
+    """The <table>s of an HTML page as rows of cell text (innermost tables only: a table holding other tables
+    is page layout, not data)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables: list[dict] = []
+        self._stack: list[dict] = []          # tables being read, innermost last
+        self._cell: list[str] | None = None
+        self._span = 1
+        self._skip = 0                        # inside <script>/<style>
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+        elif tag == "table":
+            if self._stack:
+                self._stack[-1]["nested"] = True
+            self._stack.append({"rows": [], "caption": "", "nested": False, "in_caption": False})
+        elif not self._stack:
+            return
+        elif tag == "tr":
+            self._stack[-1]["rows"].append([])
+        elif tag in ("td", "th"):
+            table = self._stack[-1]
+            if not table["rows"]:
+                table["rows"].append([])
+            self._cell = []
+            try:
+                self._span = max(1, min(int(dict(attrs).get("colspan") or 1), 50))
+            except ValueError:
+                self._span = 1
+        elif tag == "caption":
+            self._stack[-1]["in_caption"] = True
+        elif tag == "br" and self._cell is not None:
+            self._cell.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self._skip = max(0, self._skip - 1)
+        elif not self._stack:
+            return
+        elif tag in ("td", "th"):
+            self._end_cell()
+        elif tag == "caption":
+            self._stack[-1]["in_caption"] = False
+        elif tag == "table":
+            self._end_cell()
+            table = self._stack.pop()
+            rows = [row for row in table["rows"] if any(cell for cell in row)]
+            if not table["nested"] and len(rows) >= 2 and max(len(row) for row in rows) >= 2:
+                self.tables.append({"caption": table["caption"].strip(), "rows": rows})
+
+    def _end_cell(self):
+        if self._cell is not None and self._stack:
+            text = " ".join("".join(self._cell).split())
+            self._stack[-1]["rows"][-1].extend([text] + [""] * (self._span - 1))
+        self._cell, self._span = None, 1
+
+    def handle_data(self, data):
+        if self._skip or not self._stack:
+            return
+        if self._cell is not None:
+            self._cell.append(data)
+        elif self._stack[-1]["in_caption"]:
+            self._stack[-1]["caption"] += data
+
+
+def _html_tables(page: str, name: str) -> list[dict]:
+    """The data tables of an HTML page, read as they are (no Gemini); [] when it has none."""
+    parser = _HTMLTables()
+    try:
+        parser.feed(page)
+        parser.close()
+    except Exception as error:                        # a broken page: let Gemini read its text instead
+        log.info("html tables: %s", error)
+        return []
+    out = []
+    for n, table in enumerate(parser.tables[:20], 1):
+        label = table["caption"] or (name if len(parser.tables) == 1 else f"{name} {n}")
+        out.append(_table_from_rows(table["rows"], label[:31] or "Data"))
+    return out
+
+
+_URL = re.compile(r"(https?://|www\.)\S+$", re.I)
+
+
+def _tables_from_url(url: str, what: str) -> tuple[str, list[dict]]:
+    """(what it was, tables) from a web page, fetched here - the page does not need to be open. Its <table>s
+    are read as they are; a page without any (a list, or drawn by scripts) goes to Gemini as text."""
+    import httpx
+
+    from mint.agents.tools import UA
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    response = httpx.get(url, timeout=25, headers={"User-Agent": UA}, follow_redirects=True)
+    if response.status_code >= 400:
+        raise RuntimeError(f"HTTP {response.status_code} for {url}")
+    kind = response.headers.get("content-type", "").lower()
+    page = response.text
+    title = re.search(r"(?is)<title[^>]*>(.*?)</title>", page) if "html" in kind else None
+    name = " ".join(html.unescape(title.group(1)).split())[:31] if title else "Data"
+    label = f"the web page {url}"
+    if "html" in kind:
+        tables = _html_tables(page, name)
+        if tables:
+            return label, tables
+        text = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", _body(page)[1])
+        return label, _extract_tables([text[:200_000]], what)
+    if "text" in kind or "csv" in kind or "json" in kind:
+        rows = _split_table(page)
+        return label, [_table_from_rows(rows, name)] if rows else _extract_tables([page[:200_000]], what)
+    raise RuntimeError(f"{url} is {kind or 'not a web page'}; download it and pass the file instead")
+
+
 def _tables_from_file(path: Path, what: str) -> list[dict]:
     from google.genai import types
     suffix = path.suffix.lower()
+    if suffix in {".html", ".htm"}:
+        tables = _html_tables(path.read_text(errors="replace"), path.stem)
+        if tables:
+            return tables
     if suffix in {".csv", ".tsv"}:
         text = path.read_text(errors="replace")
         rows = list(csv.reader(text.splitlines(), delimiter="\t" if suffix == ".tsv" else
@@ -569,6 +729,28 @@ _TEXT_COLUMN = re.compile(r"phone|mobile|\btel\b|whatsapp|\bfax\b|zip|pin ?code|
                           r"ifsc|aadhaar|\bpan\b|card|\bid\b|passport", re.I)
 
 
+def _add_total(path: Path) -> None:
+    """A bold Total row under the data of the first sheet: =SUM of each number column."""
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    book = load_workbook(path)
+    ws = book.worksheets[0]
+    last = ws.max_row
+    if last < 2:
+        return
+    ws.cell(last + 1, 1, "Total").font = Font(bold=True)
+    for column in range(2, ws.max_column + 1):
+        values = [ws.cell(r, column).value for r in range(2, last + 1)]
+        if values and all(isinstance(v, (int, float)) for v in values if v is not None) and \
+                any(isinstance(v, (int, float)) for v in values):
+            letter = get_column_letter(column)
+            cell = ws.cell(last + 1, column, f"=SUM({letter}2:{letter}{last})")
+            cell.font = Font(bold=True)
+            cell.number_format = ws.cell(last, column).number_format
+    book.save(path)
+
+
 def _write_book(path: Path, tables: list[dict]) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -610,15 +792,32 @@ def _write_book(path: Path, tables: list[dict]) -> None:
 
 
 def data_to_sheet(source: str = "window", path: str = "", what: str = "", name: str = "",
-                  open_after: bool = True, job: dict | None = None) -> str:
+                  open_after: bool = True, job: dict | None = None, save_to: str = "", data: str = "") -> str:
     from mint.core import config
+    from mint.app import live
+    want_total = bool(re.search(r"\btotal\b", (live.request() or "").lower()))
     started = time.monotonic()
-    label = ""
+    label = note = ""
+    if not path and (_URL.match(what.strip()) or what.strip().startswith(("~/", "/"))):
+        path, what = what.strip(), ""                  # the model put the page or file in `what`
     try:
-        if path or source == "file":
-            file, why = _file(path)
+        if data.strip():
+            # Data Mint already has (read from files or pages): straight in, no scratch .csv left behind.
+            rows = _split_table(data)
+            # A Total row the model wrote itself gets a formula or sum wrong (bench: =SUM over its own row
+            # doubled the total). Take it out; a correct SUM row is added below.
+            while rows and len(rows) > 1 and re.match(r"\s*(grand\s+)?totals?\b", str(rows[-1][0] or ""), re.I):
+                rows.pop()
+                want_total = True
+            label = name or "the data"
+            tables = [_table_from_rows(rows, "Data")] if rows else _extract_tables([data[:200_000]], what)
+        elif _URL.match(path.strip()):
+            label = path.strip()
+            label, tables = _tables_from_url(label, what)
+        elif path or source == "file":
+            file, note = _file(path, SHEET_SOURCES)
             if file is None:
-                return why
+                return note
             label, tables = file.name, _tables_from_file(file, what)
         elif source == "clipboard":
             kind, value = _clipboard()
@@ -639,21 +838,28 @@ def data_to_sheet(source: str = "window", path: str = "", what: str = "", name: 
         log.info("data_to_sheet: %s", error)
         return f"FAILED: could not get the data from {label or 'there'}: {error}"
     tables = [t for t in tables if t["rows"]]
+    note = f" {note}" if note else ""
     if not tables:
-        return f"Found no table or list of data in {label}."
+        return f"Found no table or list of data in {label}.{note}"
     if job is not None:
         job["step"] = "writing the spreadsheet"
     fallback = Path(label).stem if "." in label else "Table"
     title = re.sub(r"[^\w .()-]", "", name or what or fallback).strip()[:60] or "Table"
-    out = config.storage("Spreadsheets") / f"{title} {time.strftime('%Y-%m-%d %H.%M.%S')}.xlsx"
+    from mint.tools import saveto
+    title = re.sub(r"\.(xlsx|xls|csv)$", "", title, flags=re.I).strip() or "Spreadsheet"
+    out, moved = saveto.destination(config.storage("Spreadsheets") / f"{title}.xlsx", ".xlsx", save_to)
+    if out.parent == config.storage("Spreadsheets"):
+        out = config.storage("Spreadsheets") / f"{title} {time.strftime('%Y-%m-%d %H.%M.%S')}.xlsx"
     _write_book(out, tables)
+    if want_total and data.strip():
+        _add_total(out)
     if open_after:
         subprocess.run(["open", str(out)], check=False)
     sizes = "; ".join(f"'{t['name']}' {len(t['rows'])} rows x {max(len(t['columns']), 1)} columns "
                       f"({', '.join(str(c) for c in t['columns'][:6])}{'…' if len(t['columns']) > 6 else ''})"
                       for t in tables)
     return (f"Made a spreadsheet from {label} in {time.monotonic() - started:.0f} s: {sizes}. Saved: {out}"
-            + (" and opened it." if open_after else "."))
+            + (" and opened it." if open_after else ".") + note)
 
 
 # ---------------------------------------------------------------- convert_document
@@ -1656,15 +1862,19 @@ def _ocr_tool(args: dict) -> str:
     source = str(args.get("source") or "window")
     path = str(args.get("path") or "")
     return _run("ocr_copy", path or source,
-                lambda job: ocr_copy(source, path, bool(args.get("lines")), job), "Still reading the text.")
+                lambda job: ocr_copy(source, path, bool(args.get("lines")), job, str(args.get("save_to") or "")),
+                "Still reading the text.")
 
 
 def _sheet_tool(args: dict) -> str:
     source = str(args.get("source") or "window")
     path = str(args.get("path") or "")
+    from mint.tools import saveto
+    # Worked out now, while the request is at hand (the job may finish after the next request).
+    save_to = str(args.get("save_to") or "") or saveto.requested(".xlsx")
     return _run("data_to_sheet", path or source,
                 lambda job: data_to_sheet(source, path, str(args.get("what") or ""), str(args.get("name") or ""),
-                                          args.get("open") is not False, job),
+                                          args.get("open") is not False, job, save_to, str(args.get("data") or "")),
                 "Still reading the data for the spreadsheet.")
 
 
@@ -1681,11 +1891,13 @@ def _convert_tool(args: dict) -> str:
 
 
 PROMPT = """Text and documents: "copy the text on my screen / from this image or PDF", "OCR this" -> ocr_copy \
-(source window, screen, clipboard_image, or path; lines=true keeps the exact line breaks). "Make an Excel of this \
-table / this data / from this PDF" -> data_to_sheet (source window, screen, clipboard, or path). "Convert this PDF \
-to Word", "translate report.docx into Hindi as a PDF" -> convert_document with path (or "this" for the file \
-selected in Finder or open in front), language only if they want it translated, and format (default docx); \
-"how far is the conversion?" -> convert_document status=true."""
+(source window, screen, clipboard_image, or path; lines=true keeps the exact line breaks; "and save it to X.txt" \
+-> save_to, so the whole text is saved, not what you retype). "Make an Excel of this \
+table / this data / from this PDF" -> data_to_sheet (source window, screen, clipboard, or path). A file or web \
+page the user names goes in path (a web page as its URL - it is fetched, no need to open it); source window only \
+for what is in the front window now. "Convert this PDF to Word", "translate report.docx into Hindi as a PDF" -> \
+convert_document with path (or "this" for the file selected in Finder or open in front), language only if they \
+want it translated, and format (default docx); "how far is the conversion?" -> convert_document status=true."""
 
 
 def declarations():
@@ -1704,20 +1916,29 @@ def declarations():
                                        description="where the text is (default window; file when path is given)"),
                 "path": types.Schema(type=S, description=path_note),
                 "lines": types.Schema(type=B, description="keep the exact line breaks instead of joining "
-                                                         "paragraphs (default false)")})),
+                                                         "paragraphs (default false)"),
+                "save_to": types.Schema(type=S, description="also save the text in this new text file "
+                                                           "('~/Documents/poster.txt'), when the user wants it "
+                                                           "saved")})),
         types.FunctionDeclaration(
             name="data_to_sheet",
             description=("Turn a table or list of data into an Excel .xlsx (numbers as numbers, dates as dates, a "
                          "bold frozen header, one sheet per table) and open it: from the front window or screen, a "
-                         "PDF, image, Word, text or CSV file, or what is on the clipboard (copied cells, text or a "
-                         "picture)."),
+                         "PDF, image, Word, text or CSV file, a web page (its URL in path; fetched here, it does "
+                         "not need to be open), or what is on the clipboard (copied cells, text or a picture). A "
+                         "file or page the user names always goes in path."),
             parameters=types.Schema(type=types.Type.OBJECT, properties={
                 "source": types.Schema(type=S, enum=["window", "screen", "file", "clipboard"],
                                        description="where the data is (default window; file when path is given)"),
-                "path": types.Schema(type=S, description=path_note),
+                "path": types.Schema(type=S, description=path_note + ", or a web page URL ('https://...')"),
                 "what": types.Schema(type=S, description="which table or data, if the user said, e.g. "
                                                          "'the price list', 'only the transactions'"),
                 "name": types.Schema(type=S, description="file name for the spreadsheet (optional)"),
+                "save_to": types.Schema(type=S, description="where the user asked for it: a folder or a full "
+                                                            ".xlsx path; empty = Mint's Spreadsheets folder"),
+                "data": types.Schema(type=S, description="the table itself as CSV/TSV text, when you already have "
+                                                         "the data (from files or pages you read) - no scratch "
+                                                         ".csv file needed"),
                 "open": types.Schema(type=B, description="open it when done (default true)")})),
         types.FunctionDeclaration(
             name="convert_document",

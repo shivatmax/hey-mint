@@ -16,21 +16,29 @@ _lock = threading.Lock()
 _text = ""
 _at = 0.0
 _claimed_at = -1.0     # when the current request's context pack was delivered
+_typed = False         # the current request was typed, not spoken
 
 
 def heard(chunk: str, new_turn: bool = False) -> None:
-    global _text, _at
+    global _text, _at, _typed
     with _lock:
         if new_turn or time.monotonic() - _at > 20:
             _text = ""
+            _typed = False
         _text = (_text + chunk) if _text else chunk.lstrip()
         _at = time.monotonic()
 
 
 def typed(text: str) -> None:
-    global _text, _at
+    global _text, _at, _typed
     with _lock:
-        _text, _at = text, time.monotonic()
+        _text, _at, _typed = text, time.monotonic(), True
+
+
+def was_typed() -> bool:
+    """The request in progress was typed (so nothing in it was misheard)."""
+    with _lock:
+        return _typed
 
 
 def request(max_age: float = 180.0) -> str:

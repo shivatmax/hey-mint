@@ -96,12 +96,33 @@ def brightness(value: str = "") -> str:
             return f"FAILED: brightness '{value}'? Say up, down or a number 0-100."
     target = max(3, min(100, int(target)))
     ds.DisplayServicesSetBrightness(display, ctypes.c_float(target / 100))
+    if target != current:
+        from mint.tools import undo
+        undo.record("brightness", f"brightness {current}% → {target}%", {"kind": "brightness", "value": current})
     return f"Brightness {current}% → {target}%."
 
 
 # --- Keep awake ----------------------------------------------------------------------------
 
+def _awake() -> dict:
+    """How keep-awake stands now, as the undo step that brings it back."""
+    proc = _caffeinate["proc"]
+    if proc is None or proc.poll() is not None:
+        return {"kind": "keep_awake", "state": "off"}
+    left = (_caffeinate["until"] - time.time()) / 60 if _caffeinate["until"] else 0
+    return {"kind": "keep_awake", "state": "on", "minutes": max(1, round(left)) if left else 0}
+
+
 def keep_awake(state: str = "on", minutes: float = 0) -> str:
+    before = _awake()
+    said = _keep_awake(state, minutes)
+    if str(state or "").lower() != "status" and (before["state"] == "on" or _awake()["state"] == "on"):
+        from mint.tools import undo
+        undo.record("keep_awake", f"keep awake {str(state or 'on').lower()}", before)
+    return said
+
+
+def _keep_awake(state: str = "on", minutes: float = 0) -> str:
     proc = _caffeinate["proc"]
     running = proc is not None and proc.poll() is None
     state = str(state or "on").lower()
@@ -196,6 +217,8 @@ def focus(state: str = "on") -> str:
     done = subprocess.run(["shortcuts", "run", FOCUS_SHORTCUTS[want]], capture_output=True, text=True, timeout=30)
     if done.returncode != 0:
         return f"FAILED: the shortcut '{FOCUS_SHORTCUTS[want]}' did not run: {(done.stderr or '').strip()[:200]}"
+    from mint.tools import undo      # macOS doesn't say what it was before: the way back is the opposite
+    undo.record("focus", f"Do Not Disturb {want}", {"kind": "focus", "state": "off" if want == "on" else "on"})
     return f"Do Not Disturb is {want}."
 
 
@@ -251,6 +274,9 @@ def _fullscreen() -> str:
         return "FAILED: no window in front."
     _, now = AX.AXUIElementCopyAttributeValue(window, "AXFullScreen", None)
     AX.AXUIElementSetAttributeValue(window, "AXFullScreen", not bool(now))
+    from mint.tools import undo
+    undo.record("window", f"{front.localizedName()} {'out of' if now else 'into'} full screen",
+                {"kind": "window_fullscreen", "app": str(front.localizedName() or ""), "on": bool(now)})
     return f"{front.localizedName()} is {'out of' if now else 'in'} full screen."
 
 
@@ -262,8 +288,10 @@ def window(layout: str, app: str = "", app2: str = "") -> str:
     if app2 or layout == "split":
         if not (app and app2):
             return "FAILED: side by side needs two apps (app and app2)."
-        first = window("left_half", app)
-        second = window("right_half", app2)
+        from mint.tools import undo
+        with undo.together("window", f"{app} left and {app2} right"):
+            first = window("left_half", app)
+            second = window("right_half", app2)
         return f"{first} {second}"
     if layout in ("fullscreen", "full_screen", "native_fullscreen"):
         if app and not _activate(app):
@@ -277,6 +305,7 @@ def window(layout: str, app: str = "", app2: str = "") -> str:
         if not name:
             return f"FAILED: {app} is not running (open_app it first)."
     action, fractions = LAYOUTS[layout]
+    before = window_place()
     if _rectangle():
         subprocess.run(["open", "-g", f"rectangle://execute-action?name={action}"], check=False)
         time.sleep(0.3)
@@ -287,7 +316,76 @@ def window(layout: str, app: str = "", app2: str = "") -> str:
         return f"FAILED: '{layout}' needs Rectangle (not installed)."
     import AppKit
     front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    if before:
+        from mint.tools import undo
+        undo.record("window", f"{before['app']} window → {layout.replace('_', ' ')}", before)
     return f"{name or (front.localizedName() if front else 'The window')} → {layout.replace('_', ' ')} ({how})."
+
+
+def _ax_window(app_name: str = "", title: str = ""):
+    """(app, window) through Accessibility: `app_name`'s window called `title`, else its focused one;
+    the front app's by default."""
+    import AppKit
+    import ApplicationServices as AX
+    workspace = AppKit.NSWorkspace.sharedWorkspace()
+    app = next((a for a in workspace.runningApplications() if str(a.localizedName() or "") == app_name), None) \
+        if app_name else workspace.frontmostApplication()
+    if app is None:
+        return None, None
+    element = AX.AXUIElementCreateApplication(app.processIdentifier())
+    if title:
+        _, windows = AX.AXUIElementCopyAttributeValue(element, "AXWindows", None)
+        for candidate in windows or []:
+            if str(AX.AXUIElementCopyAttributeValue(candidate, "AXTitle", None)[1] or "") == title:
+                return app, candidate
+    err, window = AX.AXUIElementCopyAttributeValue(element, "AXFocusedWindow", None)
+    return app, (window if err == 0 else None)
+
+
+def window_place(app_name: str = "", title: str = "") -> dict | None:
+    """Where a window is now, as the undo step that puts it back there."""
+    try:
+        import ApplicationServices as AX
+        app, window = _ax_window(app_name, title)
+        if window is None:
+            return None
+        _, pos = AX.AXUIElementCopyAttributeValue(window, "AXPosition", None)
+        _, size = AX.AXUIElementCopyAttributeValue(window, "AXSize", None)
+        if pos is None or size is None:
+            return None
+        p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)[1]
+        s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)[1]
+        name = AX.AXUIElementCopyAttributeValue(window, "AXTitle", None)[1]
+        return {"kind": "window_frame", "app": str(app.localizedName() or ""), "title": str(name or ""),
+                "x": float(p.x), "y": float(p.y), "w": float(s.width), "h": float(s.height)}
+    except Exception as error:
+        log.info("window place: %s", error)
+        return None
+
+
+def put_window(spec: dict):
+    """Move a window back to a saved place (undo); -> (what happened, the place it left, for redo)."""
+    import ApplicationServices as AX
+    import Quartz
+    app, window = _ax_window(spec.get("app", ""), spec.get("title", ""))
+    if window is None:
+        return f"FAILED: {spec.get('app') or 'that'} window isn't open any more."
+    now = window_place(spec.get("app", ""), spec.get("title", ""))
+    size = AX.AXValueCreate(AX.kAXValueCGSizeType, Quartz.CGSize(spec["w"], spec["h"]))
+    AX.AXUIElementSetAttributeValue(window, "AXSize", size)
+    AX.AXUIElementSetAttributeValue(window, "AXPosition", AX.AXValueCreate(
+        AX.kAXValueCGPointType, Quartz.CGPoint(spec["x"], spec["y"])))
+    AX.AXUIElementSetAttributeValue(window, "AXSize", size)     # again: a move across displays can clamp it
+    return f"{spec.get('app')} window back where it was.", now
+
+
+def set_fullscreen(app_name: str, on: bool) -> str:
+    import ApplicationServices as AX
+    app, window = _ax_window(app_name)
+    if window is None:
+        return f"FAILED: {app_name or 'that'} window isn't open any more."
+    AX.AXUIElementSetAttributeValue(window, "AXFullScreen", bool(on))
+    return f"{app_name} {'back in' if on else 'out of'} full screen."
 
 
 # --- Music, Night Shift, Wi-Fi, views, Settings --------------------------------------------
@@ -331,7 +429,11 @@ def night_shift(state: str = "on") -> str:
         schedule = {0: "no schedule", 1: "sunset to sunrise", 2: "a custom schedule"}.get(status["mode"], "a schedule")
         return f"Night Shift is {'on' if status['enabled'] else 'off'} ({schedule})."
     on = str(state).lower() not in ("off", "disable", "false")
+    was = _night_status(client)["enabled"]
     ok = client.setEnabled_(on)
+    if ok and was != on:
+        from mint.tools import undo
+        undo.record("night_shift", f"Night Shift {'on' if on else 'off'}", {"kind": "night_shift", "on": was})
     return f"Night Shift {'on' if on else 'off'}." if ok else "FAILED: Night Shift could not be switched."
 
 
@@ -344,7 +446,11 @@ def wifi(state: str = "on") -> str:
         out = subprocess.run(["networksetup", "-getairportpower", device], capture_output=True, text=True).stdout
         return out.strip() or "Unknown."
     on = str(state).lower() not in ("off", "disable", "false")
+    was = subprocess.run(["networksetup", "-getairportpower", device], capture_output=True, text=True).stdout
     subprocess.run(["networksetup", "-setairportpower", device, "on" if on else "off"], check=False)
+    if was.strip().endswith(("On", "Off")) and was.strip().endswith("On") != on:
+        from mint.tools import undo
+        undo.record("wifi", f"Wi-Fi {'on' if on else 'off'}", {"kind": "wifi", "on": not on})
     return f"Wi-Fi {'on' if on else 'off'}."
 
 

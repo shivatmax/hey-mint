@@ -27,6 +27,7 @@ import logging
 import time
 from pathlib import Path
 
+from mint.agents import deliver
 from mint.agents import providers
 from mint.agents import registry
 from mint.agents import team
@@ -94,6 +95,8 @@ class Run:
         self.mission: team.Mission | None = None
         self.children: list[Run] = []
         self.done: asyncio.Future | None = None   # helpers: resolved with (status, result) at the end
+        self.destination: deliver.Destination | None = None   # where the user asked for the result
+        self.delivered: list[Path] = []
 
     @property
     def name(self) -> str:
@@ -169,6 +172,8 @@ class Hub:
         mint = self.mint
         if mint is None:
             return
+        from mint.app import telegram
+        telegram.on_event("notice", {"text": text})      # Mint's next words are news for the phone too
         if wake and getattr(mint, "asleep", False):
             try:
                 await mint.wake_up("agent")
@@ -202,7 +207,7 @@ class Hub:
         return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout=10)
 
     def delegate(self, agent_name: str, task: str, context: str = "", thinking: str | None = None,
-                 why: str = "", folder: str = "", helpers: list[str] | None = None) -> str:
+                 why: str = "", folder: str = "", helpers: list[str] | None = None, save_to: str = "") -> str:
         agent = registry.get(agent_name)
         if agent is None:
             names = ", ".join(a["name"] for a in registry.load())
@@ -216,12 +221,17 @@ class Hub:
             provider, models, note = providers.route(agent)
         except providers.NoProvider as error:
             return f"NOT STARTED: {error} Tell the user that, in one sentence."
-        blocked = providers.key_problem(provider)
+        blocked = providers.key_problem(provider, recheck=True)
         if blocked:
             return (f"NOT STARTED: {blocked} You cannot fix this yourself - tell the user exactly that, in one "
-                    "sentence.")
+                    "sentence. If the task is small enough to do with your own tools (e.g. a short text saved "
+                    "with write_file where they asked), offer to do it yourself now.")
         effort = thinking if thinking in providers.EFFORTS else choose_effort(task, agent.get("thinking", "low"))
         run = Run(agent, task, context, effort)
+        # Where the user asked for the result: the agent may write it there, and it is
+        # copied there at the end if it stayed in the workspace (deliver.py).
+        wanted = deliver.find(task, save_to)
+        run.destination, refused = deliver.Destination.parse(wanted)
         busy = [r for r in self.runs.values() if r.active and r.name == agent["name"]]
         codex_run = agent.get("runner") == "codex"
         if folder:
@@ -248,8 +258,11 @@ class Hub:
         crew = ("" if codex_run or helpers == [] else
                 " It leads: it may bring in teammates itself" +
                 (f" (only {', '.join(helpers)})" if helpers else "") + " and reports back for all of them.")
-        return (f"Started {agent['name']} ({run.id}) on it, using {how}.{also}{crew} It works in the background; "
-                "you will be told when it asks something or finishes. Tell the user briefly who is on it.")
+        goes = (f" The result will be saved at {run.destination}." if run.destination else
+                f" NOTE: it cannot save to '{wanted}' ({refused}); the result stays in {run.agent['workspace']} - "
+                "tell the user." if wanted else "")
+        return (f"Started {agent['name']} ({run.id}) on it, using {how}.{also}{crew}{goes} It works in the "
+                "background; you will be told when it asks something or finishes. Tell the user briefly who is on it.")
 
     def delegate_many(self, jobs: list[dict]) -> str:
         """Several tasks at once, possibly to several agents."""
@@ -257,7 +270,7 @@ class Hub:
         for job in jobs[:8]:
             lines.append(self.delegate(str(job.get("agent", "")), str(job.get("task", "")),
                                        str(job.get("context", "")), job.get("thinking"), "",
-                                       str(job.get("folder", "") or "")))
+                                       str(job.get("folder", "") or ""), None, str(job.get("save_to", "") or "")))
         return "\n".join(lines) or "No tasks given."
 
     def find(self, ref: str) -> Run | None:
@@ -361,6 +374,7 @@ class Hub:
                 "simple fact needs 3-6 tool calls, a brief or comparison about 10-15; stop once you can answer "
                 "well. When the task is complete, reply WITHOUT calling any tool: that reply is your final "
                 "result - short, concrete, with file names."
+                + (run.destination.note() if run.destination is not None and run.parent is None else "")
                 + team.team_prompt(run, registry.load()))
 
     async def _run_codex(self, run: Run, follow_up: bool = False) -> None:
@@ -480,10 +494,13 @@ class Hub:
         run.doing = agent_tools.describe_args(name, args)
         self.emit("tool", run, run.doing, tool=name)
         root = run.mission.root if run.mission is not None else None
-        result = await asyncio.to_thread(agent_tools.run, name, args, workspace, root)
+        destination = run.destination if run.parent is None else None
+        result = await asyncio.to_thread(agent_tools.run, name, args, workspace, root, destination)
         if name == "write_file" and result.startswith("Wrote "):
-            run.files.append(str(args.get("path", "")))
-            self.emit("file", run, str(args.get("path", "")))
+            written = str(args.get("path", ""))
+            written = str(Path(written).expanduser()) if written.startswith("~") else written
+            run.files.append(written)
+            self.emit("file", run, written)
         if name == "create_pdf" and ".pdf" in result:
             run.files.append(result.split()[-1] if result else "pdf")
         return result
@@ -571,11 +588,28 @@ class Hub:
         return f"{child.name} {status}: {result[:6000]}{files}"
 
     async def _end(self, run: Run, status: str, result: str) -> None:
+        delivered = ""
+        if status == "done" and run.destination is not None and run.parent is None:
+            try:
+                run.delivered, problem = await asyncio.to_thread(
+                    deliver.deliver, run.destination, run.files, Path(run.agent["workspace"]).expanduser(), result)
+            except Exception as error:
+                log.exception("delivering %s's result failed", run.id)
+                run.delivered, problem = [], f"{type(error).__name__}: {error}"
+            if run.delivered:
+                shown = ", ".join(deliver._short(p) for p in run.delivered[:6])
+                more = f" and {len(run.delivered) - 6} more" if len(run.delivered) > 6 else ""
+                delivered = f" Saved where the user asked: {shown}{more}."
+            else:
+                delivered = f" It could NOT be saved at {run.destination} ({problem}) - tell the user."
+            log.info("agent %s delivery to %s: %s", run.id, run.destination, delivered.strip())
         run.status, run.result, run.finished = status, result, time.time()
         run.doing = status
         self.emit(status, run, result)
-        where = (f" Files are in {run.agent['workspace']}: {', '.join(run.files[-6:])}."
-                 if run.files and run.agent.get("runner") != "codex" else "")
+        working = [f for f in run.files if Path(f).expanduser() not in run.delivered]
+        where = delivered + (f" {'Working files' if delivered else 'Files'} are in {run.agent['workspace']}: "
+                             f"{', '.join(working[-6:])}."
+                             if working and run.agent.get("runner") != "codex" else "")
         try:
             from mint.knowledge.conversation import memory
             memory.add("agent", f"{run.name} ({status}) task: {run.task[:200]} -> {result[:600]}{where}")
@@ -594,7 +628,8 @@ class Hub:
         if status == "done":
             text = f"{run.name} [{run.id}] finished \"{run.task[:120]}\". Result: {result[:1500]}{where}"
         elif status == "failed":
-            text = f"{run.name} [{run.id}] could not finish \"{run.task[:120]}\": {result[:400]}"
+            text = (f"{run.name} [{run.id}] could not finish \"{run.task[:120]}\": {result[:400]}"
+                    + (f" Nothing was saved at {run.destination}." if run.destination is not None else ""))
         else:
             text = ""
         if text:
@@ -616,7 +651,10 @@ class Hub:
                 "(A message from your sub-agent, not from the user.) ")
         key_note = (" A key problem cannot be fixed by you or the agents: tell the user plainly that they need to "
                     "make a new API key and put it in .env - do not promise to fix it."
-                    if any("refused the API key" in b for b in batch) else "")
+                    if any("refused the API key" in b for b in batch) else
+                    " The agents' account is out of credits: tell the user plainly they need to add credits (or "
+                    "use another key) - you and the agents cannot fix that. Offer to do a small task yourself."
+                    if any("has no credits left" in b for b in batch) else "")
         await self.tell_mint(head + " | ".join(batch) + pending + key_note +
                              " Tell the user the outcome briefly - one sentence per agent; offer to open files.")
 

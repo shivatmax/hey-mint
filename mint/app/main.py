@@ -354,15 +354,15 @@ def main() -> int:
             AppHelper.callAfter(presence.register_shortcuts)
         elif key == "listen_while_working":
             mint.listen_while_working = bool(value)
-        elif key == "voice_lock":
-            mint.refresh_voice_lock()
+        elif key in ("voice_lock", "wake_phrase", "wake_models"):
+            mint.refresh_voice_lock()             # reloads the wake word models too
         elif key in ("theme", "position", "face"):
             presence.refresh()
         elif key in ("input_device", "output_device", "echo_cancellation"):
             mint.apply_audio_settings()
         elif key == "assistant_name":
             rename_later()
-        elif key in ("voice_name", "speaking_style"):
+        elif key in ("voice_name", "speaking_style", "reply_language"):
             revoice_later()
 
     # A new voice or speaking style (Settings, or set_voice): once the typing

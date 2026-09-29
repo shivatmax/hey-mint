@@ -183,10 +183,15 @@ def _front_window_point():
 def set_volume(level: int) -> str:
     """Set output volume, 0 to 100."""
     level = max(0, min(int(level), 100))
+    was = subprocess.run(["osascript", "-e", "output volume of (get volume settings)"],
+                         capture_output=True, text=True, check=False).stdout.strip()
     subprocess.run(
         ["osascript", "-e", f"set volume output volume {level}"],
         capture_output=True, check=False,
     )
+    if was.isdigit() and int(was) != level:
+        from mint.tools import undo
+        undo.record("volume", f"volume {was} → {level}", {"kind": "volume", "level": int(was)})
     return f"Volume set to {level}"
 
 

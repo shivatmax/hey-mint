@@ -76,6 +76,12 @@ def terms() -> list[str]:
     name = prefs.name()
     add(f"Hey {name}")   # "Hey Mint" was heard as "Hemant" (a common name) without this
     add(name)
+    try:
+        from mint.voice import wake
+        for phrase in wake.active_phrases():     # a wake phrase of the user's own ("Hey Jarvis")
+            add(phrase)
+    except Exception:
+        pass
     if user := str(prefs.get("user_name") or "").strip():
         add(user)
     return found[:LIMIT]

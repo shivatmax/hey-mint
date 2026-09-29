@@ -73,6 +73,10 @@ open ~/Applications/Mint.app</pre>
   <p class="lead">Spotlight search by name and content; reads text, PDFs, Word, CSV and more; writes and edits with a backup of the old version.</p>
   <ul class="say"><li><q>what did I download today?</q></li><li><q>find the PDF about the lease</q></li><li><q>make a file called plan.md with…</q></li>
     <li><q>change the deadline in plan.md to Friday</q></li><li><q>move it to Archive</q></li><li><q>show it in Finder</q></li></ul>
+  <ul class="say"><li><q>merge acme_old and the Acme copy folder into Acme, keep the newest</q></li><li><q>delete the duplicates in Downloads</q></li>
+    <li><q>put the last three things I copied into notes.md</q></li><li><q>what's 1,200.50 plus 85 plus 310.49?</q></li></ul>
+  <p>Made files go where you say: “save it in ~/Reports” or “as ~/Shop/cheapest.xlsx” (spreadsheets, PDFs and documents), otherwise into your Mint folder. Asking for a file that already exists adds to it rather than replacing it, and says so. A typo in a file name (“budgte.txt”) is caught and the right file used; “scores.pdf” when only scores.csv exists is found too.</p>
+  <p><strong>Merging folders</strong> keeps the most recently changed copy of each file, puts the older ones in an <em>older</em> folder with their real names and removes the folders left empty. <strong>Duplicates</strong> means the same contents, never just a similar name: “photo (1).jpg” can be a different photo. Totals and conversions are worked out exactly, not guessed.</p>
   <p class="note">“Delete” means the Trash. Keys, keychains, browser profiles, Mail and Messages are off limits.</p>
 </section>
 
@@ -138,6 +142,38 @@ open ~/Applications/Mint.app</pre>
     <li><q>what did I copy earlier?</q></li><li><q>screenshots to the clipboard only</q></li></ul>
   <p>Screenshots are numbered, so “paste screenshot 3” works. By default they're saved as a file and copied to the clipboard; you can say “screenshots to the clipboard only” or “as files only” to change that. History stays on this Mac for 7 days (the last 150 clips).</p>
   <p class="note">Passwords and keys are never kept in the history. “Save this as my … key” puts it in the macOS Keychain; copying it back clears it from the clipboard after 60 seconds. The clipboard never shows up in screen shares.</p>
+</section>
+
+<section id="notifications" data-group="Using Mint">
+  <h2>Your notifications</h2>
+  <p class="lead">Ask what you missed. Mint reads Notification Center, groups it by app and tells you what matters, then opens, clears or answers the one you mean.</p>
+  <ul class="say"><li><q>what did I miss?</q></li><li><q>read my notifications</q></li><li><q>any messages from Slack?</q></li><li><q>open the second one</q></li><li><q>clear the GitHub ones</q></li><li><q>reply to that saying I'm on my way</q></li></ul>
+  <p>It uses the Accessibility permission Mint already has, so there's nothing new to allow; Notification Center flashes open for a moment while it reads. Replies are read back to you and only sent when you say so.</p>
+</section>
+
+<section id="telegram" data-group="Using Mint">
+  <h2>Control Mint from your phone (Telegram)</h2>
+  <p class="lead">Text your own Telegram bot, or send it a voice note, from anywhere. Mint does it on your Mac and shows its work in the chat as it goes: one message that ticks off each step, then the answer, with screenshots and files it made.</p>
+  <ol><li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, pick a name and a username ending in “bot”, and copy the token it gives you.</li>
+    <li>In Mint, open Settings ▸ Accounts &amp; keys ▸ Telegram remote control, add the token and switch it on.</li>
+    <li>Send your bot the 6-digit code shown there. From then on only your Telegram account can control Mint.</li></ol>
+  <ul class="say"><li><q>what's on my calendar today?</q></li><li><q>find the Q3 report and send it here</q></li><li><q>/screenshot</q></li><li><q>/status</q></li><li><q>/stop</q></li></ul>
+  <p>Commands: <code>/stop</code> stops whatever Mint is doing, <code>/status</code> says what it is doing, <code>/screenshot</code> sends the screen, <code>/pause</code> and <code>/resume</code> switch phone control off and on, <code>/help</code> lists them. Alerts from trackers (“the download finished”) and agents come to the chat too.</p>
+  <p class="note">Only your Mac talks to Telegram, over HTTPS: no server, nothing to open on your router. Keep the Mac awake and plugged in; while the screen is locked, clicking and typing in apps may fail, but files, the web, agents and reminders still work. “Read-only from Telegram” stops phone requests from sending, deleting or buying anything. Every phone request is logged on the Mac.</p>
+</section>
+
+<section id="agent-apps" data-group="Using Mint">
+  <h2>ChatGPT and Claude</h2>
+  <p class="lead">Mint can use the ChatGPT and Claude desktop apps for you: ask something, read the answer back, see whether they are still working, and tell you when they finish.</p>
+  <ul class="say"><li><q>ask ChatGPT to outline a talk on local-first apps</q></li><li><q>what did ChatGPT answer?</q></li><li><q>is Claude still working?</q></li><li><q>open my Task auditor session in Claude</q></li><li><q>tell me when Claude is done</q></li><li><q>stop ChatGPT</q></li></ul>
+  <p>It checks the prompt landed in the app's message box before pressing Send once, and it only sends when you asked it to. Answers are read to you as quotes: Mint never takes instructions from them. For Claude, Mint works in Claude Code sessions; the Chat view is only read, and only when you ask for it.</p>
+</section>
+
+<section id="undo" data-group="Using Mint">
+  <h2>Undo</h2>
+  <p class="lead">Changed your mind? “Undo that” reverses what Mint just did, and “undo the last three things” goes further back. “What can you undo?” lists them.</p>
+  <ul class="say"><li><q>undo that</q></li><li><q>undo the brightness change</q></li><li><q>undo the last 3 things</q></li><li><q>redo</q></li><li><q>what can you undo?</q></li></ul>
+  <p>It covers brightness, volume, Night Shift, Wi-Fi, keep awake, Do Not Disturb, dark mode, window layouts, text Mint rewrote or typed, reminders and notes it made, files it moved, renamed, created or trashed, clipboard changes and settings you changed by voice. The last 50 actions of the past day are kept, on this Mac. Some things can't be taken back, like a message that was sent, and Mint says so.</p>
 </section>
 
 <section id="showing" data-group="Using Mint">
@@ -233,6 +269,7 @@ open ~/Applications/Mint.app</pre>
   <h2>Briefings, email, translation and more</h2>
   <p class="lead">A one-minute spoken rundown of your day. Your Apple Shortcuts by voice. Any screenshot, found by what's in it.</p>
   {{video island-schedule 380 | <b>Your day, at a glance.</b> The weather, today's timeline (now highlighted, the next one “in 2h”), reminders and headlines. It shows with a briefing or “what's on my calendar today?”}}
+  <p>Reminders, notes and events go where you say: “on my Work calendar”, “in my Groceries list”, “in the Recipes folder”. A clash is spotted before booking (“use the next free half hour if it clashes”). Email drafts open in the Mail app when you say so.</p>
   <ul class="say"><li><q>good morning, brief me</q></li><li><q>every weekday at 8:30, give me my daily briefing</q></li>
     <li><q>turn on the living room lights</q></li><li><q>run my Good Night shortcut</q></li><li><q>find the screenshot with the invoice number</q></li>
     <li><q>add my action items from that meeting to Reminders</q></li><li><q>translate this page</q></li>
@@ -352,20 +389,43 @@ open ~/Applications/Mint.app</pre>
     <tr><td>Balanced</td><td>Most of the time (the default)</td></tr>
     <tr><td>Strict</td><td>Someone with a similar voice is around</td></tr></table></div>
   <ul class="say"><li><q>you heard cube con, I said KubeCon</q></li><li><q>it's GitHub, one word</q></li></ul>
-  <p>Mint steps aside during Zoom, Meet or FaceTime calls, and ignores talk that isn't meant for it. Rename it in Settings ▸ You and it builds a new wake word.</p>
+  <p>Mint steps aside during Zoom, Meet or FaceTime calls, and ignores talk that isn't meant for it.</p>
+  <p><strong>Your own wake word.</strong> Want “Hey Jarvis” or “Okay Nova”? Type it in Settings ▸ Voice &amp; wake word and press Train. Mint builds a detector for it on your Mac in about a minute and a half, from dozens of voices plus (if you like) four takes of your own voice. In testing, “Hey Jarvis” caught 93% of voices it had never heard, with about one false wake an hour of other people talking. Keep “Hey Mint” as well if you like, press Test to try it, or Reset to go back. If the voice lock is on, retrain your voice after changing the phrase.</p>
 </section>
 
 <section id="settings" data-group="Settings">
   <h2>Settings</h2>
-  <p class="lead">Open Settings from the menu bar icon (<kbd>⌘,</kbd>), or just ask Mint to change something.</p>
-  <ul class="say"><li><q>don't speak, just chat</q></li><li><q>make it pink</q></li><li><q>move to the top left</q></li><li><q>Mint, be visible</q></li><li><q>quit Mint</q></li></ul>
-  <div class="table"><table><tr><th>Tab</th><th>What's in it</th></tr>
-    <tr><td>You</td><td>The assistant's name, your name, and what Mint should know about you</td></tr>
-    <tr><td>Your voice</td><td>Training, the voice lock and its strictness</td></tr>
-    <tr><td>Mint's voice</td><td>Voice and speaking style</td></tr>
-    <tr><td>Audio</td><td>Microphone, speaker, echo cancellation, calls</td></tr>
-    <tr><td>Appearance</td><td>Theme, position, face, captions, effects</td></tr></table></div>
+  <p class="lead">Open Settings from the menu bar icon (<kbd>⌘,</kbd>), or just ask Mint to change something. Pages sit in a sidebar, like System Settings.</p>
+  {{video settings 560 | Settings: every page, from General to Usage and Updates.}}
+  <ul class="say"><li><q>don't speak, just chat</q></li><li><q>always answer in Hindi</q></li><li><q>make it pink</q></li><li><q>move to the top left</q></li><li><q>Mint, be visible</q></li><li><q>quit Mint</q></li></ul>
+  <div class="table"><table><tr><th>Page</th><th>What's in it</th></tr>
+    <tr><td>General</td><td>The assistant's name (and so its wake word), your name, what Mint should know about you, start at login, memory when asleep, Quit</td></tr>
+    <tr><td>Voice &amp; wake word</td><td>The wake word, training your voice, the voice lock and its strictness</td></tr>
+    <tr><td>Speaking</td><td>Which of the 30 voices, speaking style, the language Mint answers in, captions</td></tr>
+    <tr><td>Audio</td><td>Microphone, speaker, echo cancellation, stepping aside for calls</td></tr>
+    <tr><td>Appearance</td><td>Theme, position, face, effects</td></tr>
+    <tr><td>Shortcuts</td><td>Keys for the chat, talking, dictation and the clipboard</td></tr>
+    <tr><td>Accounts &amp; keys</td><td>Your Gemini key (required), OpenAI and TypeSafe keys (optional), and Google through Internet Accounts</td></tr>
+    <tr><td>Skills &amp; Memory</td><td>What Mint has learned, and the window to edit it</td></tr>
+    <tr><td>Storage &amp; Privacy</td><td>The Mint folder, meetings, screenshots and clipboard history, the activity timeline</td></tr>
+    <tr><td>Usage</td><td>Tokens per model, today, this week or this month, and a 14-day chart</td></tr>
+    <tr><td>Updates &amp; Help</td><td>Your version, automatic updates, the guide, reporting a problem</td></tr></table></div>
+  <p><strong>Language.</strong> By default Mint answers in the language you speak. Pick one in Speaking ▸ Language (Hindi, Spanish, Japanese and 20 more) and it always speaks and writes in it.</p>
+  <p><strong>Usage.</strong> Every request is counted per model: requests, input and output tokens. Only counts, never what was said. Free Gemini keys cost nothing; they have daily limits, and this page shows how close you are.</p>
+  <p><strong>Google.</strong> Add your Google account in System Settings ▸ Internet Accounts (Accounts &amp; keys has a button). Gmail lands in Mail and your Google calendars in Calendar, and Mint works with both on your Mac, with no sign-in to Mint and no server in between.</p>
   <p>Mint is invisible in screen shares by default; “be visible” shows it in a Google Meet or Zoom share.</p>
+</section>
+
+<section id="updates" data-group="Settings">
+  <h2>Updates</h2>
+  <p class="lead">Hey Mint updates itself. When a new version is out, it downloads in the background and installs while you're away from the Mac, replacing the app in place and reopening it. No second copy, and your permissions stay.</p>
+  <p>Each update is checked before it is installed: its checksum must match the release, and it must be signed with the same certificate as the app you have. Anything else is refused. Turn it off, or check by hand, in Settings ▸ Updates &amp; Help. The first version with updates (0.3.0) is installed by hand once; after that it's automatic.</p>
+</section>
+
+<section id="report" data-group="Help">
+  <h2>Report a problem</h2>
+  <p class="lead">Something went wrong? Choose <b>Report a problem…</b> in the menu bar (or Settings ▸ Updates &amp; Help). A new GitHub issue opens in your browser with your version and macOS filled in.</p>
+  <p>The recent errors from Mint's log are copied to your clipboard, with paths, emails, keys and everything you or Mint said removed, so you can paste them in if you like. Nothing is sent until you submit the issue yourself.</p>
 </section>
 
 <section id="safety" data-group="Settings">

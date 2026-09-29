@@ -20,6 +20,17 @@ def test_autopilot():
     run("autopilot")
 
 
+def test_undo():
+    """The undo journal: record, undo, redo, refusals, expiry (fake inverses, a temporary journal)."""
+    run("undo")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="hdiutil and codesign are macOS tools")
+def test_updater():
+    """Updates: versions, release checks, and in-place swaps of a dummy app (signatures, refusals)."""
+    run("updater")
+
+
 def _wake_models() -> bool:
     """openWakeWord's feature models are downloaded by install.sh, not by pip."""
     spec = importlib.util.find_spec("openwakeword")

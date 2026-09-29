@@ -148,7 +148,7 @@ def _write(path: Path, columns: list[str], rows: list[tuple[str, dict]]) -> None
 
 
 def make_spreadsheet(source: str, what: str = "", columns=None, pattern: str = "", name: str = "",
-                     open_after: bool = True) -> str:
+                     open_after: bool = True, save_to: str = "") -> str:
     from mint.core import config
     files = _files(source, pattern)
     if not files:
@@ -165,7 +165,11 @@ def make_spreadsheet(source: str, what: str = "", columns=None, pattern: str = "
         results = list(pool.map(lambda pc: (pc[0], _extract(pc[0], pc[1], cols, what)), usable))
     rows = [(p.name, r) for p, res in results for r in res["rows"]]
     title = re.sub(r"[^\w .-]", "", name or what or "Spreadsheet").strip()[:60] or "Spreadsheet"
-    out = config.storage("Spreadsheets") / f"{title} {time.strftime('%Y-%m-%d %H.%M')}.xlsx"
+    from mint.tools import saveto
+    title = re.sub(r"\.(xlsx|xls|csv)$", "", title, flags=re.I).strip() or "Spreadsheet"
+    out, moved = saveto.destination(config.storage("Spreadsheets") / f"{title}.xlsx", ".xlsx", save_to)
+    if out.parent == config.storage("Spreadsheets"):
+        out = config.storage("Spreadsheets") / f"{title} {time.strftime('%Y-%m-%d %H.%M')}.xlsx"
     _write(out, cols, rows)
     if open_after:
         import subprocess
@@ -174,14 +178,210 @@ def make_spreadsheet(source: str, what: str = "", columns=None, pattern: str = "
     preview = "; ".join(", ".join(f"{c}: {r.get(c)}" for c in cols[:4]) for _, r in rows[:3])
     return (f"Made a spreadsheet of {len(usable)} file(s), {len(rows)} row(s), columns: {', '.join(cols)}, in "
             f"{time.monotonic() - started:.0f} s. Saved: {out}" + (" and opened it" if open_after else "") + "."
+            + (f" {moved}" if moved else "")
             + (f" Skipped (nothing readable): {', '.join(skipped[:8])}." if skipped else "")
             + (f" {failed} file(s) could not be read." if failed else "")
             + (f"\nFirst rows: {preview}" if preview else ""))
 
 
-PROMPT = """Spreadsheets from files: "put my invoices / receipts / CVs / statements into a spreadsheet", "make a \
+# ---------------------------------------------------------------- edit_spreadsheet
+
+EDITABLE = {".xlsx", ".xlsm"}
+_TOTAL = re.compile(r"\s*(grand\s+)?totals?\b", re.I)
+_SET = re.compile(r"\s*([A-Za-z]{1,3}[1-9][0-9]*)\s*(?:=|:|->)\s*(.*)$", re.S)
+_SHOW = 40                      # rows shown back
+
+
+def _cells(raw) -> list[str]:
+    """One new row: a list, or text with the cells separated by '|' (or tabs)."""
+    if isinstance(raw, (list, tuple)):
+        return ["" if c is None else str(c) for c in raw]
+    text = str(raw or "")
+    return [c.strip() for c in (text.split("\t") if "\t" in text else text.split("|"))]
+
+
+def _typed(text: str):
+    """A typed-in cell: '=SUM(B2:B5)' stays a formula; numbers, amounts, percentages and dates get their type."""
+    from mint.tools.convert import _value
+    text = text.strip()
+    if text.startswith("="):
+        return text, None
+    return _value(text)
+
+
+def _number(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _shown(sheet, first: int, last: int, sums: dict[str, float]) -> str:
+    lines = []
+    for r in range(first, last + 1):
+        cells = []
+        for c in sheet[r]:
+            value = c.value
+            if isinstance(value, str) and value.startswith("=") and c.coordinate in sums:
+                value = f"{value} (= {sums[c.coordinate]:g})"
+            elif isinstance(value, dt.datetime):
+                value = value.strftime("%Y-%m-%d %H:%M")
+            elif isinstance(value, dt.date):
+                value = value.isoformat()
+            cells.append("" if value is None else str(value))
+        while cells and not cells[-1]:
+            cells.pop()
+        if cells:
+            lines.append(f"{r}: " + " | ".join(cells))
+    return "\n".join(lines)
+
+
+def _extent(ws) -> tuple[int, int, int]:
+    """(first used row, last used row, first used column) of a sheet; (1, 0, 1) when it is empty."""
+    used = [(c.row, c.column) for r in ws.iter_rows() for c in r if c.value is not None and str(c.value).strip()]
+    if not used:
+        return 1, 0, 1
+    rows = [r for r, _c in used]
+    return min(rows), max(rows), min(c for _r, c in used)
+
+
+def edit_spreadsheet(path: str, add_rows=None, set_cells=None, total: bool = False, sheet: str = "") -> str:
+    """Change an existing .xlsx in place (a backup is kept): add rows at the bottom, set cells, add or refresh a
+    Total row of =SUM formulas. With no change asked for, show what is in it."""
+    import shutil
+    import zipfile
+    from copy import copy
+
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    from mint.tools import harness as harness_tools
+    from mint.tools import undo
+    file, why = harness_tools._resolve(str(path or ""))
+    if file is None:
+        return f"FAILED: {why}"
+    if file.suffix.lower() not in EDITABLE:
+        return (f"FAILED: edit_spreadsheet changes .xlsx files; {file.name} is not one"
+                + (" (a CSV is plain text: use write_file)." if file.suffix.lower() in {".csv", ".tsv"} else "."))
+    why = harness_tools._blocked(file, write=True)
+    if why:
+        return f"FAILED: {why}"
+    rows_in = [_cells(r) for r in (add_rows or []) if any(c.strip() for c in _cells(r))]
+    sets = [str(s) for s in (set_cells or []) if str(s).strip()]
+    changing = bool(rows_in or sets or total)
+    try:
+        with zipfile.ZipFile(file) as archive:
+            parts = archive.namelist()
+    except zipfile.BadZipFile:
+        return f"FAILED: {file.name} is not a readable .xlsx (it may be damaged or password protected)."
+    extras = [what for key, what in (("xl/charts/", "charts"), ("xl/pivotTables/", "pivot tables"),
+                                     ("xl/drawings/", "pictures or shapes")) if any(p.startswith(key) for p in parts)]
+    if changing and extras:
+        return (f"FAILED: {file.name} has {' and '.join(extras)}, which editing it here would lose. Nothing was "
+                "changed; the user can make this change in Excel or Numbers.")
+    book = load_workbook(file, keep_vba=file.suffix.lower() == ".xlsm")
+    if sheet:
+        match = next((ws for ws in book.worksheets if ws.title.lower() == sheet.strip().lower()), None)
+        if match is None:
+            return f"FAILED: {file.name} has no sheet '{sheet}'; its sheets: {', '.join(book.sheetnames)}."
+        ws = match
+    else:
+        ws = book.active
+    if not changing:
+        first, last, _left = _extent(ws)
+        more = f"\n… {last - first + 1 - _SHOW} more rows" if last - first + 1 > _SHOW else ""
+        return (f"{harness_tools._short(file)}, sheet '{ws.title}' (sheets: {', '.join(book.sheetnames)}), rows "
+                f"{first}-{last}:\n{_shown(ws, first, min(last, first + _SHOW - 1), {})}{more}")
+
+    done = []
+    for text in sets:
+        found = _SET.match(text)
+        if not found:
+            return f"FAILED: '{text}' is not a cell change; write it like 'B3=250'. Nothing was changed."
+        value, shape = _typed(found.group(2))
+        cell = ws[found.group(1).upper()]
+        cell.value = value
+        if shape:
+            cell.number_format = shape
+        done.append(f"set {cell.coordinate}")
+    first, last, left = _extent(ws)
+
+    # An existing Total row at the bottom comes off and goes back below the new rows, summing them too.
+    total_row = last if last > first and _TOTAL.match(str(ws.cell(last, left).value or "")) else 0
+    label = str(ws.cell(total_row, left).value).strip() if total_row else "Total"
+    if total_row and rows_in:
+        ws.delete_rows(total_row)
+        last -= 1
+    template = max(last, 1)
+    for cells in rows_in:
+        last += 1
+        for i, text in enumerate(cells):
+            cell = ws.cell(last, left + i)
+            above = ws.cell(template, left + i)
+            if above.has_style:
+                cell._style = copy(above._style)
+            value, shape = _typed(text) if text.strip() else (None, None)
+            cell.value = value
+            if shape:
+                cell.number_format = shape
+    if rows_in:
+        done.append(f"added {len(rows_in)} row{'s' if len(rows_in) > 1 else ''}")
+
+    sums: dict[str, float] = {}
+    if total or (total_row and rows_in):
+        if total_row and not rows_in:
+            last -= 1                                 # refresh the Total row that is there
+        header = not any(_number(c.value) is not None for c in ws[first][left:])
+        top = first + 1 if header else first
+        target = last + 1
+        wrote = []
+        width = max((c.column for r in ws.iter_rows(min_row=first, max_row=last) for c in r
+                     if c.value is not None and str(c.value).strip()), default=left)
+        for column in range(left + 1, width + 1):
+            filled = [v for v in (ws.cell(r, column).value for r in range(top, last + 1))
+                      if v is not None and str(v).strip()]
+            numbers = [n for n in map(_number, filled) if n is not None]
+            formulas = [v for v in filled if isinstance(v, str) and v.startswith("=")]
+            if not numbers or len(numbers) + len(formulas) < len(filled) / 2:
+                continue
+            letter = get_column_letter(column)
+            cell = ws.cell(target, column, f"=SUM({letter}{top}:{letter}{last})")
+            above = ws.cell(last, column)
+            if above.has_style:
+                cell._style = copy(above._style)
+            cell.font = Font(bold=True)
+            if not formulas:                          # its value, to say back (formulas are worked out on opening)
+                sums[cell.coordinate] = sum(numbers)
+            wrote.append(f"{letter}: {cell.value}" + (f" = {sum(numbers):g}" if not formulas else ""))
+        if not wrote:
+            return f"FAILED: no column of {file.name} (sheet '{ws.title}') holds numbers to total. Nothing was changed."
+        head = ws.cell(target, left, label)
+        head.font = Font(bold=True)
+        last = target
+        done.append("a Total row (" + "; ".join(wrote) + ")")
+
+    harness_tools.BACKUPS.mkdir(parents=True, exist_ok=True)
+    backup, n = harness_tools.BACKUPS / f"{time.strftime('%Y%m%d-%H%M%S')}-{file.name}", 2
+    while backup.exists():                            # two edits in one second keep both versions
+        backup, n = backup.with_name(f"{time.strftime('%Y%m%d-%H%M%S')}-{n}-{file.name}"), n + 1
+    shutil.copy2(file, backup)
+    try:
+        book.save(file)
+    except OSError as error:
+        return f"FAILED: could not save {harness_tools._short(file)}: {error.strerror or error}"
+    undo.record("file", f"editing {harness_tools._short(file)}",
+                {"kind": "file_restore", "path": str(file), "backup": str(backup), "mtime": file.stat().st_mtime})
+    start = max(first, last - _SHOW + 1)
+    return (f"Edited {harness_tools._short(file)} (sheet '{ws.title}'): {', '.join(done)}. The previous version is "
+            f"saved at {harness_tools._short(backup)}. If it is open in Numbers or Excel, close that window without "
+            f"saving and open it again to see the change. It now reads:\n{_shown(ws, start, last, sums)}")
+
+
+PROMPT = """Changing an existing .xlsx: call edit_spreadsheet straight away, even if the file is open in \
+Numbers or Excel - never try to close or quit apps first. Spreadsheets from files: "put my invoices / receipts / CVs / statements into a spreadsheet", "make a \
 table of these PDFs" -> make_spreadsheet with the folder (or files) and what the rows are; pass columns only if \
-the user names them. It reads every file (scans too) and saves an .xlsx in Mint's Spreadsheets folder."""
+the user names them. It reads every file (scans too) and saves an .xlsx in Mint's Spreadsheets folder. Changing an \
+existing .xlsx ("add a row to budget.xlsx", "put a total at the bottom", "set B3 to 250") -> edit_spreadsheet with \
+its path: it changes the file itself (a backup is kept). Do not open it in Numbers or Excel and type into cells - \
+Numbers does not save back to .xlsx. edit_spreadsheet with only the path shows what is in it."""
 
 
 def declarations():
@@ -199,15 +399,38 @@ def declarations():
             "what": types.Schema(type=S, description="what the files are / what each row is, e.g. 'invoices'"),
             "columns": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=S),
                                     description="only if the user named them"),
-            "name": types.Schema(type=S, description="file name for the spreadsheet (optional)")},
-            required=["source"]))]
+            "name": types.Schema(type=S, description="file name for the spreadsheet (optional)"),
+            "save_to": types.Schema(type=S, description="where the user asked for it: a folder or a full .xlsx "
+                                                        "path; empty = Mint's Spreadsheets folder")},
+            required=["source"])),
+        types.FunctionDeclaration(
+            name="edit_spreadsheet",
+            description=("Change an existing Excel .xlsx file in place, without opening it: add rows at the bottom, set "
+                         "cells, add a Total row (=SUM of every number column, below the data; an existing Total row "
+                         "moves below new rows). A backup is kept. With only the path, shows what is in it. Use this "
+                         "instead of typing into Numbers or Excel."),
+            parameters=types.Schema(type=types.Type.OBJECT, properties={
+                "path": types.Schema(type=S, description="the .xlsx file, e.g. '~/Documents/budget.xlsx'"),
+                "add_rows": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=S),
+                                         description="rows to add at the bottom, one string per row with the cells "
+                                                     "in column order separated by ' | ', e.g. 'Travel | 1200'"),
+                "set_cells": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=S),
+                                          description="cells to change, e.g. 'B3=250', 'A7=Notes', 'C9==B9*2' "
+                                                      "(a formula)"),
+                "total": types.Schema(type=types.Type.BOOLEAN,
+                                      description="add a Total row at the bottom that sums the number columns"),
+                "sheet": types.Schema(type=S, description="which sheet (default: the one that opens first)")},
+                required=["path"]))]
 
 
 def tool(args: dict) -> str:
     """Up to a handful of files: answered now. More: made in the background, with a message when done."""
     import threading
+    from mint.tools import saveto
+    # Worked out now, while the request is at hand: a big job runs in the background, later.
+    save_to = str(args.get("save_to") or "") or saveto.requested(".xlsx")
     job = (str(args.get("source") or ""), str(args.get("what") or ""), args.get("columns"),
-           str(args.get("pattern") or ""), str(args.get("name") or ""))
+           str(args.get("pattern") or ""), str(args.get("name") or ""), True, save_to)
     count = len(_files(job[0], job[3]))
     if count <= 6:
         return make_spreadsheet(*job)
@@ -228,4 +451,9 @@ def tool(args: dict) -> str:
             "min). A message comes when it is ready; tell the user and carry on.")
 
 
-HANDLERS = {"make_spreadsheet": tool}
+def edit_tool(args: dict) -> str:
+    return edit_spreadsheet(str(args.get("path") or ""), args.get("add_rows"), args.get("set_cells"),
+                            args.get("total") is True, str(args.get("sheet") or ""))
+
+
+HANDLERS = {"make_spreadsheet": tool, "edit_spreadsheet": edit_tool}
