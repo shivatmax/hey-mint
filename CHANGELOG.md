@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Welcome window** (`mint/ui/onboarding.py`): the first launch opens a guided setup. It covers:
+  - your name and what to call Mint, with a live preview (a new name gets its own wake word)
+  - what you do
+  - a voice, tap to hear it
+  - Microphone, Accessibility, Screen Recording, Input Monitoring, Calendars and Reminders: each with why it's needed, its live status, and Allow (macOS's prompt, then the right Settings pane)
+  - the shortcuts as keycaps, click to change
+  - a 12-feature tour with clips
+  - "try this first" cards
+
+  Esc or Skip ends it on any page; the menu bar's **Welcome tour…** opens it again. The shortcut recorder is shared with Settings.
 - **Clipboard** (`mint/tools/clipboard.py`, `mint/ui/clipboard_window.py`): everything you copy (⌘C), every
   screenshot and everything Mint copies, kept on this Mac for 7 days. ⌃⌥V or "open my clipboard" turns the orb into
   a compact card (All · Mint · Pinned, search): tap the circles to pick several in order, then paste, copy, pin (up

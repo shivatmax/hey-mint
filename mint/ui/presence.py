@@ -231,6 +231,7 @@ class Presence:
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._add_settings(menu)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        self._row(menu, "Welcome tour…", "onboarding:show")
         self._row(menu, "Grant Accessibility…", "grant")
         self._row(menu, "Forget conversation history", "forget")
         if self.log_path:
@@ -252,6 +253,9 @@ class Presence:
         elif kind == "clipboard":
             from mint.ui import clipboard_window
             clipboard_window.window.show()
+        elif kind == "onboarding":
+            from mint.ui import onboarding
+            onboarding.onboarding.show()
         elif kind == "brain":
             from mint.ui import brain as brain_window
             brain_window.open_window(value or "skills")

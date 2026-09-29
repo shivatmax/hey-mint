@@ -94,6 +94,8 @@ DEFAULTS: dict = {
     "addressee_check": True,
     # Extra words and names for Mint to expect (see vocab.py).
     "vocabulary": [],
+    # The welcome window (onboarding.py) has been seen, finished or skipped.
+    "onboarded": False,
     # Who's who.
     "assistant_name": "Mint",
     "user_name": "",

@@ -122,7 +122,13 @@ Optional extras, each unlocking one thing:
    Security** and click **Open Anyway**. (Release builds are not notarized by Apple yet.)
 4. Paste your free [Gemini API key](https://aistudio.google.com/apikey); the OpenAI and Jev keys are optional.
    Hold <kbd>⌥</kbd> while opening Hey Mint to change keys later.
-5. Allow the **Microphone**, and switch Hey Mint on under **Accessibility** when asked, so it can click and type.
+5. The welcome window takes it from there (about two minutes, Esc skips): your name and what to call Mint, a
+   voice, each permission with why it's needed and an Allow button (Microphone is the one it needs), your
+   shortcuts, and a tour of what Mint can do. It's in the menu bar as **Welcome tour…** any time later.
+
+<p align="center">
+  <img src="docs/media/onboarding.gif" alt="The welcome window: Mint says hi, asks your name, and you pick a voice" width="560">
+</p>
 
 Your keys, settings, memory and skills live in `~/Library/Application Support/Hey Mint`. To update,
 replace the app with a newer one; your data stays.

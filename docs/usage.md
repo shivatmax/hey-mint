@@ -49,6 +49,12 @@ the accessibility tree, a menu command, AppleScript) rather than guessing pixels
 open ~/Applications/Mint.app
 ```
 
+The first launch opens the **welcome window** (Esc skips it; the menu bar's **Welcome
+tour…** brings it back). It asks your name and what to call Mint, and what you do. It lets you
+hear and pick a voice. It lists each permission with why it's needed, its live status and an Allow
+button. It shows your shortcuts as keys you can click to change, and plays a short tour of the
+main features.
+
 macOS asks for **Microphone** first. Grant **Accessibility** from the menu bar item
 (needed for clicking, typing, menus and scrolling). **Screen Recording**,
 **Automation** (per app, e.g. "Mint wants to control Google Chrome"),

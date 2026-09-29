@@ -82,6 +82,16 @@ mkdir -p "$RUNTIME"
 rm -rf "$RUNTIME/mint"
 ditto "$ROOT/mint" "$RUNTIME/mint"
 find "$RUNTIME/mint" -name '__pycache__' -type d -prune -exec rm -rf {} +
+# The welcome tour's clips (the rest stream from the guide site).
+if [[ -d "$ROOT/guide/media" ]]; then
+  mkdir -p "$RUNTIME/media/tour"
+  for clip in doing island-schedule island-meeting dictation clipboard-window convert video-edit translate drop \
+              agent island-teach island-trackers; do
+    for ext in mp4 jpg; do
+      [[ -f "$ROOT/guide/media/$clip.$ext" ]] && cp "$ROOT/guide/media/$clip.$ext" "$RUNTIME/media/tour/"
+    done
+  done
+fi
 cp "$ROOT/requirements.txt" "$RUNTIME/"
 if [[ -f "$ROOT/.env" ]]; then
   cp "$ROOT/.env" "$RUNTIME/.env"

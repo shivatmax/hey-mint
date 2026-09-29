@@ -593,9 +593,12 @@ def main() -> int:
         from Foundation import NSNotificationCenter
         observers.append(NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
             AppKit.NSApplicationWillTerminateNotification, None, None, lambda note: mint.close()))
-        # First-run onboarding: ask for Accessibility once, the way macOS apps
-        # do. It shows the system dialog; nothing blocks while it is open.
-        if not fastinput.has_accessibility():
+        # First run: the welcome window (name, voice, permissions, shortcuts, a tour).
+        # Later runs still ask for Accessibility once if it is missing, like macOS apps do.
+        from mint.ui import onboarding
+        if onboarding.needed():
+            onboarding.onboarding.show()
+        elif not fastinput.has_accessibility():
             fastinput.request_accessibility()
 
     try:

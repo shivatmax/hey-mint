@@ -452,50 +452,14 @@ class SettingsWindow:
 
     def _record_shortcut(self, button, key: str, modifier_ok: bool) -> None:
         """Wait for the next key combination (or, for dictation, one modifier on its own)."""
-        from mint.tools import fastinput
         from mint.core import hotkeys
-        if getattr(self, "_recorder", None) is not None:
-            AppKit.NSEvent.removeMonitor_(self._recorder)
-        button.setTitle_("Press the keys…")
-        names = {code: name for name, code in fastinput.KEYS.items()}
-        pending = {"modifier": None}
-        sides = {61: "right_option", 54: "right_command", 62: "right_control", 60: "right_shift", 63: "fn"}
 
         def done(value):
-            AppKit.NSEvent.removeMonitor_(self._recorder)
-            self._recorder = None
             if value is None:
                 button.setTitle_(hotkeys.display(prefs.get("shortcuts").get(key, "")) or "Not set")
             else:
                 self._set_shortcut(key, value, button)
-
-        def handle(event):
-            kind = event.type()
-            flags = int(event.modifierFlags())
-            if kind == AppKit.NSEventTypeKeyDown:
-                code = int(event.keyCode())
-                if code == 53:                                         # Esc
-                    done(None)
-                    return None
-                mods = [name for name, bit in (("ctrl", 1 << 18), ("option", 1 << 19), ("shift", 1 << 17),
-                                               ("cmd", 1 << 20)) if flags & bit]
-                name = names.get(code)
-                if name and (mods or name.startswith("f")):
-                    done("+".join(mods + [name]))
-                else:
-                    button.setTitle_("Add ⌘, ⌥, ⌃ or ⇧…")
-                pending["modifier"] = None
-                return None
-            if kind == AppKit.NSEventTypeFlagsChanged and modifier_ok:
-                code = int(event.keyCode())
-                if code in sides:
-                    if pending["modifier"] is None:
-                        pending["modifier"] = sides[code]
-                    elif pending["modifier"] == sides[code]:
-                        done(sides[code])                              # pressed and let go on its own
-            return event
-        mask = AppKit.NSEventMaskKeyDown | AppKit.NSEventMaskFlagsChanged
-        self._recorder = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, handle)
+        record_keys(modifier_ok, button.setTitle_, done)
 
     def _act(self, name: str) -> None:
         callback = self.actions.get(name)
@@ -580,3 +544,59 @@ class SettingsWindow:
 
     def _closed(self) -> None:
         self.window = None
+
+
+_recorder = [None]
+
+
+def record_keys(modifier_ok: bool, prompt, done) -> None:
+    """Main thread. Wait for the next key combination (or, when `modifier_ok`, one modifier key pressed
+    and let go on its own, like Right ⌥). prompt(text) shows what to press; done(value) gets the
+    shortcut ("ctrl+option+space", "right_option") or None on Esc. Used by Settings and onboarding."""
+    from mint.tools import fastinput
+    if _recorder[0] is not None:
+        AppKit.NSEvent.removeMonitor_(_recorder[0])
+    prompt("Press the keys…")
+    names = {code: name for name, code in fastinput.KEYS.items()}
+    pending = {"modifier": None}
+    sides = {61: "right_option", 54: "right_command", 62: "right_control", 60: "right_shift", 63: "fn"}
+
+    def finish(value):
+        if _recorder[0] is not None:
+            AppKit.NSEvent.removeMonitor_(_recorder[0])
+        _recorder[0] = None
+        done(value)
+
+    def handle(event):
+        kind = event.type()
+        flags = int(event.modifierFlags())
+        if kind == AppKit.NSEventTypeKeyDown:
+            code = int(event.keyCode())
+            if code == 53:                                             # Esc
+                finish(None)
+                return None
+            mods = [name for name, bit in (("ctrl", 1 << 18), ("option", 1 << 19), ("shift", 1 << 17),
+                                           ("cmd", 1 << 20)) if flags & bit]
+            name = names.get(code)
+            if name and (mods or name.startswith("f")):
+                finish("+".join(mods + [name]))
+            else:
+                prompt("Add ⌘, ⌥, ⌃ or ⇧…")
+            pending["modifier"] = None
+            return None
+        if kind == AppKit.NSEventTypeFlagsChanged and modifier_ok:
+            code = int(event.keyCode())
+            if code in sides:
+                if pending["modifier"] is None:
+                    pending["modifier"] = sides[code]
+                elif pending["modifier"] == sides[code]:
+                    finish(sides[code])                                # pressed and let go on its own
+        return event
+    mask = AppKit.NSEventMaskKeyDown | AppKit.NSEventMaskFlagsChanged
+    _recorder[0] = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, handle)
+
+
+def cancel_recording() -> None:
+    if _recorder[0] is not None:
+        AppKit.NSEvent.removeMonitor_(_recorder[0])
+        _recorder[0] = None
