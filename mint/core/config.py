@@ -54,7 +54,7 @@ CHUNK_SIZE = 1024
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Where everything Mint makes for the user goes (Settings > Storage), one folder per kind.
-STORAGE_KINDS = ("Documents", "Meetings", "Videos", "Agents", "Spreadsheets")
+STORAGE_KINDS = ("Documents", "Meetings", "Videos", "Agents", "Spreadsheets", "Images")
 
 
 def storage(kind: str = "") -> Path:

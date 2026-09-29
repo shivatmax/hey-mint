@@ -188,6 +188,11 @@ def phrase(name: str, args: dict) -> str:
             return f"Editing the video · {_quote(a.get('instruction') or '', 30)}".rstrip(" ·")
         case "show_card":
             return f"Showing · {_quote(a.get('title') or '', 30)}".rstrip(" ·")
+        case "make_image":
+            return {"edit": f"Changing the picture · {_quote(a.get('prompt') or '', 28)}",
+                    "open_app": "Opening Image Playground",
+                    "setup": "Setting up Image Playground"}.get(str(a.get("action") or "create"),
+                                                                f"Drawing · {_quote(a.get('prompt') or '', 30)}").rstrip(" ·")
         case "edit_spreadsheet":
             return f"Editing · {_quote(str(a.get('path', '')).rsplit('/', 1)[-1], 34)}".rstrip(" ·")
         case "agent_app":

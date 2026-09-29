@@ -14,7 +14,10 @@ def run(name: str) -> None:
     result = subprocess.run([sys.executable, str(CHECKS / f"{name}.py")], capture_output=True, text=True, timeout=600)
     # The failing lines first: CI shows only the start of the message as the error.
     failed = [line.strip() for line in result.stdout.splitlines() if "FAIL" in line]
-    assert result.returncode == 0, " | ".join(failed[:8]) + "\n" + result.stdout[-3000:] + result.stderr[-2000:]
+    crash = [line.strip() for line in result.stderr.splitlines() if line.strip()][-3:]
+    last = [line.strip() for line in result.stdout.splitlines() if line.strip()][-2:]
+    assert result.returncode == 0, (" | ".join(failed[:8] or crash or last) + f" (exit {result.returncode})\n"
+                                    + result.stdout[-3000:] + result.stderr[-2000:])
 
 
 def test_autopilot():

@@ -177,18 +177,31 @@ def _new_file(prompt: str) -> Path:
     return path
 
 
+# Image Playground's own messages (ImagePlaygroundInternal Localizable.loctable), by what they mean.
+_REFUSED = ("guardrails rejected", "safety rejected", "unable to use that", "not allowed", "rejected prompt")
+_OFF = ("turn on apple intelligence", "apple intelligence required", "image playground unavailable",
+        "image playground is not available", "is not available in your", "couldn’t be downloaded",
+        "couldn't be downloaded", "generation service is not available", "unavailable on shared devices",
+        "update required", "is out of date")
+_LATER = ("usage limit", "timed out", "try again later", "can't be completed right now", "can’t be completed right now",
+          "capabilities are unavailable", "system state")
+
+
 def _explain(text: str) -> str:
     low = text.lower()
-    if any(w in low for w in ("apple intelligence", "not available", "unavailable", "not supported", "turned off",
-                              "isn't available", "is not enabled", "not enabled")):
-        return ("FAILED: Image Playground is not available - Apple Intelligence must be on (System Settings > Apple "
-                f"Intelligence & Siri) and its image models downloaded. ({text[:160]})")
-    if any(w in low for w in ("safety", "unsafe", "guideline", "not allowed", "can't create", "cannot create",
-                              "couldn't create", "could not create", "inappropriate", "restricted", "policy",
-                              "blocked", "refus")):
+    if any(w in low for w in _REFUSED):
         return ("REFUSED: Image Playground would not make this picture (its content rules). Tell the user and "
-                f"suggest wording it differently. ({text[:160]})")
-    if any(w in low for w in ("couldn’t find", "couldn't find", "not found", "no shortcut")):
+                f"suggest describing it differently. ({text[:160]})")
+    if "selected style is not available" in low:
+        return f"FAILED: that style is not available in Image Playground right now; try another style. ({text[:120]})"
+    if any(w in low for w in _OFF) or "apple intelligence" in low:
+        return ("FAILED: Image Playground is not available - Apple Intelligence must be on (System Settings > Apple "
+                f"Intelligence & Siri) and its image support downloaded. ({text[:160]})")
+    if any(w in low for w in _LATER):
+        return f"FAILED: Image Playground can't do it right now; try again in a little while. ({text[:160]})"
+    if "could not be read" in low or "smaller image" in low:
+        return f"FAILED: Image Playground could not use that picture ({text[:160]}). Try another one."
+    if any(w in low for w in ("couldn’t find", "couldn't find", "no shortcut")):
         _state["offered"] = 0.0
         return f"FAILED: the shortcut is missing or broken ({text[:160]}). Ask again to set it up."
     return f"FAILED: Image Playground stopped with: {text[:300]}"
@@ -196,12 +209,11 @@ def _explain(text: str) -> str:
 
 def _is_image(path: Path) -> bool:
     try:
-        head = path.read_bytes()[:16]
+        head = path.read_bytes()[:12]
     except OSError:
         return False
-    return head.startswith(b"\x89PNG") or head[:3] == b"\xff\xd8\xff" or head[4:12] in (b"ftypheic", b"ftypmif1",
-                                                                                           b"ftypheix") or \
-        head[:4] in (b"MM\x00*", b"II*\x00")
+    return (head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"MM\x00*", b"II*\x00", b"GIF8"))
+            or head[4:8] == b"ftyp" or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
 
 
 def _generate(prompt: str, style: str, image: Path | None) -> tuple[Path | None, str]:
