@@ -171,9 +171,10 @@ def declarations() -> list[types.FunctionDeclaration]:
             {"tab": {**STRING, "enum": ["skills", "memory"]}}),
         _fn("show_on_screen",
             "Show the user where something is, in whatever app is in front (a PDF, a web page, a "
-            "chat, a document, code): it finds the words on screen - scrolling the window to them if "
-            "needed - and draws a box, underline, highlight, circle or arrow around them, with an "
-            "optional short note; your orb flies over beside it. Use for 'find X', 'where does it "
+            "chat, a document, code): it finds the words on screen - or, for things without words "
+            "(an icon, a button, a picture, a chart), looks at the screen for them - scrolling the "
+            "window if needed, and draws a box, underline, highlight, circle or arrow around it, with "
+            "an optional short note; your orb flies over beside it. Use for 'find X', 'where does it "
             "say', 'show me', 'point to', 'underline the part', and while explaining something on "
             "screen, to mark the exact part you are talking about.",
             {"text": {**STRING, "description": "The words to find, as they appear on screen (a few "
@@ -486,9 +487,11 @@ def prompt_text() -> str:
     from mint.tools import briefing
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
+    from mint.tools import mac as macctl
     from mint.tools import mailtriage
     from mint.tools import meetings
     from mint.tools import rewrite
+    from mint.tools import screenrec
     from mint.tools import screenshots
     from mint.tools import sheets
     from mint.app import tasks
@@ -500,7 +503,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

@@ -5,7 +5,7 @@ Each agent:
       "name": "Astra",
       "color": "#8B7CFF",
       "role": "research",                  one line, shown to Mint when it picks an agent
-      "provider": "openrouter",            every agent runs on openai/gpt-6-luna via OpenRouter
+      "provider": "openai",                every agent runs on GPT-6 Luna, straight from the OpenAI API
       "models": ["openai/gpt-6-luna"],     (set "allow_other_models": true to use others)
       "thinking": "none" | "low" | "medium",   the usual reasoning effort; Mint may pick per task
       "tools": ["web_search", "fetch_url", "write_file", ...],
@@ -37,9 +37,9 @@ log = logging.getLogger("mint.agents")
 PATH = config.PROJECT_ROOT / "agents.json"
 WORK_ROOT = Path.home() / "Documents" / "Mint" / "agents"      # default; new agents use config.storage("Agents")
 
-# The user's choice: every sub-agent runs on OpenAI's GPT-6 Luna through
-# OpenRouter, nothing else. Its thinking is set per task (none/low/medium).
-ONLY_PROVIDER, ONLY_MODEL = "openrouter", "openai/gpt-6-luna"
+# The user's choice: every sub-agent runs on OpenAI's GPT-6 Luna, straight from the
+# OpenAI API (OPENAI_API_KEY) - never OpenRouter. Its thinking is set per task.
+ONLY_PROVIDER, ONLY_MODEL = "openai", "gpt-6-luna"
 CODEX_MODEL = "gpt-6-luna"
 
 GEMINI_FAST = ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
@@ -124,7 +124,7 @@ def _normal(agent: dict) -> dict:
         agent["provider"] = "codex"
         agent["models"] = [m.split("/", 1)[-1] for m in (agent.get("models") or [CODEX_MODEL])]
     elif not agent.get("allow_other_models"):
-        # Only GPT-6 Luna on OpenRouter, even for agents made before that choice.
+        # Only GPT-6 Luna from OpenAI, even for agents made before that choice (they said OpenRouter).
         agent["provider"], agent["models"] = ONLY_PROVIDER, [ONLY_MODEL]
         agent.pop("fallback", None)
     agent.setdefault("provider", ONLY_PROVIDER)

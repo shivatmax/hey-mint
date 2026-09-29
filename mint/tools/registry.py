@@ -319,6 +319,21 @@ def tools() -> list[types.Tool]:
 
 # --- Dispatch ----------------------------------------------------------------
 
+def _calendar_tool(args: dict) -> str:
+    """The calendar as words for the model and, for today, as a schedule card on the island."""
+    days = args.get("days", 1)
+    text = skills.calendar_events(days)
+    try:
+        if int(days or 1) <= 1:
+            import datetime as _dt
+            from mint.ui.island import island
+            island.show_schedule({"day": f"{_dt.datetime.now():%A}", "date": f"{_dt.datetime.now():%-d %B}",
+                                  "events": skills.calendar_rows(), "reminders": [], "news": [], "weather": None})
+    except Exception:
+        pass
+    return text
+
+
 _SYNC = {
     "open_app": lambda a: macos.open_app(a["name"]),
     "open_url": lambda a: macos.open_url(a["url"], a.get("browser", "")),
@@ -338,7 +353,7 @@ _SYNC = {
     "get_status": lambda a: skills.get_status(),
     "notify": lambda a: skills.notify(a["title"], a.get("message", "")),
     "system_action": lambda a: skills.system_action(a["action"]),
-    "calendar_events": lambda a: skills.calendar_events(a.get("days", 1)),
+    "calendar_events": lambda a: _calendar_tool(a),
     "create_reminder": lambda a: skills.create_reminder(a["title"], a.get("in_minutes"), a.get("when")),
     "create_note": lambda a: skills.create_note(a["title"], a.get("body", "")),
     "compose_email": lambda a: skills.compose_email(a.get("to", ""), a.get("subject", ""), a.get("body", "")),
@@ -603,9 +618,11 @@ _tools_before_power = tools
 def _power_modules():
     from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import briefing
+    from mint.tools import mac as macctl
     from mint.tools import mailtriage
     from mint.tools import meetings
     from mint.tools import rewrite
+    from mint.tools import screenrec
     from mint.tools import screenshots
     from mint.tools import sheets
     from mint.knowledge import teach
@@ -613,7 +630,7 @@ def _power_modules():
     from mint.tools import translate
     from mint.ui import tutor
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage)
+            mailtriage, macctl, screenrec)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -632,7 +649,8 @@ def _power(name: str):
 
 _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
-                                                  "find_screenshot", "translate_screen", "mail")})
+                                                  "find_screenshot", "translate_screen", "mail", "mac",
+                                                  "screen_record")})
 
 
 # --- Tasks that last: sub-steps, replanning, resuming (tasks.py; run by the session) --

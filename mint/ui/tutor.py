@@ -1207,6 +1207,18 @@ def active() -> bool:
     return _lesson is not None
 
 
+def snapshot() -> dict:
+    """For the island: {"task", "index", "total", "say"} during a lesson, {"planning": task} while one is
+    being planned, else {}."""
+    lesson, planning = _lesson, _planning
+    if lesson is not None:
+        step = lesson["steps"][lesson["index"]]
+        return {"task": lesson["task"], "index": lesson["index"], "total": len(lesson["steps"]), "say": step["say"]}
+    if planning is not None:
+        return {"planning": planning[1]}
+    return {}
+
+
 def keep_loaded() -> bool:
     """A lesson is running: Mint must stay loaded to watch for the user's clicks."""
     return active()

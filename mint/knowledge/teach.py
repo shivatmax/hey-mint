@@ -1392,6 +1392,18 @@ def recording() -> bool:
         return _rec is not None and not _rec.stopping.is_set()
 
 
+def snapshot() -> dict:
+    """For the island: {"seconds", "clicks", "keys", "goal", "auto_stopped"} while watching, else {}."""
+    with _lock:
+        rec = _rec
+        if rec is None or rec.stopping.is_set():
+            return {}
+        events = list(rec.events)
+        return {"seconds": rec.t(), "clicks": sum(1 for e in events if e["type"] in ("click", "drag")),
+                "keys": sum(1 for e in events if e["type"] in ("char", "shortcut", "key")),
+                "goal": rec.goal, "auto_stopped": rec.auto_stopped}
+
+
 # --- the tool --------------------------------------------------------------------------------
 
 PROMPT = """Teach by showing: when the user wants to SHOW you how to do something - "watch me do this", \

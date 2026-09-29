@@ -107,6 +107,10 @@ cp "$(cd launcher/engine && xcrun swift build -c release --show-bin-path)/JevDes
 echo "Building the meeting recorder…"
 xcrun swiftc -O -target arm64-apple-macos14.2 launcher/recorder/*.swift -o "$APP/Contents/MacOS/MintRecorder" \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/recorder/Info.plist
+# Screen recordings: ScreenCaptureKit into an .mp4 (launcher/screenrec).
+echo "Building the screen recorder…"
+xcrun swiftc -O -target arm64-apple-macos14.2 launcher/screenrec/*.swift -o "$APP/Contents/MacOS/MintScreen" \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/screenrec/Info.plist
 "$PY" launcher/make_icon.py "$RES/Mint.icns" >/dev/null
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -166,6 +170,7 @@ while IFS= read -r -d '' file; do
 done < <(find "$RES" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) -print0)
 codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintengine" "$APP/Contents/MacOS/MintEngine"
 codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintrecorder" "$APP/Contents/MacOS/MintRecorder"
+codesign "${sign_flags[@]}" --identifier "$IDENTIFIER.mintscreen" "$APP/Contents/MacOS/MintScreen"
 codesign "${sign_flags[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 

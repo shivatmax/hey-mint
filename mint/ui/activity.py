@@ -61,7 +61,7 @@ _KIND = {
     "watch_video": "look", "automation": "timer", "recall_history": "search",
     "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
     "teach": "look", "tutor": "look", "briefing": "calendar", "shortcut": "open", "find_screenshot": "search",
-    "translate_screen": "look", "mail": "mail",
+    "translate_screen": "look", "mail": "mail", "mac": "system", "screen_record": "shot",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -173,6 +173,15 @@ def phrase(name: str, args: dict) -> str:
         case "tidy":
             return {"apply": "Tidying the folder", "undo": "Putting files back", "cancel": "Dropping the plan"}.get(
                 str(a.get("action")), f"Planning a tidy-up · {_quote(a.get('folder') or 'Downloads', 30)}")
+        case "mac":
+            control = str(a.get("control", "")).replace("_", " ")
+            return f"{control.capitalize()} · {_quote(a.get('value') or a.get('app') or '', 26)}".rstrip(" ·")
+        case "screen_record":
+            action = str(a.get("action") or "start")
+            if action == "start":
+                return f"Screen recording · {_quote(a.get('region') or a.get('app') or a.get('target') or 'screen', 26)}"
+            return {"stop": "Stopping the recording", "confirm": "Recording the area", "cancel": "Dropping the area",
+                    "status": "Checking the recording"}.get(action, "Screen recording")
         case "translate_screen":
             return f"Translating the screen · {_quote(a.get('target') or 'English', 20)}"
         case "mail":

@@ -225,6 +225,16 @@ def show(query: str, style: str = "box", note: str = "", scroll: bool = True, se
             scrolled = f", after scrolling {direction} {moved} time{'s' if moved != 1 else ''}" if moved else ""
             return (f"Showing '{query}'{where} with a {style} ({how}{scrolled})."
                     + (f" Note shown: '{note}'." if note else "") + " It stays for about 10 seconds.")
+        if reads == 1:
+            # Not words on screen - "the share button", "the gear icon", "the chart": look at the
+            # screenshot itself for it, before scrolling away from what the user is looking at.
+            found = _look_for(query)
+            if found is not None:
+                box, label = found
+                marks.show([box], style, note, seconds)
+                _visit(box)
+                return (f"Showing {label}{where} with a {style} (found by looking at the screen, not by its "
+                        "words)." + (f" Note shown: '{note}'." if note else "") + " It stays for about 10 seconds.")
         if not scroll:
             break
         seen = tuple(l["text"] for l in scoped[:40])
@@ -239,6 +249,23 @@ def show(query: str, style: str = "box", note: str = "", scroll: bool = True, se
     visible = "; ".join(l["text"][:40] for l in scoped[:8])
     return (f"FAILED: could not find '{query}'{where}" + (" even after scrolling the whole way" if scroll else "")
             + f". Nothing was marked. Visible text includes: {visible}")
+
+
+def _look_for(query: str):
+    """(box, label) of a thing the words search missed, found on a screenshot by Gemini; None when it is not
+    on the screen (or the look failed)."""
+    from mint.tools import screenrec
+    try:
+        box, label = screenrec.locate(query, point=True)
+    except LookupError as error:
+        log.info("look for %r: %s", query, error)
+        return None
+    except Exception as error:
+        log.info("look for %r failed: %s", query, str(error)[:160])
+        return None
+    x, y, w, h = box
+    pad = 4.0                                      # a hair of room, so the mark does not cut into it
+    return (x - pad, y - pad, w + 2 * pad, h + 2 * pad), label
 
 
 def mark_area(x: float, y: float, w: float, h: float, style: str = "box", note: str = "",

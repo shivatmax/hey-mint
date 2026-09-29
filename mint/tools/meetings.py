@@ -249,6 +249,63 @@ def guess_title() -> str:
 #   {"starting": True, "title", "started"}      while start() guesses the title and launches the recorder
 #   {"proc", "folder", "title", "started", ...} recording ({"stopping": True} once it is being stopped)
 
+# --- The call Mint has noticed (set by the session when a call app takes the mic) ------------
+
+_call: dict = {}
+
+
+def call_started(app: str) -> None:
+    """A call app took the microphone: the recorder control appears. Its title is looked up aside."""
+    with _lock:
+        if _call.get("app"):
+            return
+        _call.update(app=app, since=time.time(), title="")
+
+    def look():
+        try:
+            title = guess_title()
+        except Exception:
+            title = ""
+        with _lock:
+            if _call.get("app") == app:
+                _call["title"] = title
+    threading.Thread(target=look, daemon=True, name="meeting-title").start()
+
+
+def call_ended() -> None:
+    with _lock:
+        _call.clear()
+
+
+def on_call() -> dict:
+    """{"app", "since", "title"} while a call has the microphone, else {}."""
+    with _lock:
+        return dict(_call)
+
+
+def phase() -> str:
+    """starting | recording | stopping | "" - for the recorder control."""
+    with _lock:
+        if _rec.get("starting"):
+            return "starting"
+        if _rec.get("stopping"):
+            return "stopping"
+        if is_recording():
+            return "recording"
+        return "starting" if _rec else ""
+
+
+def current_title() -> str:
+    with _lock:
+        return str(_rec.get("title") or "")
+
+
+def processing() -> dict:
+    """Meetings whose notes are being written: folder -> what is happening."""
+    with _lock:
+        return dict(_processing)
+
+
 def is_recording() -> bool:
     with _lock:
         proc = _rec.get("proc")
@@ -336,6 +393,7 @@ def _reader(rec: dict, started: threading.Event) -> None:
                 "recorded; tell the user briefly.)")
         return
     # Nothing was recorded (a permission refused, the device gone at once): no empty meeting is left behind.
+    _stop_video(rec)
     _drop(rec)
     shutil.rmtree(folder, ignore_errors=True)
     if answered:
@@ -379,7 +437,9 @@ def _watch_call(rec: dict) -> None:
             return
 
 
-def start(title: str = "") -> str:
+def start(title: str = "", video: bool = False, mic: bool = True) -> str:
+    """Record the meeting's audio (the user's mic and the call) - and with `video`, the call's window too,
+    into the same folder."""
     global _rec
     with _lock:
         if _rec.get("starting"):
@@ -407,9 +467,14 @@ def start(title: str = "") -> str:
             n += 1
         folder.mkdir(parents=True)
         os.chmod(folder, 0o700)
-        _write_meta(folder, {"title": title, "started": now.isoformat(timespec="seconds"), "status": "recording"})
+        meta = {"title": title, "started": now.isoformat(timespec="seconds"), "status": "recording"}
+        earlier = _earlier_part(title, now)
+        if earlier is not None:
+            meta["continues"] = earlier.name
+        _write_meta(folder, meta)
         try:
-            proc = subprocess.Popen([str(binary), "record", "--out", str(folder), "--seconds", str(MAX_RECORDING)],
+            proc = subprocess.Popen([str(binary), "record", "--out", str(folder), "--seconds", str(MAX_RECORDING)]
+                                    + ([] if mic else ["--no-mic"]),
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                     text=True, bufsize=1)
         except OSError as error:
@@ -450,6 +515,20 @@ def start(title: str = "") -> str:
                 "or system audio - approve it.")
     what = ("your microphone and the call audio" if tracks.get("you") and tracks.get("others")
             else "only your microphone" if tracks.get("you") else "only the call audio")
+    if video:
+        from mint.tools import screenrec
+        call = on_call()
+        answer = screenrec.record_meeting_video(folder / "video.mp4", call.get("app", ""), call.get("title", ""),
+                                                mic=mic)
+        if screenrec.recording_file() == str(folder / "video.mp4"):
+            with _lock:
+                rec["video"] = str(folder / "video.mp4")
+            meta = _read_meta(folder)
+            meta["video"] = "video.mp4"
+            _write_meta(folder, meta)
+            what += ", and a video of " + (answer.split("Recording ", 1)[-1].split(" (")[0] or "the call")
+        else:
+            what += f" (the video did not start: {answer[:160]})"
     text = f"Recording '{title}' - {what}. Say 'stop recording' when the meeting ends."
     if warnings:
         text += " Note: " + "; ".join(warnings)
@@ -459,6 +538,7 @@ def start(title: str = "") -> str:
 def _finish_recording(rec: dict, reason: str = "") -> Path:
     """Close the recorder's paperwork for `rec` and start the transcript and notes in the background."""
     global _rec
+    _stop_video(rec)
     folder = rec["folder"]
     with _lock:
         if _rec is rec:
@@ -511,6 +591,113 @@ def _stop(rec: dict | None, reason: str = "") -> str:
 
 def stop() -> str:
     return _stop(None)
+
+
+def _stop_video(rec: dict) -> None:
+    """The meeting's video ends with its audio."""
+    if not rec.get("video"):
+        return
+    try:
+        from mint.tools import screenrec
+        if screenrec.recording_file() == rec["video"]:
+            screenrec.stop()
+    except Exception:
+        log.exception("stopping the meeting video")
+
+
+def has_video() -> bool:
+    with _lock:
+        return bool(_rec.get("video"))
+
+
+CONTINUE_WITHIN = 15 * 60    # a meeting restarted this soon under the same title is the same meeting
+
+
+def _earlier_part(title: str, now: dt.datetime) -> Path | None:
+    """The recording of this same meeting that was stopped minutes ago (stopped by mistake, then started
+    again): its transcript goes into this part's notes."""
+    try:
+        folders = sorted((f for f in meetings_root().iterdir() if f.is_dir()), key=lambda f: f.name, reverse=True)
+    except OSError:
+        return None
+    for folder in folders[:6]:
+        meta = _read_meta(folder)
+        if meta.get("title", "").strip().lower() != title.strip().lower() or not meta.get("ended"):
+            continue
+        try:
+            ended = dt.datetime.fromisoformat(meta["ended"])
+        except ValueError:
+            continue
+        if 0 <= (now - ended).total_seconds() <= CONTINUE_WITHIN:
+            return folder
+    return None
+
+
+def _earlier_transcript(meta: dict, folder: Path) -> str:
+    """The transcripts of the earlier parts of this meeting (oldest first), for its notes."""
+    parts, seen = [], set()
+    while meta.get("continues") and meta["continues"] not in seen:
+        seen.add(meta["continues"])
+        earlier = folder.parent / meta["continues"]
+        try:
+            parts.insert(0, (earlier / "transcript.md").read_text())
+        except OSError:
+            break
+        meta = _read_meta(earlier)
+    if not parts:
+        return ""
+    return ("EARLIER PART(S) OF THIS SAME MEETING (the recording was stopped and started again; its timestamps "
+            "restart at 0:00):\n" + "\n".join(parts) + "\nTHE PART RECORDED NOW:\n")
+
+
+def _snapshot(folder: Path, scratch: Path) -> float:
+    """Copies of the tracks being recorded, with WAV headers that match what is written so far.
+    -> seconds recorded."""
+    import struct
+    longest = 0
+    for name, _label in TRACKS:
+        source = folder / f"{name}.wav"
+        if not source.exists():
+            continue
+        data = source.read_bytes()
+        body = (len(data) - 44) // 2 * 2
+        if body <= 0:
+            continue
+        head = bytearray(data[:44])
+        struct.pack_into("<I", head, 4, 36 + body)
+        struct.pack_into("<I", head, 40, body)
+        (scratch / f"{name}.wav").write_bytes(bytes(head) + data[44:44 + body])
+        longest = max(longest, body)
+    return longest / 32000
+
+
+def notes_so_far(folder: Path | None = None) -> str:
+    """Transcript and notes of the meeting being recorded, up to now - the recording goes on."""
+    import tempfile
+    with _lock:
+        if folder is None:
+            if not is_recording():
+                return "No meeting is being recorded right now."
+            folder = _rec["folder"]
+    folder = Path(folder)
+    meta = _read_meta(folder)
+    scratch = Path(tempfile.mkdtemp(prefix="mint-meeting-"))
+    try:
+        meta["seconds"] = round(_snapshot(folder, scratch), 1)
+        if meta["seconds"] < 5:
+            return "The recording has only just started - nothing to summarise yet."
+        rows = transcribe(scratch)
+        transcript = transcript_markdown(rows, meta)
+        if not rows and not meta.get("continues"):
+            return f"Nothing has been said yet in the {_duration(meta['seconds'])} recorded."
+        notes, _model = write_notes(folder, _earlier_transcript(meta, folder) + transcript, meta)
+        (folder / "notes so far.md").write_text(notes)
+        (folder / "transcript so far.md").write_text(transcript)
+        return (f"(The meeting '{meta.get('title')}' is STILL being recorded - notes of the first "
+                f"{_duration(meta['seconds'])}, saved in {folder}/notes so far.md; the full notes come when it "
+                "ends. Tell the user the gist briefly, or answer what they asked from it.)\n\n" + notes[:3000])
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def status() -> str:
@@ -1046,7 +1233,7 @@ def process(folder: Path, compress: bool = True) -> dict:
         with _lock:
             _processing[key] = "writing notes"
         if rows:
-            notes, model = write_notes(folder, transcript, meta)
+            notes, model = write_notes(folder, _earlier_transcript(meta, folder) + transcript, meta)
             meta["notes_model"] = model
             found = re.match(r"#\s+(.+)", notes)
             if found and (not meta.get("title") or meta["title"] == "Meeting" or meta["title"].endswith(" call")):
@@ -1054,6 +1241,8 @@ def process(folder: Path, compress: bool = True) -> dict:
         else:
             notes = f"# {meta.get('title') or 'Meeting'}\n\n**Date:** {_when(meta)}\n\nNo speech was recognised.\n"
         (folder / "notes.md").write_text(notes)
+        for name in ("notes so far.md", "transcript so far.md"):
+            (folder / name).unlink(missing_ok=True)
         (folder / "transcript.md").write_text(transcript_markdown(rows, meta))   # with the final title
         # Anything left out: "partial", and the audio stays as it is (WAV) for action=retry.
         complete = not failed and not cut
@@ -1277,8 +1466,13 @@ def listing(which: str = "") -> str:
 
 PROMPT = """Meetings: Mint can record a call on this Mac without joining it (Google Meet, Zoom, Teams, Slack \
 huddles, FaceTime - both the user's mic and the call audio), then write a transcript and notes. "record this \
-meeting", "take notes of this call", "start recording" -> meeting action=start (pass title only if the user \
-names the meeting). "stop recording", "the meeting is over" -> action=stop; the notes arrive later by \
+meeting", "take notes of this call", "start recording" during a call -> meeting action=start (video=true for \
+"record the meeting with video" / "video and transcript") (a video of \
+the screen - "record my screen", "start video recording" - is screen_record instead) (pass title only if the user \
+names the meeting). While recording, "what's been said so far?", "summary so far", "give me the transcript \
+and summary", "what did they say about X?" -> action=so_far: it does NOT stop the recording - never stop a \
+meeting unless the user says it is over or says stop. "stop recording", "the meeting is over" -> action=stop (when only a screen recording is running, \
+screen_record stop); the notes arrive later by \
 themselves (recording also stops by itself a few minutes after the call ends, or after 4 hours). \
 If notes came out partial or were interrupted, "try the notes again" -> action=retry (which= optional). \
 For questions about a past meeting - "what did we decide in the Acme call?", "my action items from \
@@ -1299,13 +1493,17 @@ def declarations():
         name="meeting",
         description=("Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as "
                      "two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in "
-                     "Mint's Meetings folder. Actions: start, stop, status, list (past meetings, optionally "
+                     "Mint's Meetings folder. Actions: start, stop, so_far (transcript and notes of the meeting being "
+                     "recorded, up to now - the recording goes on), status, list (past meetings, optionally "
                      "matching `which`), open (the notes of one past meeting, to answer questions about it), "
                      "retry (write the transcript and notes again for `which`, else the latest partial or "
                      "interrupted meeting), reminders (turn the meeting's action items into Reminders: the "
                      "user's own, or everyone's with everyone=true)."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=S, enum=["start", "stop", "status", "list", "open", "retry", "reminders"]),
+            "action": types.Schema(type=S, enum=["start", "stop", "so_far", "status", "list", "open",
+                                                                "retry", "reminders"]),
+            "video": types.Schema(type=types.Type.BOOLEAN, description="start: also record a video of the call's "
+                                                                       "window (with sound) - 'record the meeting with video'"),
             "title": s(S, "start: the meeting's name if the user gave one (otherwise it is guessed from the "
                           "calendar or the call)"),
             "which": s(S, "open/list/retry: which meeting, as the user said it - 'Acme call', 'yesterday's standup', "
@@ -1319,9 +1517,11 @@ def declarations():
 def tool(args: dict) -> str:
     action = str(args.get("action") or "status").lower()
     if action == "start":
-        return start(str(args.get("title") or ""))
+        return start(str(args.get("title") or ""), bool(args.get("video")))
     if action == "stop":
         return stop()
+    if action == "so_far":
+        return _so_far_tool()
     if action == "list":
         return listing(str(args.get("which") or ""))
     if action == "open":
@@ -1331,6 +1531,28 @@ def tool(args: dict) -> str:
     if action == "reminders":
         return to_reminders(str(args.get("which") or ""), bool(args.get("everyone")))
     return status()
+
+
+def _so_far_tool() -> str:
+    """Answers within 25 s; a long meeting's notes so far arrive a little later as a message."""
+    state: dict = {}
+
+    def run():
+        try:
+            state["result"] = notes_so_far()
+        except Exception as error:
+            log.exception("notes so far")
+            state["result"] = f"FAILED: could not write the notes so far: {error}"
+        if state.get("late"):
+            _notify(state["result"])
+    worker = threading.Thread(target=run, daemon=True, name="meeting-so-far")
+    worker.start()
+    worker.join(25)
+    if worker.is_alive():
+        state["late"] = True
+        return ("Writing the notes so far - the recording goes on. They come as a message in a moment; tell the "
+                "user in a few words.")
+    return state["result"]
 
 
 HANDLERS = {"meeting": tool}

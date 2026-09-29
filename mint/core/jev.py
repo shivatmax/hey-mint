@@ -59,6 +59,13 @@ class Pick:
         return self.id is not None and self.confidence >= 0.5
 
 
+_in_flight = [0]      # calls under way (no lock: a hint for low-priority callers like moods)
+
+
+def in_flight() -> int:
+    return _in_flight[0]
+
+
 def choose(question: str, options: dict[str, str], context: dict | None = None,
            timeout: float = 6.0, instructions: str | None = None) -> Pick | None:
     """Ask Jev which option `question` means. Returns None if Jev is unreachable.
@@ -89,12 +96,15 @@ def choose(question: str, options: dict[str, str], context: dict | None = None,
     request = urllib.request.Request(
         URL, data=json.dumps(body).encode(), method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    _in_flight[0] += 1
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             answer = json.load(response)["answers"]["pick"]
     except Exception as error:
         log.warning("Jev unavailable: %s", str(error).replace(key, "[redacted]")[:120])
         return None
+    finally:
+        _in_flight[0] -= 1
     chosen = answer.get("choice")
     return Pick(
         id=None if chosen == "none" else chosen,

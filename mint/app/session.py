@@ -442,24 +442,26 @@ class Mint:
                     free_since = 0.0
 
     def _offer_meeting_notes(self, app: str) -> None:
-        """A call started: offer to take notes (Settings > Storage & Privacy), once per call.
-        Mint has let go of the mic for the call, so the offer is a notification and the menu
-        bar's "Record meeting" - one click."""
+        """A call started: the orb turns into the recorder (island.py) - Settings > Storage & Privacy
+        turns the offer off. Mint has let go of the mic for the call, so it is one click, not a word."""
         from mint.tools import meetings
         from mint.core import prefs
-        from mint.tools import everyday as skills
+        meetings.call_started(app)
         if not prefs.get("meeting_offer") or meetings.is_recording():
             return
         if time.monotonic() - getattr(self, "_meeting_offered", -1e9) < 1800:
             return
         self._meeting_offered = time.monotonic()
-        skills.notify(f"{prefs.name()} can take notes of this call",
-                      f"{app} is on a call. Click {prefs.name()} in the menu bar ▸ Record meeting - "
-                      "you get a transcript and notes at the end.")
-        self.ui.action("On a call? Menu bar ▸ Record meeting")
+        # The orb itself turns into the recorder (island.py); no notification on top of it.
+        self.ui.action("On a call? Tap ● to record it")
 
     def _take_mic_back(self) -> None:
         name, self._mic_lent_to = self._mic_lent_to, ""
+        try:
+            from mint.tools import meetings
+            meetings.call_ended()
+        except Exception:
+            pass
         threading.Thread(target=self.audio.resume, daemon=True).start()
         self._print(f"[{name} is done with the microphone - Mint is listening again]")
         self._state(self._idle_state())
@@ -1970,9 +1972,10 @@ class Mint:
             if automations.keep_loaded():     # a folder/app watcher, or one due within minutes
                 return False
             from mint.tools import meetings
+            from mint.tools import screenrec
             from mint.knowledge import teach
             from mint.ui import tutor
-            if tutor.keep_loaded() or teach.recording() or meetings.busy():
+            if tutor.keep_loaded() or teach.recording() or meetings.busy() or screenrec.busy():
                 return False
         except Exception:
             pass

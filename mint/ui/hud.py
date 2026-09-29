@@ -241,6 +241,12 @@ class HUD:
         except Exception:
             import logging
             logging.getLogger("mint.ui.hud").exception("emotes failed to attach")
+        # The island: the orb turns into a recorder, a schedule card, a lesson... (island.py).
+        try:
+            from mint.ui import island
+            island.attach(self)
+        except ImportError:
+            pass
 
     # --- geometry -----------------------------------------------------------------------
 
@@ -639,7 +645,8 @@ class HUD:
         over = dist < D * 0.75
         # Clickable only on the orb itself; everywhere else the window is air.
         dragging = bool(AppKit.NSEvent.pressedMouseButtons() & 1) and self._interactive
-        want = over or dragging
+        # While the orb has turned into the island (island.py), the island takes the clicks.
+        want = (over or dragging) and not getattr(self, "island_active", False)
         if want != self._interactive:
             self._interactive = want
             self._orb_window.setIgnoresMouseEvents_(not want)

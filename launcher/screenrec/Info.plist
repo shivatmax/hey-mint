@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>local.jarvis.screen</string>
+	<key>CFBundleName</key>
+	<string>MintScreen</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Mint records your voice with a screen recording only when you ask it to include the microphone.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Mint records the sound your Mac plays with a screen recording only when you ask it to.</string>
+</dict>
+</plist>

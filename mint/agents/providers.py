@@ -74,8 +74,8 @@ def check_keys() -> dict:
     "via OpenRouter" and only then find the OpenRouter key expired."""
     import httpx
     results = {}
-    probes = {"openrouter": ("https://openrouter.ai/api/v1/key", None),
-              "openai": (os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") + "/models", None)}
+    # Only OpenAI: agents never use OpenRouter (the user's choice), so its key is not even checked.
+    probes = {"openai": (os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") + "/models", None)}
     for provider, (url, _) in probes.items():
         key = os.environ.get(KEYS[provider], "")
         if not key:
@@ -113,12 +113,13 @@ def route(agent: dict) -> tuple[str, list[str], str]:
         if codex.problem():
             raise NoProvider(codex.problem())
         return "codex", models, ""
-    if provider == "openrouter" and (not available("openrouter") or key_problem("openrouter")) \
-            and available("openai") and all(m.startswith("openai/") for m in models):
-        # The same model straight from OpenAI, while the OpenRouter key does not work
-        # (it answered "API key expired" in testing).
-        why = "expired or refused" if key_problem("openrouter") else "missing"
-        return "openai", _direct(models), f"OpenRouter key {why}; using OpenAI directly (same model)"
+    if provider == "openrouter":
+        # Never OpenRouter (the user's rule): the same model, straight from OpenAI.
+        provider, models = "openai", _direct(models)
+    if provider == "openai":
+        if not available("openai"):
+            raise NoProvider("Agents run on GPT-6 Luna from OpenAI, and there is no OPENAI_API_KEY in .env.")
+        return "openai", models or ["gpt-6-luna"], ""
     if available(provider):
         return provider, models, ""
     fallback = agent.get("fallback") or {"provider": "gemini", "models": []}

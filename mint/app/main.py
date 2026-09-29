@@ -481,7 +481,8 @@ def main() -> int:
         from mint.tools import meetings
 
         def run():
-            result = meetings.start() if action == "start" else meetings.stop()
+            result = (meetings.start() if action == "start" else meetings.start(video=True) if action == "video"
+                      else meetings.stop())
             print(f"  [meeting {action}] {result}", flush=True)
             presence.action(("● Recording the meeting" if meetings.is_recording() else result)[:90])
         if action == "folder":
@@ -490,6 +491,7 @@ def main() -> int:
         threading.Thread(target=run, daemon=True, name=f"meeting-{action}").start()
     presence.on("meeting_start", lambda *_: meeting("start"))
     presence.on("meeting_stop", lambda *_: meeting("stop"))
+    presence.on("meeting_video", lambda *_: meeting("video"))
     presence.on("meeting_folder", lambda *_: meeting("folder"))
     presence.on("train_voice", train_voice)
     presence.on("forget_voice", forget_voice)

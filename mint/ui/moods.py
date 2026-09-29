@@ -1,6 +1,14 @@
 """Mint shows feelings on its own during a conversation, not only when asked.
 
-Instant and local: the words themselves are read as they arrive (no model call).
+Two layers:
+
+* Instant: unmistakable words as they arrive ("haha", "love you", "thank you",
+  "wow", hello and goodbye) - no model call.
+* Context: when you finish speaking, and again once Mint's reply is out, Jev reads
+  the last few exchanges and picks the feeling that fits - or none. So a sad
+  story gets a sad face even without the word "sad", your joke gets a laugh, good
+  news for you gets applause, a sweet moment gets hearts - and "sorry, which
+  file?" does NOT make it cry.
 
 * What Mint says: good news -> a smile, a joke -> a laugh, "sorry, I couldn't"
   -> a sad face, "hmm, let me think" -> thinking, "wow" -> surprised, hello or
@@ -35,8 +43,6 @@ COOL_GAP = 12.0             # sunglasses: not more often than this
 
 # (pattern, expression, chance) - first match wins, so the strongest feelings go first.
 MINT_RULES = [
-    (r"\b(sorry|unfortunately|sadly|i apologi[sz]e)\b", "cry", 0.8),
-    (r"\b(couldn'?t|could not|wasn'?t able|unable to|failed to|didn'?t work)\b", "cry", 0.55),
     (r"\b(ha(ha)+|lol|funny|hilarious|joke)\b|😂|🤣", "laugh", 1.0),
     (r"\b(congrat\w*|well done|great job|proud of you|you did it|bravo)\b", "clap", 1.0),
     (r"\b(love (it|that|you)|adorable|so sweet|aww+)\b|❤|💕", "love", 1.0),
@@ -48,14 +54,10 @@ MINT_RULES = [
     (r"\b(hmm+|let me think|good question|interesting question|let me see)\b|🤔", "thinking", 0.9),
     (r"\b(just kidding|our (little )?secret|between us)\b|😉", "wink", 1.0),
     (r"\b(you('?re| are) welcome|my pleasure|happy to help|anytime|of course)\b|😊", "smile", 0.8),
-    (r"\b(great|awesome|perfect|excellent|fantastic|nice|all set|done|here you go|ready)\b", "smile", 0.35),
 ]
 
 USER_RULES = [
-    (r"\b(stupid|dumb|useless|idiot|hate you|you suck|shut up|worst)\b", "cry", 0.9),
     (r"\b(love you|i love (it|this|that|mint))\b|❤|😍", "love", 1.0),
-    (r"\b(i'?m|i am|feeling|feel) (so )?(sad|down|tired|stressed|upset|lonely|exhausted|awful)\b|"
-     r"\b(bad day|rough day)\b|😢|😞", "love", 1.0),
     (r"\b(thank(s| you)|thx|ty)\b|🙏", "blush", 0.9),
     (r"\b(good job|great job|well done|nice work|you('?re| are) (the best|amazing|awesome|great|so cute|cute)|"
      r"good (girl|boy|bot)|smart)\b", "blush", 1.0),
@@ -63,6 +65,27 @@ USER_RULES = [
     (r"\b(wow|whoa|no way)\b", "surprised", 0.8),
     (r"\b(hello|hi|hey|good (morning|evening)|bye|good night)\b", "wave", 0.5),
 ]
+
+# What Jev may pick from, for the conversation's context.
+FEELINGS = {
+    "laugh": "funny: a joke, teasing, something silly or witty - worth laughing at",
+    "cry": "sad: bad news, loss, disappointment, someone hurt or upset, a sad story",
+    "love": "sweet or affectionate: kindness, care, cute things, comforting someone who is down",
+    "blush": "the user praises, thanks or compliments Mint",
+    "clap": "good news or an achievement for the user: something to cheer",
+    "surprised": "surprising, shocking or astonishing news",
+    "thinking": "a puzzling or tricky question that needs thought",
+    "smile": "warm, pleasant and happy, but not funny",
+    "dance": "celebration, party, music, excitement",
+    "sleepy": "tiredness, bedtime, being exhausted",
+    "angry": "the user is rude or insulting to Mint",
+    "cool": "showing off something impressive or stylish",
+}
+CONTEXT_RULES = (
+    "Mint is a cute voice assistant whose round face shows feelings. From the conversation (`conversation`) and "
+    "the latest words (`request`), pick the ONE feeling its face should show right now - the emotional tone, not "
+    "the literal words. Choose none for ordinary, neutral or practical exchanges (commands, facts, questions, "
+    "'sorry, which one?'): most turns need no expression.")
 
 # Tools that are bookkeeping, not a task done for the user.
 QUIET = {"express", "move_orb", "set_voice", "screen_share_visibility", "find_skill", "use_skill",
@@ -88,6 +111,8 @@ class Moods:
         self._did_work = False
         self._failed = False
         self._state = ""
+        self._history: list[str] = []     # finished lines, "You: ..." / "Mint: ..."
+        self._wait = {"user": 0, "mint": 0}   # debounce tokens
 
     # --- the hooks (any thread) ------------------------------------------------------
 
@@ -103,10 +128,17 @@ class Moods:
                 self._reacted_mint = True
         if pick:
             self._show(pick)
+        else:
+            self._later("mint", 1.4)          # once the reply pauses, read it in context
 
     def heard_user(self, text: str, new_turn: bool) -> None:
         with self._lock:
             if new_turn:
+                if self._user_text.strip():
+                    self._history.append("You: " + self._user_text.strip())
+                if self._mint_text.strip():
+                    self._history.append("Mint: " + self._mint_text.strip())
+                self._history = self._history[-8:]
                 self._user_text, self._reacted_user = "", False
                 self._mint_text, self._reacted_mint = "", False
                 self._did_work = self._failed = False
@@ -118,6 +150,66 @@ class Moods:
                 self._reacted_user = True
         if pick:
             self._show(pick)
+        else:
+            self._later("user", 0.9)          # when the user has finished, read it in context
+
+    # --- context (Jev) ---------------------------------------------------------------
+
+    def _later(self, side: str, delay: float) -> None:
+        if not enabled():
+            return
+        self._wait[side] += 1
+        token = self._wait[side]
+        timer = threading.Timer(delay, self._read, args=(side, token))
+        timer.daemon = True
+        timer.start()
+
+    def _read(self, side: str, token: int) -> None:
+        """Debounced: no new words for a moment -> ask Jev what the moment feels like."""
+        with self._lock:
+            if token != self._wait[side] or (self._reacted_user if side == "user" else self._reacted_mint):
+                return
+            latest = (self._user_text if side == "user" else self._mint_text).strip()
+            lines = self._history[-6:] + (["You: " + self._user_text.strip()] if self._user_text.strip() else [])
+            if side == "mint":
+                lines.append("Mint: " + latest)
+        if len(latest) < 4:
+            return
+        from mint.core import jev
+        # Never ahead of or alongside the session's own Jev calls (the addressee check gates
+        # every tool): wait until Mint is speaking or idle with no tool running and no Jev
+        # call in flight; give up after a few seconds.
+        deadline = time.monotonic() + 6.0
+        while True:
+            hud = self.hud
+            quiet = (hud is None or (getattr(hud, "_activity", None) is None
+                                     and getattr(hud, "_state", "") in ("speaking", "awake")))
+            if quiet and jev.in_flight() == 0:
+                break
+            if time.monotonic() > deadline:
+                return
+            time.sleep(0.25)
+        started = time.monotonic()
+        try:
+            pick = jev.choose(latest[-400:], FEELINGS, context={"conversation": "\n".join(lines)[-1500:],
+                                                                   "speaker": "the user" if side == "user" else "Mint"},
+                              timeout=5.0, instructions=CONTEXT_RULES)
+        except Exception:
+            log.debug("mood context failed", exc_info=True)
+            return
+        if pick is None or pick.id is None or not pick.sure or time.monotonic() - started > 6.0:
+            return
+        with self._lock:
+            if side == "user":
+                if self._reacted_user or token != self._wait["user"]:
+                    return
+                self._reacted_user = True
+            else:
+                if self._reacted_mint:
+                    return
+                self._reacted_mint = True
+        log.info("mood from context (%s): %s %.2f", side, pick.id, pick.confidence)
+        self._show(pick.id, why="context")
 
     def tool_done(self, name: str, ok: bool) -> None:
         if name in QUIET:
@@ -161,14 +253,14 @@ class Moods:
             return False
         return True
 
-    def _show(self, name: str) -> None:
+    def _show(self, name: str, why: str = "words") -> None:
         def go():
             now = time.monotonic()
             if now - self._last < GAP or not self._free(now):
                 return
             self._last = now
             from mint.ui.emotes import emotes
-            print(f"  [orb feels: {name}]", flush=True)
+            print(f"  [orb feels: {name} ({why})]", flush=True)
             emotes.play(name)
         AppHelper.callAfter(go)
 

@@ -36,6 +36,20 @@ def stopped() -> bool:
 DEFAULT_WORDS = ["stop", "stop it", "stop everything", "cancel", "cancel that", "abort",
                  "enough", "hold on", "never mind", "nevermind", "shut up"]
 _NEGATIONS = {"don't", "dont", "do", "not", "never", "no", "won't", "can't"}
+# "stop recording", "stop the screen recording", "stop the music": a request about one thing, for the
+# model - not the stop switch (which would leave that very recording running).
+_OBJECTS = {"recording", "record", "recordings", "screen", "video", "meeting", "call", "music", "song", "playing",
+            "playback", "sharing", "share", "timer", "alarm", "caffeinate", "keeping", "watching", "tutor", "lesson",
+            "teaching", "dictation", "notes", "automation", "reminder", "focus"}
+_DETERMINERS = {"the", "my", "this", "that", "our"}
+
+
+def _about_something(words: list[str], after: int) -> bool:
+    """The words right after "stop" name a thing to stop ("stop recording", "stop the music")."""
+    rest = words[after:after + 3]
+    while rest and rest[0] in _DETERMINERS:
+        rest = rest[1:]
+    return bool(rest) and rest[0] in _OBJECTS
 
 
 def _words(text: str) -> list[str]:
@@ -61,6 +75,8 @@ def is_stop(text: str, phrases: list[str] | None = None) -> bool:
             if words[i:i + n] != target:
                 continue
             if i > 0 and words[i - 1] in _NEGATIONS:
+                continue
+            if target[-1] == "stop" and _about_something(words, i + n):
                 continue
             # A command: the whole utterance is short, or it leads with the phrase.
             if len(words) <= 5 or i == 0:

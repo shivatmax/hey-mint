@@ -113,10 +113,45 @@ def gather(news_topic: str = "") -> dict:
     return out
 
 
+_WEATHER_SYMBOLS = (("thunder", "cloud.bolt.rain.fill"), ("snow", "snowflake"), ("sleet", "cloud.sleet.fill"),
+                    ("rain", "cloud.rain.fill"), ("drizzle", "cloud.drizzle.fill"), ("shower", "cloud.rain.fill"),
+                    ("fog", "cloud.fog.fill"), ("mist", "cloud.fog.fill"), ("haze", "sun.haze.fill"),
+                    ("smoke", "smoke.fill"), ("partly", "cloud.sun.fill"), ("overcast", "cloud.fill"),
+                    ("cloud", "cloud.fill"), ("sun", "sun.max.fill"), ("clear", "sun.max.fill"))
+
+
+def card(parts: dict) -> dict:
+    """The day as data for the island's schedule card: calendar rows, reminders, weather, headlines."""
+    from mint.tools import everyday as skills
+    now = dt.datetime.now()
+    data: dict = {"day": f"{now:%A}", "date": f"{now:%-d %B}", "events": [], "reminders": [], "news": [],
+                  "weather": None}
+    try:
+        data["events"] = skills.calendar_rows()
+    except Exception as error:
+        log.info("card calendar: %s", error)
+    data["reminders"] = [r.strip() for r in (parts.get("reminders") or "").split(";") if r.strip()][:4]
+    data["news"] = [n.strip() for n in (parts.get("news") or "").split(";") if n.strip()][:3]
+    weather = parts.get("weather") or ""
+    found = re.search(r"now (-?\d+)°C,\s*([^;]+)", weather)
+    if found:
+        desc = found.group(2).strip()
+        symbol = next((s for word, s in _WEATHER_SYMBOLS if word in desc.lower()), "thermometer.medium")
+        high = re.search(r"today (-?\d+)-(-?\d+)°C", weather)
+        data["weather"] = {"temp": int(found.group(1)), "desc": desc, "symbol": symbol,
+                           "range": f"{high.group(1)}–{high.group(2)}°" if high else ""}
+    return data
+
+
 def brief(focus: str = "", news_topic: str = "") -> str:
     from mint.core import llm
     from mint.core import prefs
     parts = gather(news_topic)
+    try:
+        from mint.ui.island import island
+        island.show_schedule(card(parts))
+    except Exception as error:
+        log.info("schedule card: %s", error)
     now = dt.datetime.now()
     name = prefs.get("user_name") or ""
     facts = "\n".join(f"{k.upper()}: {v}" for k, v in parts.items() if v)

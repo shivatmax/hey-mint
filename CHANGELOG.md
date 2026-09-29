@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Pointing at things without words:** `show_on_screen` ("where's the share button?", "point at the gear
+  icon") now looks at the screen for icons, buttons and pictures when the words search finds nothing - a
+  tight box around that one thing, found on a fresh screenshot with the mouse position as a hint.
+- **The island** (`mint/ui/island.py`): like the Dynamic Island, the orb morphs into a black capsule with a
+  tiny live Mint face for whatever is going on, and springs back after: a meeting recorder on calls
+  (record, mic and video switches; REC timer, level bars, Stop; notes progress, Notes ready), screen
+  recording and "Record this area?", teaching a skill (Learning, clicks, Done), tutor lessons (step, next),
+  and a schedule card for briefings and today's calendar (weather, timeline, reminders, headlines).
+- **Meetings with video** (`meeting action=start video=true`, or the island's video switch): the call's
+  window with sound into the meeting folder; `mic=false` records only the call.
+- **Meeting notes so far** (`meeting action=so_far`): a summary of the call up to now while it keeps
+  recording. Asking for "the transcript and summary" mid-call had stopped the recording; it no longer
+  does, and a meeting restarted within 15 minutes under the same title is one meeting in the notes.
+- **Mac switches** (`mac`): brightness, keep awake, Do Not Disturb (through two small shortcuts Mint
+  prepares), window layouts through Rectangle (halves, thirds, quarters, two apps side by side, full
+  screen, other display), resume music, Night Shift, Wi-Fi, show desktop / Mission Control, Settings pages.
+- **Screen recording** (`screen_record`): the whole screen, one window or an area you describe ("the left
+  half", "the video player"); Mint shows a box and records only after you confirm. New Swift helper
+  `MintScreen` (`launcher/screenrec`, ScreenCaptureKit).
+- **More instant commands:** show desktop, Mission Control, keep awake, snap left/right, maximise, full
+  screen, start and stop screen recording.
+- **Agents on GPT-6 Luna only:** Astra, Luna and Sage run on OpenAI's `gpt-6-luna`; OpenRouter is no
+  longer used by any agent.
+
 - **Moods:** Mint shows feelings by itself as you talk (a smile at good news, a blush at thanks, a laugh at a
   joke) and slides on its sunglasses when it finishes a task. Off with the `auto_emotions` setting.
 

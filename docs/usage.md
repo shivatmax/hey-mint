@@ -362,6 +362,10 @@ password, key or card number, is never kept, and Mint never pastes into a passwo
 Click **Record meeting** in the menu bar, or say "take notes of this meeting". Mint records silently
 until you click **Stop recording**, or say "stop recording" once the call is over.
 
+- **Mint turns into a recorder on calls:** see "The island" below - on a call the orb becomes a small
+  black capsule with a glowing record button and switches for your mic and for video (the call's window
+  with sound, saved as `video.mp4` in the same meeting folder). While recording: REC time, level bars,
+  Stop; then the notes' progress and **Notes ready**. By voice: "record this meeting with video".
 - **Works with:** Google Meet in any browser, Zoom, Teams, Slack huddles, FaceTime, Webex.
 - **Two tracks:** the call's audio (a Core Audio tap: macOS's "System Audio Recording Only" permission,
   no screen recording, no virtual driver) and your microphone. The mic is "You"; the call is everyone
@@ -373,8 +377,36 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
   from the calendar event, the Meet/Teams/Zoom tab, or the call app.
 - **When a call starts:** Mint offers to take notes (a notification and the menu), because it has lent
   the microphone to the call. Turn the offer off in Settings.
+- **During the call:** "what's been said so far?", "summary so far", "give me the transcript and
+  summary" → `meeting action=so_far`: a transcript and notes of what is recorded up to now (`notes so
+  far.md` in the meeting folder), and the recording goes on. Mint stops only when you say the meeting is
+  over or say stop.
+- **Stopped by mistake:** started again under the same title within 15 minutes, it is the same meeting:
+  the earlier part's transcript goes into the final notes.
 - **Afterwards:** "what did we decide in the Acme call?", "open yesterday's meeting notes", "list my
   meetings" → `meeting action=open/list`.
+
+### The island: Mint changes shape
+
+Like the Dynamic Island, the orb turns into whatever is going on and springs back when it is over. A
+tiny live Mint (the same swirl and eyes, blinking and following the pointer) stays where the orb was;
+click it to open the chat.
+
+| When | The island |
+|---|---|
+| On a call | ● record · 🎙 mic on/off · 🎥 video on/off · × |
+| Recording a meeting | ● 12:34 · level bars · (video icon) · ■ Stop, the face bobbing with the call |
+| Writing the notes / done | "Notes · 3/10" with a spinner, then "✓ Notes ready" (click to open) |
+| A screen recording | ● 0:12 · ■ Stop; for an area, "Record this area? ✓ ✕" |
+| Teaching Mint a skill | 👁 Learning · 0:42 · 12 clicks · ✓ Done · ✕ |
+| A lesson (tutor) | STEP 2 OF 5 · what to do · → next · ✕ |
+| A briefing, or "what's on my calendar today?" | a card: the day and date, weather, today's timeline (now highlighted, past dimmed, "in 2h" on the next one), reminders, headlines; click or wait 40 s to close it |
+
+- **Where:** it grows from the orb towards the middle of the screen. While it shows, Mint's word
+  bubble stays hidden (the words are still in the chat).
+- **Private:** never in screenshots or screen shares; click-through everywhere but the capsule.
+- **Code:** `mint/ui/island.py` - each scene is a small class (size, build, tick, mood); providers read
+  Mint's state ten times a second and the highest-priority scene wins.
 
 ### Teach by showing, and the tutor
 
@@ -423,6 +455,31 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
   For Gmail, reading the inbox in the browser is often faster.
 - **Screenshot index:** kept in `~/Library/Application Support/Mint/screenshots.json` (mode 600). A
   search reads new screenshots for up to 25 s, and the rest carry on in the background.
+
+### The Mac's own switches, windows and screen recordings
+
+| Say | What happens |
+|---|---|
+| "brighter", "dim the screen", "brightness 70" | `mac control=brightness` (DisplayServices; the built-in display) |
+| "keep the Mac awake for 2 hours", "you can sleep now" | `mac control=keep_awake` (`caffeinate -d -i -s`, with a time limit if given) |
+| "turn on Do Not Disturb", "focus off" | `mac control=focus`: runs the shortcuts "Mint Focus On" / "Mint Focus Off" (see below) |
+| "Chrome left, Slack right", "left half", "top-right quarter", "maximise", "full screen", "other display" | `mac control=window`: Rectangle's URL actions when Rectangle is installed, otherwise Mint places the window itself through Accessibility |
+| "play the last music", "pause", "next song" | `mac control=music` (Spotify or Music, whichever is open) |
+| "night shift on", "Wi-Fi status", "show the desktop", "mission control", "open the Bluetooth settings" | `mac control=night_shift / wifi / show / settings` |
+| "record my screen", "start video recording" | `screen_record target=screen`: starts at once, into `<storage>/Videos/Recordings` |
+| "record the Chrome window", "record the left half", "record the video player" | `screen_record target=window/area`: Mint draws a box around what it will record and asks "is this the right area?" - it records only after you say yes |
+| "record my screen with sound / with my voice" | `audio=true` (the Mac's sound, without Mint's voice) / `mic=true` |
+| "stop screen recording" | `screen_record action=stop` (also stops by itself after two hours) |
+
+- **Do Not Disturb:** macOS has no command or API for Focus, and on macOS 27 Control Center's menu
+  bar icon has no accessible name. The first time you ask, Mint builds two one-action shortcuts ("Set
+  Focus" on / off), signs them with `shortcuts sign` and opens them in Shortcuts: click **Add
+  Shortcut** once for each, then ask again. From then on it is instant.
+- **Screen recordings:** `MintScreen` (ScreenCaptureKit, H.264 .mp4) leaves Mint's orb out of the
+  video. "Stop recording" while a meeting is being recorded too: Mint asks which, if it is unclear.
+- **Instant:** "show the desktop", "mission control", "keep the Mac awake", "snap this window to the
+  left/right", "maximise", "full screen", "record my screen" and "stop screen recording" run the moment
+  you stop talking.
 
 ### Power tools for everyday work
 
@@ -648,6 +705,7 @@ a fresh session from it), "clear the chat", "start a new session".
 Named background agents with their own colour, model and tools (`agents.json`):
 **Astra** (research, sourced briefs), **Luna** (code, RL environments), **Sage**
 (long documents), **Codex** (builds sites and apps with OpenAI Codex).
+Astra, Luna and Sage all run on OpenAI's GPT-6 Luna (`OPENAI_API_KEY`); no agent uses OpenRouter.
 
 | Say | Tool |
 |---|---|
@@ -864,7 +922,7 @@ each description.
 | `list_memories` | group | List what is remembered, optionally one group. |
 | `memory_used` | minutes | Which remembered facts you were given in this conversation (and the fixed ones) - for 'why did you say that?', 'which memory did you use?', 'how do you know that?'. |
 | `show_skills_and_memory` | tab | Open the Skills & Memory window on screen, where the user can see and edit every skill and every remembered fact. |
-| `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - scrolling the window to them if needed - and draws a box, underline, highlight, circle or arrow around them, with an optional short note; your orb flies over beside it. |
+| `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - or, for things without words (an icon, a button, a picture), looks at a screenshot for a tight box around that one thing (about 4 s) - scrolling the window if needed, and draws a box, underline, highlight, circle or arrow around it, with an optional short note; your orb flies over beside it. |
 | `mark_area` | x, y, w, h, style, note | Mark a region with no text (an image, a chart, an icon) using 0-1000 coordinates of your latest look screenshot: x, y of its top-left corner, and its width and height. |
 | `clear_marks` |  | Remove the marks you drew on screen. |
 | `move_orb` | direction, amount, tricks | Move your orb on screen when the user asks: 'go a little down', 'move up', 'move left a lot', 'you are covering that' (direction away), 'go to the middle'. |
@@ -892,6 +950,8 @@ each description.
 | `find_screenshot` | query, open | Find screenshots by the text or things in them (an invoice number, an error, a booking, a chat), wherever they are saved. |
 | `translate_screen` | target, show | Translate the foreign text in the front window (any language or script, even in images) and pin each translation beside its text on screen for a minute. |
 | `mail` | action, number, say, count | The Mail app's inbox, smarter: triage (sort the newest messages into needs a reply, to do, FYI, newsletters, promos, with one line each) and draft_reply (write a reply to message `number` in the user's own style, from what they say, and open it as a draft - never sent). |
+| `mac` | control, value, minutes, app, app2 | The Mac's own switches: brightness, keep_awake, focus (Do Not Disturb), window layouts (Rectangle or Accessibility), music, night_shift, wifi, show (desktop, Mission Control...), settings pages. |
+| `screen_record` | action, target, app, region, audio, mic, confirm, reveal | Record a video (.mp4) of the screen, one window or a part of the screen; a window or area is shown as a box first and recorded only after confirm. |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |

@@ -522,6 +522,37 @@ def calendar_events(days: int = 1) -> str:
     return "; ".join(lines)
 
 
+def calendar_rows(day: dt.date | None = None) -> list[dict]:
+    """One day's events as data (for the island's schedule card): {"start", "end" (datetimes), "title",
+    "all_day", "place", "rgb"}. [] when the calendar cannot be read."""
+    import AppKit
+    import EventKit
+    from Foundation import NSDate
+
+    store, problem = _event_store(EventKit.EKEntityTypeEvent)
+    if problem:
+        return []
+    start = dt.datetime.combine(day or dt.date.today(), dt.time.min)
+    end = start + dt.timedelta(days=1)
+    predicate = store.predicateForEventsWithStartDate_endDate_calendars_(
+        NSDate.dateWithTimeIntervalSince1970_(start.timestamp()),
+        NSDate.dateWithTimeIntervalSince1970_(end.timestamp()), None)
+    rows = []
+    for event in sorted(store.eventsMatchingPredicate_(predicate) or [],
+                        key=lambda e: e.startDate().timeIntervalSince1970())[:30]:
+        rgb = (0.04, 0.52, 1.0)
+        try:
+            color = event.calendar().color().colorUsingColorSpace_(AppKit.NSColorSpace.sRGBColorSpace())
+            rgb = (color.redComponent(), color.greenComponent(), color.blueComponent())
+        except Exception:
+            pass
+        rows.append({"start": dt.datetime.fromtimestamp(event.startDate().timeIntervalSince1970()),
+                     "end": dt.datetime.fromtimestamp(event.endDate().timeIntervalSince1970()),
+                     "title": str(event.title() or "(untitled)"), "all_day": bool(event.isAllDay()),
+                     "place": str(event.location() or ""), "rgb": rgb})
+    return rows
+
+
 def create_reminder(title: str, in_minutes: int | None = None, when: str | None = None) -> str:
     """A reminder in the default list, optionally due at a time."""
     import EventKit

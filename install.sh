@@ -22,6 +22,7 @@ remove() {
   pkill -x "$APP_NAME" 2>/dev/null || true
   pkill -x MintEngine 2>/dev/null || true
   pkill -x MintRecorder 2>/dev/null || true
+  pkill -x MintScreen 2>/dev/null || true
   pkill -f "python -m mint" 2>/dev/null || true
   if [[ -f "$AGENT" ]]; then
     launchctl bootout "gui/$(id -u)" "$AGENT" 2>/dev/null || true
@@ -166,6 +167,13 @@ if ! recorder_log=$(xcrun swiftc -O launcher/recorder/*.swift -o "$BUILD/Content
   printf '%s\n' "$recorder_log" | tail -15 >&2
   echo "Warning: the meeting recorder did not build; Mint works without meeting notes." >&2
 fi
+# Screen recordings: ScreenCaptureKit into an .mp4, a window or an area (launcher/screenrec).
+echo "Building the screen recorder…"
+if ! screen_log=$(xcrun swiftc -O launcher/screenrec/*.swift -o "$BUILD/Contents/MacOS/MintScreen" \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker launcher/screenrec/Info.plist 2>&1); then
+  printf '%s\n' "$screen_log" | tail -15 >&2
+  echo "Warning: the screen recorder did not build; Mint works without screen recordings." >&2
+fi
 "$RUNTIME/.venv/bin/python" launcher/make_icon.py "$BUILD/Contents/Resources/$APP_NAME.icns" >/dev/null
 rm -f "$BUILD/Contents/Resources/$APP_NAME.png"
 
@@ -223,6 +231,7 @@ codesign --verify --strict "$BUILD"
 pkill -x "$APP_NAME" 2>/dev/null || true
 pkill -x MintEngine 2>/dev/null || true
 pkill -x MintRecorder 2>/dev/null || true
+pkill -x MintScreen 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALL"
 ditto "$BUILD" "$INSTALL"
