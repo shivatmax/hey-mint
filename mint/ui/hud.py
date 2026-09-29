@@ -247,6 +247,12 @@ class HUD:
             island.attach(self)
         except ImportError:
             pass
+        # While Mint learns a task by watching: a mint ring on the pointer, click ripples (teach_fx.py).
+        try:
+            from mint.ui import teach_fx
+            teach_fx.attach(self)
+        except ImportError:
+            pass
 
     # --- geometry -----------------------------------------------------------------------
 

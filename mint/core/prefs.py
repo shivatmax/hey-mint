@@ -68,8 +68,14 @@ DEFAULTS: dict = {
     "mic": True,
     # ⌘J opens the console and closes it again; Esc closes it too. "close" is
     # empty by default: ⌘H is macOS's Hide in every app, and a global hotkey
-    # would take it away from all of them.
-    "shortcuts": {"toggle": "cmd+j", "close": ""},
+    # would take it away from all of them. "talk" wakes Mint to listen without the
+    # wake word. "dictate": hold it to dictate at the cursor (a key combo, or one
+    # modifier on its own: right_option, right_command, right_control, right_shift,
+    # fn), tap it twice for hands-free; "dictate_toggle" starts/stops hands-free.
+    "shortcuts": {"toggle": "cmd+j", "close": "", "talk": "ctrl+option+space", "dictate": "right_option",
+                  "dictate_toggle": ""},
+    # Words dictation should spell exactly (names, jargon), comma-separated.
+    "dictation_words": "",
     # Keep hearing the user while a task runs; "stop" (any of stop_words) cuts it off.
     "listen_while_working": True,
     # The activity timeline (timeline.py) - off until the user turns it on.

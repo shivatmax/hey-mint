@@ -263,23 +263,465 @@ def chat(p):
     p.fire("console"); time.sleep(0.8)
 
 
+# --- The island (mint/ui/island.py): Mint's real island and teach effects, fed made-up state -------------
+
+F = {"phase": "", "call": {}, "proc": {}, "video_on": False, "levels": {}, "screen": {}, "teach": {},
+     "tutor": {}, "vid": {}}
+POINTER = [720.0, 466.0]                      # the scripted pointer (Cocoa points) for the teach scene
+VIDEO_FRAMES = sorted(Path.home().glob("Library/Application Support/Mint/videos/bd94f99867c7ea/frame-*.jpg"))
+
+
+def _fakes():
+    """The island reads Mint's state through these; here they return the scene's script."""
+    import math as _m
+    from mint.tools import meetings
+    from mint.tools import screenrec
+    from mint.knowledge import teach
+    from mint.ui import tutor
+    from mint.tools import video
+    from mint.ui import teach_fx
+    meetings.phase = lambda: F["phase"]
+    meetings.on_call = lambda: dict(F["call"])
+    meetings.processing = lambda: dict(F["proc"])
+    meetings.has_video = lambda: F["video_on"]
+    meetings.current_title = lambda: "Design review"
+    meetings.list_meetings = lambda n=1: [{"folder": str(RAW)}]
+    t0 = time.time()
+    meetings.elapsed = lambda: 754 + time.time() - t0
+    meetings.levels = lambda: {"others": 0.03 + 0.05 * abs(_m.sin(time.time() * 2.3)), "you": 0.01}
+    screenrec.snapshot = lambda: dict(F["screen"])
+    teach.snapshot = lambda: dict(F["teach"])
+    tutor.snapshot = lambda: dict(F["tutor"])
+    video.snapshot = lambda: dict(F["vid"])
+
+    class _Event:                             # teach_fx follows this pointer, not the real one
+        @staticmethod
+        def mouseLocation():
+            import AppKit as _AK
+            return _AK.NSMakePoint(*POINTER)
+
+        @staticmethod
+        def addGlobalMonitorForEventsMatchingMask_handler_(mask, handler):
+            return None
+
+        @staticmethod
+        def removeMonitor_(monitor):
+            pass
+
+    class _AppKitProxy:
+        NSEvent = _Event
+
+        def __getattr__(self, name):
+            import AppKit as _AK
+            return getattr(_AK, name)
+    teach_fx.AppKit = _AppKitProxy()
+
+
+def _island():
+    from mint.ui.island import island
+    return island
+
+
+def _meeting_scene():
+    return _island().providers[0].__self__
+
+
+@scene("island-meeting", 17)
+def island_meeting(p):
+    F["call"] = {"app": "Google Chrome", "since": 1, "title": "Design review"}
+    time.sleep(2.2)
+    ms.main_sync(_meeting_scene().toggle_video); time.sleep(1.2)
+    F["phase"] = "starting"; time.sleep(0.9)
+    F["phase"], F["video_on"] = "recording", True; time.sleep(4.2)
+    F["phase"] = "stopping"; time.sleep(0.6)
+    F["phase"], F["proc"] = "", {"/x": "transcribing 3/10"}; time.sleep(1.4)
+    F["proc"] = {"/x": "transcribing 9/10"}; time.sleep(1.2)
+    F["proc"] = {"/x": "writing notes"}; time.sleep(1.0)
+    F["proc"], F["video_on"] = {}, False; time.sleep(2.6)
+    F["call"] = {}; ms.main_sync(lambda: setattr(_meeting_scene(), "done_until", 0.0)); time.sleep(1.4)
+
+
+def _glide(to, seconds=0.7):
+    """Move the scripted pointer to `to` (Quartz point) along an eased curve."""
+    import math as _m
+    start = (POINTER[0], POINTER[1])
+    end = (to[0], ms.SH - to[1])
+    steps = int(seconds * 60)
+    for i in range(1, steps + 1):
+        t = i / steps
+        e = t * t * (3 - 2 * t)
+        lift = _m.sin(_m.pi * t) * 30
+        POINTER[0] = start[0] + (end[0] - start[0]) * e
+        POINTER[1] = start[1] + (end[1] - start[1]) * e + lift
+        time.sleep(1 / 60)
+
+
+def _click(step):
+    from mint.ui.teach_fx import fx
+    point = (POINTER[0] - fx.origin[0], POINTER[1] - fx.origin[1])
+    AppHelper.callAfter(fx.burst, point, step)
+
+
+@scene("island-teach", 16)
+def island_teach(p):
+    import AppKit
+    import Quartz
+    from mint.ui.teach_fx import fx
+    # screencapture leaves the real pointer out: draw one that follows the script.
+    cursor = Quartz.CALayer.layer()
+    image = AppKit.NSCursor.arrowCursor().image()
+    cursor.setContents_(image.CGImageForProposedRect_context_hints_(None, None, None)[0])
+    cursor.setBounds_(Quartz.CGRectMake(0, 0, image.size().width, image.size().height))
+    cursor.setAnchorPoint_(Quartz.CGPointMake(0.18, 0.88))
+
+    def follow(_orig=fx.tick):
+        _orig()
+        Quartz.CATransaction.begin(); Quartz.CATransaction.setDisableActions_(True)
+        cursor.setPosition_(Quartz.CGPointMake(POINTER[0] - fx.origin[0], POINTER[1] - fx.origin[1]))
+        Quartz.CATransaction.commit()
+    fx.tick = follow
+    ms.main_sync(lambda: fx.root.addSublayer_(cursor))
+    l = ms.labels
+    t0 = time.time()
+    snap = {"seconds": 0, "clicks": 0, "keys": 0, "goal": "", "auto_stopped": False, "paused": False}
+
+    def tick_clock():
+        while F["teach"] and "seconds" in F["teach"]:
+            F["teach"] = dict(F["teach"], seconds=time.time() - t0)
+            time.sleep(0.2)
+    F["teach"] = snap
+    threading.Thread(target=tick_clock, daemon=True).start()
+    time.sleep(1.6)
+    for n, (key, dx) in enumerate((("p2", 150), ("owner", 70), ("field", 60)), 1):
+        target = (l[key][0] + dx, l[key][1] + l[key][3] / 2)
+        _glide(target)
+        time.sleep(0.25)
+        _click(n)
+        F["teach"] = dict(F["teach"], clicks=n)
+        time.sleep(1.1)
+    F["teach"] = dict(F["teach"], keys=12); time.sleep(0.8)
+    _glide((l["deadline"][0] + 200, l["deadline"][1] + 40)); time.sleep(0.6)
+    F["teach"] = {"saving": True}; time.sleep(1.8)
+    F["teach"] = {"saved": "Share the launch plan with Priya"}; time.sleep(2.6)
+    F["teach"] = {}; time.sleep(1.4)
+    ms.main_sync(cursor.removeFromSuperlayer)
+
+
+@scene("island-video", 16)
+def island_video(p):
+    title = "Steve Jobs' 2005 Stanford Commencement Address"
+    frames = [str(f) for f in VIDEO_FRAMES]
+    started = time.time()
+
+    def vid(step, n):
+        F["vid"] = {"title": title, "step": step, "frames": frames[:n], "seconds": time.time() - started,
+                    "duration": 905, "key": "demo"}
+    vid("Getting the video's details", 0); time.sleep(1.6)
+    vid("Downloading a small copy to look at", 0); time.sleep(1.6)
+    for n in range(1, len(frames) + 1):
+        vid("Picking the keyframes", n); time.sleep(0.35)
+    for part in range(1, 5):
+        vid(f"Listening: part {part} of 4", len(frames)); time.sleep(0.9)
+    vid("Writing it up", len(frames)); time.sleep(2.0)
+    F["vid"] = {}; time.sleep(6.0)
+
+
+@scene("island-schedule", 10)
+def island_schedule(p):
+    import datetime as dt
+    now = dt.datetime.now().replace(second=0, microsecond=0)
+
+    def ev(h0, h1, title, rgb):
+        return {"start": now + dt.timedelta(hours=h0), "end": now + dt.timedelta(hours=h1), "title": title,
+                "all_day": False, "place": "", "rgb": rgb}
+    card = {"day": f"{now:%A}", "date": f"{now:%-d %B}",
+            "weather": {"temp": 27, "desc": "Partly cloudy", "symbol": "cloud.sun.fill", "range": "23–31°"},
+            "events": [ev(-2.5, -2, "Standup", (0.2, 0.6, 1.0)), ev(-0.4, 0.6, "Design review", (0.3, 0.85, 0.45)),
+                       ev(2.1, 3, "1:1 with Priya", (1.0, 0.6, 0.1)), ev(5, 6, "Gym", (0.8, 0.4, 1.0))],
+            "reminders": ["Send the invoice", "Book flights"],
+            "news": ["Rate cut hopes lift markets", "New transit line opens this weekend"]}
+    time.sleep(1.2)
+    _island().show_schedule(card, seconds=6.5); time.sleep(8.6)
+
+
+@scene("island-area", 11)
+def island_area(p):
+    from mint.ui.marks import marks
+    l = ms.labels
+    x, y = l["deadline"][0] - 14, l["deadline"][1] - 14
+    marks.show([(x, y, l["deadline"][2] + 28, l["p2"][1] - y + l["p2"][3] + 14)], "box", "Record this area?", 5.0)
+    F["screen"] = {"pending": "the launch deadline part"}; time.sleep(3.6)
+    marks.clear()
+    started = time.time()
+    while time.time() - started < 4.2:
+        F["screen"] = {"seconds": time.time() - started, "what": "the launch deadline part", "file": "/x.mp4"}
+        time.sleep(0.2)
+    F["screen"] = {}; time.sleep(1.6)
+
+
+@scene("island-tutor", 12)
+def island_tutor(p):
+    from mint.ui.marks import marks
+    l = ms.labels
+    F["tutor"] = {"planning": "share the plan"}; time.sleep(1.8)
+    for i, (key, say_) in enumerate((("title", "Click the title to open the plan"),
+                                     ("owner", "Click Priya's line to mention her"),
+                                     ("field", "Type a note in the comment box"))):
+        F["tutor"] = {"task": "share the plan", "index": i, "total": 3, "say": say_}
+        marks.show([l[key]], "arrow", "", 3.0); time.sleep(2.6)
+    marks.clear()
+    F["tutor"] = {}; time.sleep(1.4)
+
+
+@scene("island-trackers", 16)
+def island_trackers(p):
+    from mint.tools import trackers
+    T = {"start": {}, "end": {}}
+    trackers.just_started = lambda seconds=3.5: dict(T["start"])
+    trackers.recent = lambda seconds=8.0: dict(T["end"])
+    time.sleep(1.0)
+    T["start"] = {"id": "a", "label": "The download finishes", "kind": "download"}; time.sleep(3.2)
+    T["start"] = {}; time.sleep(2.0)
+    T["end"] = {"id": "a", "label": "The download finishes", "kind": "download", "outcome": "done",
+                "open": str(Path.home() / "Downloads" / "Figma-installer.dmg")}; time.sleep(3.4)
+    T["end"] = {"id": "b", "label": "Task auditor", "kind": "claude", "outcome": "done"}; time.sleep(3.2)
+    T["end"] = {}; time.sleep(2.2)
+
+
+@scene("island-cards", 19)
+def island_cards(p):
+    isl = _island()
+    home = Path.home() / "Downloads"
+    time.sleep(1.0)
+    isl.show_card({"title": "Unread emails", "subtitle": "Inbox", "number": 12, "unit": "unread emails",
+                   "icon": "envelope.fill", "tint": "blue", "more": 9,
+                   "items": [{"title": "Priya Sharma", "detail": "Launch plan: final review", "trailing": "9:41am",
+                              "icon": "person.crop.circle.fill"},
+                             {"title": "GitHub", "detail": "[hey-mint] CI passed", "trailing": "8:02am",
+                              "icon": "checkmark.seal.fill"},
+                             {"title": "Figma", "detail": "A comment on Mint 2.0", "trailing": "Yesterday",
+                              "icon": "bubble.left.fill"}]}, seconds=5.2)
+    time.sleep(6.0)
+    isl.show_card({"title": "Downloaded today", "subtitle": "Downloads", "icon": "arrow.down.circle.fill",
+                   "tint": "green", "items": [
+                       {"title": "Launch-deck.pdf", "detail": "PDF document", "trailing": "4.2 MB", "icon": "doc.richtext.fill"},
+                       {"title": "Figma-installer.dmg", "detail": "Disk image", "trailing": "212 MB", "icon": "externaldrive.fill"},
+                       {"title": "receipts-sept.zip", "detail": "Archive", "trailing": "18 MB", "icon": "doc.zipper"},
+                       {"title": "team-photo.jpg", "detail": "JPEG image", "trailing": "3.1 MB", "icon": "photo.fill"}]},
+                  seconds=5.2)
+    time.sleep(6.0)
+    isl.show_card({"title": "Automations", "number": 3, "unit": "automations", "icon": "bolt.fill", "tint": "purple",
+                   "items": [{"title": "Morning briefing", "detail": "weekdays at 08:30", "trailing": "8:30am",
+                              "icon": "sunrise.fill"},
+                             {"title": "Tidy Downloads", "detail": "every day", "trailing": "9:00am",
+                              "icon": "arrow.clockwise"},
+                             {"title": "Standup prep", "detail": "10 min before standups", "trailing": "paused",
+                              "icon": "calendar"}]}, seconds=5.0)
+    time.sleep(6.0)
+    del home
+
+
+@scene("translate", 14)
+def translate_scene(p):
+    """A Japanese note on the desk, translated in place by the real pipeline (Gemini)."""
+    import AppKit
+    import Quartz
+    from mint.tools import translate as TR
+    from mint.screen import ocr
+
+    def window():
+        w = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            AppKit.NSMakeRect(930, 300, 440, 300), AppKit.NSWindowStyleMaskBorderless, 2, False)
+        w.setLevel_(AppKit.NSFloatingWindowLevel + 1)
+        w.setSharingType_(AppKit.NSWindowSharingReadOnly)
+        v = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 440, 300))
+        v.setWantsLayer_(True)
+        v.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(0.12, 0.12, 0.14, 1))
+        v.layer().setCornerRadius_(14)
+        w.setContentView_(v)
+        w.setOpaque_(False)
+        w.setBackgroundColor_(AppKit.NSColor.clearColor())
+        y = 250
+        for text, size, bold in (("チームへのお知らせ", 21, True), ("来週、新しい音声アシスタントを全員に公開します。", 14, False),
+                                 ("締め切りは10月3日の金曜日です。質問があれば、チャンネルに書いてください。", 14, False),
+                                 ("予算はイベント全体で4,000ドル以内に抑えます。", 14, False)):
+            f = AppKit.NSTextField.wrappingLabelWithString_(text)
+            f.setFont_(AppKit.NSFont.systemFontOfSize_weight_(size, AppKit.NSFontWeightBold if bold else AppKit.NSFontWeightRegular))
+            f.setTextColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(0.9, 0.9, 0.92, 1))
+            f.setDrawsBackground_(False)
+            f.setFrame_(AppKit.NSMakeRect(26, 0, 390, 60))
+            f.sizeToFit()
+            fr = f.frame()
+            f.setFrameOrigin_(AppKit.NSMakePoint(26, y - fr.size.height))
+            v.addSubview_(f)
+            y -= fr.size.height + 20
+        w.orderFrontRegardless()
+        return w
+    win = ms.main_sync(window)
+    f = win.frame()
+    rect = (f.origin.x, ms.SH - f.origin.y - f.size.height, f.size.width, f.size.height)
+
+    def capture():
+        image, area = ocr._screen()
+        k = image.width / area["width"]
+        return image.crop(tuple(int(v * k) for v in (rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]))), rect
+    TR._capture = capture
+    time.sleep(2.0)
+    print("  [translate]", TR.translate_screen("English", True)[:120].replace("\n", " "), flush=True)
+    time.sleep(6.5)
+    from mint.ui.marks import marks
+    marks.clear()
+    time.sleep(0.8)
+    ms.main_sync(win.orderOut_)
+
+
+@scene("dictation", 12)
+def dictation_scene(p):
+    """Hold Right Option, talk, let go: the words land in the note's comment box."""
+    import math as _m
+
+    import AppKit
+    from mint.voice import dictation
+    D = {"s": {}}
+    dictation.snapshot = lambda: dict(D["s"])
+    l = ms.labels
+    fx, fy, fw, fh = l["field"]
+    box = {}
+
+    def make_text():
+        field = AppKit.NSTextField.labelWithString_("")
+        field.setFont_(AppKit.NSFont.systemFontOfSize_(15))
+        field.setTextColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(0.12, 0.14, 0.2, 1))
+        field.setFrame_(AppKit.NSMakeRect(fx + 14, ms.SH - fy - fh + 12, fw - 28, 22))
+        win = AppKit.NSApp().windows()[0] if AppKit.NSApp().windows() else None
+        for w in AppKit.NSApp().windows():
+            if w.frame().size.width >= ms.SW - 1 and w.level() == AppKit.NSFloatingWindowLevel:
+                win = w
+        win.contentView().addSubview_(field)
+        box["field"] = field
+    ms.main_sync(make_text)
+    time.sleep(1.2)
+    t0 = time.time()
+    while time.time() - t0 < 3.4:
+        k = time.time() - t0
+        levels = [abs(_m.sin(k * 9 + i * 0.7)) * 0.06 * (0.6 + 0.4 * _m.sin(k * 3 + i)) for i in range(40)]
+        D["s"] = {"mode": "recording", "seconds": k, "levels": levels, "hands_free": False}
+        time.sleep(0.08)
+    D["s"] = {"mode": "writing", "seconds": 3.5}
+    time.sleep(1.3)
+    text = "Looks good to me. Let's ship it on Thursday."
+    AppHelper.callAfter(lambda: box["field"].setStringValue_(text))
+    D["s"] = {"mode": "done", "text": text}
+    time.sleep(2.4)
+    D["s"] = {}
+    time.sleep(1.8)
+    AppHelper.callAfter(box["field"].removeFromSuperview)
+
+
+@scene("drop", 13)
+def drop_scene(p):
+    """A PDF dragged towards Mint: the drop target, then what to do with it."""
+    isl = _island()
+    isl._watch_drag = lambda: None
+    time.sleep(1.0)
+    isl.dragging = True
+    time.sleep(1.6)
+    isl.drop_hot = True
+    time.sleep(1.2)
+    report = Path("/tmp/mint-guide-scenes/Quarterly report.pdf")
+    report.write_bytes(b"%PDF-1.4")
+    ms.main_sync(lambda: isl.dropped([str(report)], ""))
+    time.sleep(4.5)
+    isl.hud.fire = lambda *a: print("  [drop chose]", a[:2], flush=True)
+    ms.main_sync(lambda: isl.drop.choose("Translate it into Hindi, as a Word doc", False))
+    time.sleep(2.2)
+
+
+@scene("convert", 14)
+def convert_scene(p):
+    """A PDF translated into a Hindi Word document: the progress on the island, then the file."""
+    from mint.tools import convert
+    from mint.tools import video_edit
+    C = {"s": {}}
+    convert.snapshot = lambda: dict(C["s"])
+    video_edit.snapshot = lambda: {}
+    isl = _island()
+    time.sleep(1.0)
+    started = time.time()
+    for done in range(0, 14):
+        C["s"] = {"kind": "convert", "title": "Quarterly report.pdf", "step": "Translating into Hindi",
+                  "done": done, "total": 13, "seconds": time.time() - started}
+        time.sleep(0.45)
+    C["s"] = {"kind": "convert", "title": "Quarterly report.pdf", "step": "Writing the Word document", "done": 13,
+              "total": 13, "seconds": time.time() - started}
+    time.sleep(1.0)
+    C["s"] = {}
+    out = Path("/tmp/mint-guide-scenes/Quarterly report (Hindi).docx")
+    out.write_bytes(b"PK")
+    isl.show_card({"title": "Translated into Hindi", "subtitle": "21 pages · 42 s", "icon": "doc.text.fill",
+                   "tint": "blue", "items": [{"title": out.name, "detail": "Word document · headings, lists and 16 "
+                                              "tables kept", "trailing": "1.2 MB", "path": str(out)}]},
+                  seconds=4.5)
+    time.sleep(5.5)
+
+
+@scene("video-edit", 13)
+def video_edit_scene(p):
+    """"Make it vertical for Reels and add captions": the edit's progress, then the QA."""
+    from mint.tools import convert
+    from mint.tools import video_edit
+    V = {"s": {}}
+    video_edit.snapshot = lambda: dict(V["s"])
+    convert.snapshot = lambda: {}
+    isl = _island()
+    time.sleep(1.0)
+    V["s"] = {"step": "Writing the captions", "percent": 0, "summary": "", "seconds": 0}
+    time.sleep(1.4)
+    for percent in range(0, 101, 6):
+        V["s"] = {"step": "Rendering", "percent": percent, "summary": "", "seconds": 1}
+        time.sleep(0.22)
+    V["s"] = {"step": "Checking it (QA)", "percent": 100, "summary": "", "seconds": 5}
+    time.sleep(1.0)
+    V["s"] = {}
+    isl.show_card({"title": "Edited · launch-demo (edited).mp4", "subtitle": "vertical 9:16 · captions burned in",
+                   "icon": "scissors", "tint": "green",
+                   "items": [{"title": "Length", "detail": "0:45, as planned", "trailing": "✓", "icon": "clock.fill"},
+                             {"title": "Size", "detail": "1080 x 1920 (9:16)", "trailing": "✓",
+                              "icon": "rectangle.portrait"},
+                             {"title": "Captions", "detail": "18 lines, checked on 3 frames", "trailing": "✓",
+                              "icon": "captions.bubble"}]}, seconds=4.5)
+    time.sleep(5.5)
+
+
 def tour(p):
     try:
         time.sleep(1.8)
         p.set_state("awake"); time.sleep(1.2)
-        for step in (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat):
+        _fakes()
+        for step in (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                     island_teach, island_video, island_schedule, island_area, island_tutor,
+                     island_trackers, island_cards, translate_scene,
+                     dictation_scene, drop_scene, convert_scene, video_edit_scene):
             step(p)
         print("  [done]", flush=True)
     except Exception:
         import traceback
         traceback.print_exc()
     finally:
-        from mint.core import prefs
-        prefs.set("origin", None); prefs.set("position", "bottom-right")
         os._exit(0)
 
 
+def _demo_prefs():
+    """The demo's orb sits bottom-right, without touching the real Mint's settings (the same file)."""
+    from mint.core import prefs
+    real_get, real_set = prefs.get, prefs.set
+    fixed = {"position": "bottom-right", "origin": None, "meeting_offer": True, "face": True}
+    prefs.get = lambda key: fixed[key] if key in fixed else real_get(key)
+    prefs.set = lambda key, value: None if key in fixed else real_set(key, value)
+
+
 def main():
+    _demo_prefs()
     presence = ui.Presence(hands_free=True, show_hud=True)
     presence.on("quit", lambda: os._exit(0))
 

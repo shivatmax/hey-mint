@@ -86,6 +86,12 @@ class Marks:
     def clear(self) -> None:
         AppHelper.callAfter(self._clear)
 
+    def cover(self, blocks: list[dict], note: str = "", seconds: float = 60.0) -> None:
+        """Write text over the screen in place: each block {"rect" (Quartz), "text", "bg", "fg" (0-1 RGB),
+        "line" (the original line height, points)} is covered in its own background colour and its text
+        drawn over it, sized to fit - used for translations."""
+        AppHelper.callAfter(self._cover, list(blocks), note, seconds)
+
     # --- drawing (main thread) ---------------------------------------------------------
 
     def _clear(self) -> None:
@@ -116,6 +122,66 @@ class Marks:
             getattr(self, f"_{style}")(root, rect, ink, delay=n * 0.12)
         if note:
             self._note(first_root, first_rect, note, style)
+        AppHelper.callLater(seconds, lambda: self._fade(token))
+
+    @staticmethod
+    def _fit(text: str, width: float, height: float, start: float):
+        """The largest font (at most `start`) whose wrapped text fits width x height -> (font, size, height).
+        It never goes below ~80% of `start` (a translation is often longer than the original): then the
+        height grows to fit instead."""
+        start = max(9.0, min(start, 30.0))
+        size = start
+        while True:
+            font = AppKit.NSFont.systemFontOfSize_weight_(size, AppKit.NSFontWeightSemibold)
+            bound = AppKit.NSString.stringWithString_(text).boundingRectWithSize_options_attributes_(
+                AppKit.NSMakeSize(width, 10000), AppKit.NSStringDrawingUsesLineFragmentOrigin,
+                {AppKit.NSFontAttributeName: font})
+            if bound.size.height <= height + 1:
+                return font, size, height
+            if size <= max(9.0, start * 0.8):
+                return font, size, min(bound.size.height + 2, height * 2.2 + 12)
+            size -= 0.5
+
+    def _cover(self, blocks, note, seconds) -> None:
+        self._clear()
+        self._token += 1
+        token = self._token
+        first = None
+        for n, block in enumerate(blocks):
+            x, y, w, h = block["rect"]
+            root, rect, scale = self._local(x, y, w, h)
+            first = first or (root, rect)
+            inset = 2.0
+            font, size, need = self._fit(block["text"], rect.size.width - 2 * inset, rect.size.height - 2,
+                                         float(block.get("line") or 16) * 0.86)
+            if need > rect.size.height - 2:            # grown downwards (Cocoa y is up)
+                grow = need + 2 - rect.size.height
+                rect = Quartz.CGRectMake(rect.origin.x, rect.origin.y - grow, rect.size.width, rect.size.height + grow)
+            patch = Quartz.CALayer.layer()
+            patch.setFrame_(rect)
+            patch.setCornerRadius_(3)
+            patch.setBackgroundColor_(gfx.cg(block["bg"]))
+            patch.setOpacity_(0.0)
+            text = Quartz.CATextLayer.layer()
+            text.setString_(block["text"])
+            text.setFont_(font)
+            text.setFontSize_(size)
+            text.setForegroundColor_(gfx.cg(block["fg"]))
+            text.setWrapped_(True)
+            text.setContentsScale_(scale)
+            text.setFrame_(Quartz.CGRectMake(inset, 0, rect.size.width - 2 * inset, rect.size.height))
+            patch.addSublayer_(text)
+            self._add(root, patch)
+            appear = Quartz.CABasicAnimation.animationWithKeyPath_("opacity")
+            appear.setFromValue_(0.0)
+            appear.setToValue_(1.0)
+            appear.setDuration_(0.25)
+            appear.setBeginTime_(Quartz.CACurrentMediaTime() + n * 0.05)
+            appear.setFillMode_(Quartz.kCAFillModeBackwards)
+            patch.setOpacity_(1.0)
+            patch.addAnimation_forKey_(appear, "in")
+        if note and first is not None:
+            self._note(first[0], first[1], note, "box")
         AppHelper.callLater(seconds, lambda: self._fade(token))
 
     def _fade(self, token: int) -> None:

@@ -415,6 +415,87 @@ class SettingsWindow:
         self._label(view, "Never screenshots or typing; private windows and password managers are skipped.",
                     200, 70, 360, h=30, lines=2, size=11, alpha=0.65)
 
+    def _tab_shortcuts(self, view) -> None:
+        """Keys for Mint: open the chat, talk without the wake word, dictate at the cursor."""
+        self._label(view, "Shortcuts", 24, 360, 200, bold=True, size=13)
+        self._label(view, "Click a shortcut, then press the keys you want (Esc cancels). They work in any app.",
+                    24, 336, 540, size=11, alpha=0.65)
+        rows = (("toggle", "Open or close the chat", False), ("talk", f"Talk to {prefs.name()} (no wake word)", False),
+                ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free (start/stop)", False))
+        y = 292
+        for key, title, modifier_ok in rows:
+            self._label(view, title, 24, y + 6, 230)
+            button = self._button(view, "", 260, y, 190, lambda: None)
+            self._shortcut_button(button, key, modifier_ok)
+            self._button(view, "Clear", 456, y, 80, lambda k=key, b=button: self._set_shortcut(k, "", b))
+            y -= 44
+        self._label(view, "Dictation", 24, y - 4, 200, bold=True, size=13)
+        self._label(view, "Hold the dictate key, talk, let go: the text is typed where your cursor is, cleaned up. "
+                          "Tap it twice to dictate hands-free, tap once more to finish. One key on its own works "
+                          "too: Right ⌥, Right ⌘, Right ⌃, Right ⇧ or fn.", 24, y - 44, 540, h=40, lines=3, size=11,
+                    alpha=0.7)
+        self._label(view, "Words to spell exactly", 24, y - 82, 160)
+        self._text(view, "dictation_words", 190, y - 86, 350, "names, product words, jargon")
+
+    def _shortcut_button(self, button, key: str, modifier_ok: bool) -> None:
+        from mint.core import hotkeys
+        button.setTitle_(hotkeys.display(prefs.get("shortcuts").get(key, "")) or "Not set")
+        self._on(button, lambda c: self._record_shortcut(button, key, modifier_ok))
+
+    def _set_shortcut(self, key: str, value: str, button) -> None:
+        from mint.core import hotkeys
+        keys = dict(prefs.get("shortcuts"))
+        keys[key] = value
+        prefs.set("shortcuts", keys)
+        button.setTitle_(hotkeys.display(value) or "Not set")
+
+    def _record_shortcut(self, button, key: str, modifier_ok: bool) -> None:
+        """Wait for the next key combination (or, for dictation, one modifier on its own)."""
+        from mint.tools import fastinput
+        from mint.core import hotkeys
+        if getattr(self, "_recorder", None) is not None:
+            AppKit.NSEvent.removeMonitor_(self._recorder)
+        button.setTitle_("Press the keys…")
+        names = {code: name for name, code in fastinput.KEYS.items()}
+        pending = {"modifier": None}
+        sides = {61: "right_option", 54: "right_command", 62: "right_control", 60: "right_shift", 63: "fn"}
+
+        def done(value):
+            AppKit.NSEvent.removeMonitor_(self._recorder)
+            self._recorder = None
+            if value is None:
+                button.setTitle_(hotkeys.display(prefs.get("shortcuts").get(key, "")) or "Not set")
+            else:
+                self._set_shortcut(key, value, button)
+
+        def handle(event):
+            kind = event.type()
+            flags = int(event.modifierFlags())
+            if kind == AppKit.NSEventTypeKeyDown:
+                code = int(event.keyCode())
+                if code == 53:                                         # Esc
+                    done(None)
+                    return None
+                mods = [name for name, bit in (("ctrl", 1 << 18), ("option", 1 << 19), ("shift", 1 << 17),
+                                               ("cmd", 1 << 20)) if flags & bit]
+                name = names.get(code)
+                if name and (mods or name.startswith("f")):
+                    done("+".join(mods + [name]))
+                else:
+                    button.setTitle_("Add ⌘, ⌥, ⌃ or ⇧…")
+                pending["modifier"] = None
+                return None
+            if kind == AppKit.NSEventTypeFlagsChanged and modifier_ok:
+                code = int(event.keyCode())
+                if code in sides:
+                    if pending["modifier"] is None:
+                        pending["modifier"] = sides[code]
+                    elif pending["modifier"] == sides[code]:
+                        done(sides[code])                              # pressed and let go on its own
+            return event
+        mask = AppKit.NSEventMaskKeyDown | AppKit.NSEventMaskFlagsChanged
+        self._recorder = AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, handle)
+
     def _act(self, name: str) -> None:
         callback = self.actions.get(name)
         if callback:
@@ -447,7 +528,8 @@ class SettingsWindow:
         for title, build in (("You", self._tab_you), ("Your voice", self._tab_voice),
                              (f"{prefs.name()}'s voice", self._tab_speaking),
                              ("Audio", self._tab_audio), ("Appearance", self._tab_looks),
-                             ("Skills & Memory", self._tab_brain), ("Storage & Privacy", self._tab_storage)):
+                             ("Skills & Memory", self._tab_brain), ("Storage & Privacy", self._tab_storage),
+                             ("Shortcuts", self._tab_shortcuts)):
             item = AppKit.NSTabViewItem.alloc().initWithIdentifier_(title)
             item.setLabel_(title)
             view = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W - 32, H - 60))

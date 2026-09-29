@@ -61,7 +61,7 @@ _KIND = {
     "watch_video": "look", "automation": "timer", "recall_history": "search",
     "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
     "teach": "look", "tutor": "look", "briefing": "calendar", "shortcut": "open", "find_screenshot": "search",
-    "translate_screen": "look", "mail": "mail", "mac": "system", "screen_record": "shot",
+    "translate_screen": "look", "mail": "mail", "mac": "system", "screen_record": "shot", "track": "timer", "show_card": "look", "dictation": "write", "edit_video": "file", "video_info": "look", "ocr_copy": "clip", "data_to_sheet": "file", "convert_document": "file",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -176,6 +176,22 @@ def phrase(name: str, args: dict) -> str:
         case "mac":
             control = str(a.get("control", "")).replace("_", " ")
             return f"{control.capitalize()} · {_quote(a.get('value') or a.get('app') or '', 26)}".rstrip(" ·")
+        case "ocr_copy":
+            return "Copying the text"
+        case "data_to_sheet":
+            return f"Making a spreadsheet · {_quote(a.get('what') or a.get('path') or a.get('source') or '', 26)}".rstrip(" ·")
+        case "convert_document":
+            lang = a.get("language") or ""
+            return f"Converting{(' into ' + lang) if lang else ''} · {_quote(a.get('path') or 'the document', 24)}"
+        case "edit_video":
+            return f"Editing the video · {_quote(a.get('instruction') or '', 30)}".rstrip(" ·")
+        case "show_card":
+            return f"Showing · {_quote(a.get('title') or '', 30)}".rstrip(" ·")
+        case "track":
+            action = str(a.get("action") or "start")
+            if action == "start":
+                return f"Tracking · {_quote(a.get('goal') or a.get('target') or a.get('what') or '', 30)}".rstrip(" ·")
+            return {"list": "Checking what I'm tracking", "stop": "Stopping a tracker"}.get(action, "Tracking")
         case "screen_record":
             action = str(a.get("action") or "start")
             if action == "start":

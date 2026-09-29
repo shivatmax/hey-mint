@@ -441,3 +441,5 @@ q.inline{quotes:none;background:var(--caption);color:#F4F4F8;padding:2px 9px;bor
 .film-link:hover{transform:translateY(-2px);border-color:var(--mint)}
 @media (prefers-reduced-motion:reduce){.film-play .pb,.film-link .pb{animation:none}}
 @media (max-width:640px){.film{border-radius:18px}.film-play{top:86%;padding:6px 16px 6px 6px}.film-play .pb{width:34px;height:34px}}
+.plain{margin:6px 0 18px;padding-left:20px;max-width:68ch}
+.plain li{margin:5px 0}

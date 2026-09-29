@@ -742,6 +742,10 @@ def analyse(kind: str, where: str, question: str = "", frames: int = 12, progres
     os.chmod(folder, 0o700)
     say = progress or (lambda text: None)
     meta: dict = {"key": key, "source": where, "kind": kind, "started": time.time()}
+    if progress is not None and hasattr(progress, "meta"):
+        progress.meta = meta             # the island reads the title and keyframes as they come
+    for old_frame in folder.glob("frame-*.jpg"):     # a fresh look: not last time's keyframes
+        old_frame.unlink(missing_ok=True)
     local = where if kind == "file" else ""
     captions: list[dict] = []
     if kind == "url":
@@ -989,6 +993,9 @@ def _start_job(kind: str, where: str, question: str, frames: int = 12, notify: b
     def progress(text):
         state["step"] = text
         log.info("video %s: %s", job_key, text)
+    progress.meta = {}
+    state["progress"] = progress
+    state["started"] = time.time()
 
     def run():
         try:
@@ -1021,6 +1028,21 @@ def _start_job(kind: str, where: str, question: str, frames: int = 12, notify: b
         _jobs[job_key] = (state, thread)
         thread.start()
     return state, thread
+
+
+def snapshot() -> dict:
+    """For the island: the video being watched now - {"title", "step", "seconds", "frames": [jpg paths],
+    "duration"} - else {}."""
+    with _lock:
+        running = [(key, state) for key, (state, thread) in _jobs.items() if thread.is_alive()]
+    if not running:
+        return {}
+    key, state = running[0]
+    meta = getattr(state.get("progress"), "meta", {}) or {}
+    frames = sorted(str(p) for p in (CACHE / key).glob("frame-*.jpg"))
+    return {"title": str(meta.get("title") or "a video"), "step": state.get("step", ""), "frames": frames,
+            "seconds": time.time() - state.get("started", time.time()), "duration": meta.get("duration") or 0,
+            "key": key}
 
 
 def _said_near(meta: dict, at: float, span: float = 12.0) -> str:

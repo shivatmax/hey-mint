@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **Documents** (`mint/tools/convert.py`): `ocr_copy` (screen, window, image, PDF or clipboard picture to the
+  clipboard), `data_to_sheet` (tables on screen or in files to a clean .xlsx), `convert_document` (PDF/DOCX/text
+  into another language and format - e.g. an English PDF to a Hindi Word doc - keeping headings, lists, tables).
+- **Video editing by voice** (`mint/tools/video_edit.py`): trim, cut, speed, vertical crops, captions, silence
+  removal, compress, GIF, join, music, fades - planned by Gemini from safe operations, rendered with ffmpeg, and
+  checked (QA) before Mint reports.
+- **Dictation, Wispr-Flow style** (`mint/voice/dictation.py`): hold Right ⌥ (or your key), talk, let go - clean
+  text typed at the cursor in any app (fillers dropped, corrections applied, Hindi/English), ~3 s. Tap twice for
+  hands-free. A live waveform on the island.
+- **Your own shortcuts** (Settings ▸ Shortcuts): talk without the wake word (⌃⌥Space), dictate, open the chat.
+- **Drop things on Mint:** drag files, a folder or text to the orb; the island offers what fits (summarize,
+  translate to a Word doc, spreadsheet, copy text, captions, transcribe) or "Tell Mint what to do".
+- **Answers as cards** (`show_card`): counts as a big number, lists with icons (files open on click).
+- **Translation in place:** foreign text is covered in its own colours with the translation written over it.
+- **Trackers** (`track`, `mint/tools/trackers.py`): "let me know when the download finishes / this Claude session
+  is done / the build finishes / the upload completes". Downloads by the browser's partial file, Claude Code
+  sessions by their transcript (and "needs you" on a pending approval), Terminal/iTerm commands by the tab's
+  foreground process, any window by its progress bars and a Gemini check against your words, files by size.
+  Told by voice, notification and the island; up to 12 hours, kept across restarts.
+- **Guide recordings** are checked frame by frame: a clip where anything but the demo backdrop shows is
+  rejected before it can be published.
+- **Teaching looks recorded** (`mint/ui/teach_fx.py`): a Mint-coloured ring on the pointer, and each click
+  captured with a ripple, a snapping frame and its step number. The island's teach recorder counts steps,
+  pauses and carries on (`teach action=pause/resume`), then shows "Saving the skill…" and "Learned".
+- **Watching a video on the island:** the title, each step and the keyframes popping in as they are picked.
+- **Guide:** new sections for the island and the Mac switches, and clips of every island scene.
 - **Pointing at things without words:** `show_on_screen` ("where's the share button?", "point at the gear
   icon") now looks at the screen for icons, buttons and pictures when the words search finds nothing - a
   tight box around that one thing, found on a fresh screenshot with the mouse position as a hint.

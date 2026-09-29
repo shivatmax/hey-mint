@@ -9,7 +9,8 @@ the capsule springs back into the orb.
     meeting, recording   [• ● 12:34 ▁▃▅▃▂ ■]            the face bobs with the call's sound
     meeting, after       [• ◌ Notes 3/10] -> [• ✓ Notes ready ↗]
     screen recording     [• ● 0:12 · screen ■]  /  [• Record this area? ✓ ✕]
-    teaching a skill     [• 👁 Learning 0:42 · 12 clicks  ✓ ✕]
+    teaching a skill     [• ● 0:42 (4 steps) ⏸ ✓ ✕] -> Saving the skill -> ✓ Learned · <title>
+    watching a video     a card: the title, keyframes popping in under a sweeping scan line, the step
     a lesson (tutor)     [• Step 2 of 5 · Click Export  → ✕]
     briefing, calendar   a card: the day, the weather, a timeline of today (now lit, past dimmed),
                          reminders, headlines
@@ -25,6 +26,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import math
+import os
+import re
 import subprocess
 import threading
 import time
@@ -118,6 +121,29 @@ class _IslandButton(AppKit.NSButton):
 
     def acceptsFirstMouse_(self, event):
         return True
+
+
+class _IslandRoot(AppKit.NSView):
+    """The island's root view: files, pictures or text dropped on the capsule go to Mint."""
+
+    def draggingEntered_(self, sender):
+        island.drop_hover(True)
+        return AppKit.NSDragOperationCopy
+
+    def draggingExited_(self, sender):
+        island.drop_hover(False)
+
+    def prepareForDragOperation_(self, sender):
+        return island.rect is not None and island._inside(AppKit.NSEvent.mouseLocation())
+
+    def performDragOperation_(self, sender):
+        board = sender.draggingPasteboard()
+        urls = board.readObjectsForClasses_options_([AppKit.NSURL],
+                                                    {AppKit.NSPasteboardURLReadingFileURLsOnlyKey: True}) or []
+        paths = [str(u.path()) for u in urls if u.path()]
+        text = "" if paths else str(board.stringForType_(AppKit.NSPasteboardTypeString) or "")
+        island.dropped(paths, text)
+        return bool(paths or text.strip())
 
 
 class _IslandTicker(AppKit.NSObject):
@@ -513,7 +539,8 @@ class ScreenScene(Scene):
 
 
 class TeachScene(Scene):
-    """Mint watching the user do a task, to learn it as a skill."""
+    """Mint learning a task by watching: a small recorder - time, steps so far, pause, done, cancel -
+    then "Saving the skill" and "Learned · <title>"."""
 
     key = "teach"
     priority = 80
@@ -521,36 +548,83 @@ class TeachScene(Scene):
     def provide(self, now):
         from mint.knowledge import teach
         self.snap = teach.snapshot()
-        return self if self.snap else None
+        if not self.snap:
+            return None
+        self.mode = ("saved" if self.snap.get("saved") else "saving" if self.snap.get("saving")
+                     else "paused" if self.snap.get("paused") else "recording")
+        return self
+
+    def signature(self):
+        return f"teach:{self.mode}"
 
     def size(self):
-        return (40 + 212, ROW)
+        if self.mode == "saving":
+            return (40 + 150, ROW)
+        if self.mode == "saved":
+            title = self.snap.get("saved", "")
+            return (40 + min(250, 92 + len(title) * 7), ROW)
+        return (40 + 232, ROW)
 
     def mood(self):
-        return "working"
+        return {"saving": "thinking", "recording": "working"}.get(self.mode, "awake")
 
     def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
         mid = height / 2
-        icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("eye.fill", 12))
-        icon.setContentTintColor_(_ns(PURPLE))
-        icon.setFrame_(AppKit.NSMakeRect(8, mid - 8, 18, 16))
-        view.addSubview_(icon)
-        self.title = self.label(view, "Learning", 30, mid - 1, 110, size=12)
-        self.detail = self.label(view, "", 30, mid - 15, 110, size=10, weight="medium", rgb=DIM)
-        self.button(view, "checkmark", self.done, 146, mid - 14, GREEN, filled=True, size=28, symbol_size=11,
+        mint = tuple(_gfx.accent())
+        if self.mode == "saving":
+            self.spinner(view, 8, mid - 8, mint)
+            self.label(view, "Saving the skill…", 30, mid - 9, 118, size=13)
+            return
+        if self.mode == "saved":
+            self.label(view, "✓  Learned", 10, mid + 1, 90, size=12, rgb=GREEN)
+            self.label(view, self.snap.get("saved", ""), 10, mid - 14, width - 20, size=11, weight="medium", rgb=DIM)
+            return
+        recording = self.mode == "recording"
+        self.dot(view, 9, mid - 4, 8, mint if recording else DIM, blink=recording)
+        self.clock = self.label(view, "", 23, mid - 9, 48, size=14, mono=True, rgb=INK if recording else DIM)
+        # The steps so far, in a mint pill that pops each time one is added.
+        self.pill = Quartz.CALayer.layer()
+        self.pill.setFrame_(Quartz.CGRectMake(74, mid - 11, 62, 22))
+        self.pill.setCornerRadius_(11)
+        self.pill.setBackgroundColor_(_cg(mint, 0.22 if recording else 0.08))
+        view.layer().addSublayer_(self.pill)
+        self.steps = self.label(view, "", 74, mid - 8, 62, size=11, weight="bold", rgb=mint if recording else DIM)
+        self.steps.setAlignment_(AppKit.NSTextAlignmentCenter)
+        self.counted = -1
+        self.button(view, "pause.fill" if recording else "play.fill", self.pause_or_play, 142, mid - 13, INK,
+                    size=26, symbol_size=10, tip="Pause (nothing is recorded)" if recording else "Carry on")
+        self.button(view, "checkmark", self.done, 172, mid - 14, GREEN, filled=True, size=28, symbol_size=11,
                     tip="Done - save it as a skill")
-        self.button(view, "xmark", self.cancel, 180, mid - 13, DIM, size=26, symbol_size=10, tip="Cancel")
+        self.button(view, "xmark", self.cancel, 206, mid - 13, DIM, size=26, symbol_size=10, tip="Cancel")
         self.tick(time.time())
 
     def tick(self, now):
         from mint.knowledge import teach
-        snap = teach.snapshot() or self.snap
-        if not hasattr(self, "title"):
+        if self.mode not in ("recording", "paused") or not hasattr(self, "clock"):
             return
-        self.title.setStringValue_(f"Learning · {_stamp(snap.get('seconds', 0))}")
-        clicks, keys = snap.get("clicks", 0), snap.get("keys", 0)
-        self.detail.setStringValue_(f"{clicks} click{'s' * (clicks != 1)} · {keys} key{'s' * (keys != 1)}"
-                                    if not snap.get("auto_stopped") else "Paused - press ✓ to save")
+        snap = teach.snapshot() or self.snap
+        self.clock.setStringValue_(_stamp(snap.get("seconds", 0)))
+        steps = int(snap.get("clicks", 0)) + (1 if snap.get("keys") else 0)
+        if steps != self.counted:
+            grew = self.counted >= 0 and steps > self.counted
+            self.counted = steps
+            self.steps.setStringValue_("Paused" if self.mode == "paused" else f"{steps} step{'s' * (steps != 1)}")
+            if grew:
+                pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
+                pop.setFromValue_(1.35)
+                pop.setToValue_(1.0)
+                pop.setDamping_(10)
+                pop.setStiffness_(260)
+                pop.setDuration_(pop.settlingDuration())
+                self.pill.addAnimation_forKey_(pop, "pop")
+
+    def pause_or_play(self):
+        from mint.knowledge import teach
+        if self.mode == "recording":
+            teach.pause()
+        else:
+            teach.resume()
 
     def done(self):
         from mint.knowledge import teach
@@ -559,6 +633,142 @@ class TeachScene(Scene):
     def cancel(self):
         from mint.knowledge import teach
         _later(lambda: _notify_mint("(The user cancelled the demonstration on the island.) " + teach.cancel()))
+
+
+class VideoScene(Scene):
+    """Mint watching a video: the title, the keyframes popping in as they are picked, a scan line
+    sweeping over them, and what it is doing (listening, writing it up). Then "Watched"."""
+
+    key = "video"
+    priority = 55
+    WIDTH = 312
+
+    @property
+    def card(self) -> bool:
+        """A card while watching; "Watched" afterwards is a plain capsule."""
+        return getattr(self, "mode", "watching") == "watching"
+    SLOTS = 6
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.snap: dict = {}
+        self.done_until, self.done_title, self.seen = 0.0, "", False
+
+    def provide(self, now):
+        from mint.tools import video
+        snap = video.snapshot()
+        if snap:
+            self.snap, self.seen = snap, True
+            self.mode = "watching"
+            return self
+        if self.seen:                                   # just finished
+            self.seen = False
+            self.done_until, self.done_title = now + 5.0, self.snap.get("title", "")
+        if now < self.done_until:
+            self.mode = "done"
+            return self
+        return None
+
+    def signature(self):
+        return f"video:{self.mode}"
+
+    def size(self):
+        return (self.WIDTH, 104) if self.mode == "watching" else (40 + 200, ROW)
+
+    def mood(self):
+        return "working" if self.mode == "watching" else "awake"
+
+    def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
+        mint = tuple(_gfx.accent())
+        if self.mode == "done":
+            self.label(view, "✓  Watched", 10, height / 2 + 1, 180, size=12, rgb=GREEN)
+            self.label(view, self.done_title, 10, height / 2 - 14, 186, size=11, weight="medium", rgb=DIM)
+            return
+        top = height - 12
+        badge = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(14, top - 30, 30, 30))
+        badge.setWantsLayer_(True)
+        badge.layer().setCornerRadius_(9)
+        badge.layer().setBackgroundColor_(_cg(mint, 0.18))
+        view.addSubview_(badge)
+        icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("film.stack", 14))
+        icon.setContentTintColor_(_ns(mint))
+        icon.setFrame_(AppKit.NSMakeRect(5, 6, 20, 18))
+        badge.addSubview_(icon)
+        right = width - (48 if island.face_right and island.face_top else 14)
+        self.title = self.label(view, self.snap.get("title", ""), 52, top - 14, right - 52, size=13)
+        self.step = self.label(view, "", 52, top - 30, right - 52 - 40, size=11, weight="medium", rgb=DIM)
+        self.clock = self.label(view, "", right - 40, top - 30, 40, size=11, weight="medium", rgb=DIM, mono=True)
+        self.clock.setAlignment_(AppKit.NSTextAlignmentRight)
+        # The keyframe strip: placeholders first, pictures popping in as they are picked.
+        gap, slot_w = 6.0, (width - 28 - 5 * 6.0) / self.SLOTS
+        slot_h = slot_w * 9 / 16
+        self.slots, self.shown_frames = [], []
+        y = 14
+        for i in range(self.SLOTS):
+            cell = Quartz.CALayer.layer()
+            cell.setFrame_(Quartz.CGRectMake(14 + i * (slot_w + gap), y, slot_w, slot_h))
+            cell.setCornerRadius_(5)
+            cell.setMasksToBounds_(True)
+            cell.setBackgroundColor_(_cg((1, 1, 1), 0.07))
+            view.layer().addSublayer_(cell)
+            self.slots.append(cell)
+        scan = Quartz.CALayer.layer()
+        scan.setBounds_(Quartz.CGRectMake(0, 0, 2, slot_h + 8))
+        scan.setBackgroundColor_(_cg(mint))
+        scan.setShadowColor_(_cg(mint))
+        scan.setShadowRadius_(6)
+        scan.setShadowOpacity_(1.0)
+        scan.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+        scan.setPosition_(Quartz.CGPointMake(14, y + slot_h / 2))
+        view.layer().addSublayer_(scan)
+        sweep = Quartz.CABasicAnimation.animationWithKeyPath_("position.x")
+        sweep.setFromValue_(14)
+        sweep.setToValue_(width - 14)
+        sweep.setDuration_(1.8)
+        sweep.setAutoreverses_(True)
+        sweep.setRepeatCount_(1e9)
+        sweep.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
+            Quartz.kCAMediaTimingFunctionEaseInEaseOut))
+        scan.addAnimation_forKey_(sweep, "sweep")
+        self.tick(time.time())
+
+    def tick(self, now):
+        from mint.tools import video
+        if self.mode != "watching" or not hasattr(self, "slots"):
+            return
+        snap = video.snapshot() or self.snap
+        self.snap = snap
+        if snap.get("title") and snap["title"] != self.title.stringValue():
+            self.title.setStringValue_(snap["title"])
+        self.step.setStringValue_(snap.get("step", ""))
+        self.clock.setStringValue_(_stamp(snap.get("seconds", 0)))
+        frames = snap.get("frames") or []
+        if len(frames) > len(self.shown_frames):
+            # Spread over the strip: with more keyframes than slots, every n-th one.
+            want = frames if len(frames) <= self.SLOTS else [
+                frames[round(i * (len(frames) - 1) / (self.SLOTS - 1))] for i in range(self.SLOTS)]
+            for i, path in enumerate(want[:self.SLOTS]):
+                if i < len(self.shown_frames) and self.shown_frames[i] == path:
+                    continue
+                image = AppKit.NSImage.alloc().initWithContentsOfFile_(path)
+                picture = image.CGImageForProposedRect_context_hints_(None, None, None)[0] if image else None
+                if picture is None:
+                    continue
+                cell = self.slots[i]
+                cell.setContents_(picture)
+                cell.setContentsGravity_(Quartz.kCAGravityResizeAspectFill)
+                pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
+                pop.setFromValue_(0.55)
+                pop.setToValue_(1.0)
+                pop.setDamping_(11)
+                pop.setStiffness_(220)
+                pop.setDuration_(pop.settlingDuration())
+                cell.addAnimation_forKey_(pop, "pop")
+                if i < len(self.shown_frames):
+                    self.shown_frames[i] = path
+                else:
+                    self.shown_frames.append(path)
 
 
 class TutorScene(Scene):
@@ -609,6 +819,555 @@ class TutorScene(Scene):
     def stop(self):
         from mint.ui import tutor
         _later(lambda: _notify_mint("(The user ended the lesson on the island.) " + tutor.stop()))
+
+
+class DictationScene(Scene):
+    """Dictation (dictation.py): a live waveform while you talk, "Writing…", then "✓ Pasted"."""
+
+    key = "dictation"
+    priority = 96
+    BARS = 18
+
+    def provide(self, now):
+        from mint.voice import dictation
+        self.snap = dictation.snapshot()
+        if not self.snap:
+            return None
+        self.mode = self.snap["mode"]
+        return self
+
+    def signature(self):
+        return f"dictation:{self.mode}"
+
+    def size(self):
+        if self.mode == "recording":
+            return (40 + 214, ROW)
+        if self.mode == "done":
+            return (40 + 200, ROW)
+        return (40 + 156, ROW)
+
+    def mood(self):
+        return "thinking" if self.mode == "writing" else "awake"
+
+    def level(self):
+        levels = self.snap.get("levels") or [0.0]
+        return min(0.5, levels[-1] * 3) if self.mode == "recording" else 0.0
+
+    def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
+        mid = height / 2
+        mint = tuple(_gfx.accent())
+        if self.mode == "recording":
+            badge = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(7, mid - 13, 26, 26))
+            badge.setWantsLayer_(True)
+            badge.layer().setCornerRadius_(13)
+            badge.layer().setBackgroundColor_(_cg(mint, 0.22))
+            view.addSubview_(badge)
+            icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("mic.fill", 11, "bold"))
+            icon.setContentTintColor_(_ns(mint))
+            icon.setFrame_(AppKit.NSMakeRect(5, 5, 16, 16))
+            badge.addSubview_(icon)
+            self.breathe_layer = badge.layer()
+            glow = Quartz.CABasicAnimation.animationWithKeyPath_("backgroundColor")
+            glow.setFromValue_(_cg(mint, 0.15))
+            glow.setToValue_(_cg(mint, 0.45))
+            glow.setDuration_(0.8)
+            glow.setAutoreverses_(True)
+            glow.setRepeatCount_(1e9)
+            badge.layer().addAnimation_forKey_(glow, "glow")
+            self.wave = []
+            for i in range(self.BARS):
+                bar = Quartz.CALayer.layer()
+                bar.setCornerRadius_(1.25)
+                bar.setBackgroundColor_(_cg(mint, 0.95))
+                bar.setFrame_(Quartz.CGRectMake(42 + i * 5, mid - 1.5, 2.5, 3))
+                view.layer().addSublayer_(bar)
+                self.wave.append(bar)
+            self.clock = self.label(view, "0:00", 136, mid - 8, 40, size=12, mono=True, rgb=DIM)
+            self.button(view, "xmark", self.cancel, 180, mid - 12, DIM, size=24, symbol_size=9,
+                        tip="Throw it away")
+            self.tick(time.time())
+        elif self.mode == "writing":
+            self.spinner(view, 9, mid - 8, mint)
+            self.label(view, "Writing…", 32, mid - 9, 120, size=13)
+        elif self.mode == "done":
+            self.label(view, "✓  Pasted", 10, mid + 1, 180, size=12, rgb=GREEN)
+            self.label(view, " ".join(self.snap.get("text", "").split())[:60], 10, mid - 14, width - 16, size=10.5,
+                       weight="medium", rgb=DIM)
+        else:
+            self.label(view, self.snap.get("error") or "Didn't catch that", 10, mid - 9, width - 16, size=12,
+                       rgb=ORANGE)
+
+    def tick(self, now):
+        from mint.voice import dictation
+        if self.mode != "recording" or not hasattr(self, "wave"):
+            return
+        snap = dictation.snapshot() or self.snap
+        self.clock.setStringValue_(_stamp(snap.get("seconds", 0)))
+        levels = (snap.get("levels") or [])[-self.BARS:]
+        levels = [0.0] * (self.BARS - len(levels)) + levels
+        mid = ROW / 2
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.08)
+        for bar, level in zip(self.wave, levels):
+            h = 3 + min(1.0, math.sqrt(level) * 3.2) * 22
+            frame = bar.frame()
+            bar.setFrame_(Quartz.CGRectMake(frame.origin.x, mid - h / 2, 2.5, h))
+        Quartz.CATransaction.commit()
+
+    def cancel(self):
+        from mint.voice import dictation
+        dictation.cancel()
+
+
+DROP_ACTIONS = {
+    "document": [("text.alignleft", "Summarize it"), ("character.bubble", "Translate it into Hindi, as a Word doc"),
+                 ("tablecells", "Make a spreadsheet of its tables"), ("doc.on.clipboard", "Copy all its text")],
+    "image": [("text.viewfinder", "Copy the text in it"), ("eye", "Describe it"),
+              ("tablecells", "Make a spreadsheet of the table in it")],
+    "video": [("sparkles.tv", "Watch it and tell me what it's about"), ("captions.bubble", "Add captions to it"),
+              ("rectangle.portrait", "Make it vertical for Reels"), ("arrow.down.right.and.arrow.up.left", "Compress it")],
+    "audio": [("waveform", "Transcribe it"), ("text.alignleft", "Summarize it")],
+    "sheet": [("chart.bar", "Summarize the data"), ("text.magnifyingglass", "Find anything unusual in it")],
+    "folder": [("sparkles", "Tidy it up"), ("list.bullet", "What's in it?")],
+    "many": [("tablecells", "Make one spreadsheet of all of them"), ("text.alignleft", "Summarize them"),
+             ("folder.badge.plus", "Put them in one folder")],
+    "text": [("text.alignleft", "Summarize it"), ("character.bubble", "Translate it"), ("pencil", "Make it more formal"),
+             ("doc.on.clipboard", "Copy it")],
+}
+KINDS = {"document": (".pdf", ".doc", ".docx", ".txt", ".md", ".rtf", ".pages", ".html", ".key", ".pptx"),
+         "image": (".png", ".jpg", ".jpeg", ".heic", ".gif", ".webp", ".tiff", ".bmp"),
+         "video": (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"),
+         "audio": (".mp3", ".m4a", ".wav", ".aiff", ".aac", ".flac", ".ogg"),
+         "sheet": (".csv", ".xlsx", ".xls", ".numbers", ".tsv")}
+
+
+def drop_kind(paths: list[str], text: str) -> str:
+    if not paths:
+        return "text"
+    if len(paths) > 1:
+        return "many"
+    if os.path.isdir(paths[0]):
+        return "folder"
+    ext = os.path.splitext(paths[0])[1].lower()
+    return next((kind for kind, exts in KINDS.items() if ext in exts), "document")
+
+
+class DropScene(Scene):
+    """While a file is being dragged anywhere: a capsule to drop it on ("Drop here for Mint"); after the
+    drop, a card of things to do with it that fit what it is - or just tell Mint."""
+
+    key = "drop"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mode, self.dropped_at = "", 0.0
+        self.paths: list[str] = []
+        self.text = ""
+
+    def provide(self, now):
+        if island.dragging:
+            self.mode, self.priority = "target", 97
+            return self
+        if self.mode == "actions" and now - self.dropped_at < 30:
+            self.priority = 94
+            return self
+        self.mode = ""
+        return None
+
+    def signature(self):
+        return f"drop:{self.mode}:{'hot' if island.drop_hot else ''}:{self.dropped_at}"
+
+    @property
+    def card(self) -> bool:
+        return self.mode == "actions"
+
+    def size(self):
+        if self.mode == "target":
+            return (40 + 196, ROW)
+        rows = len(DROP_ACTIONS[drop_kind(self.paths, self.text)]) + 1
+        return (320, 62 + rows * 36 + 10)
+
+    def mood(self):
+        return "awake"
+
+    def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
+        mint = tuple(_gfx.accent())
+        if self.mode == "target":
+            mid = height / 2
+            ring = Quartz.CAShapeLayer.layer()
+            ring.setFrame_(Quartz.CGRectMake(4, 4, width - 6, height - 8))
+            ring.setPath_(Quartz.CGPathCreateWithRoundedRect(Quartz.CGRectMake(0, 0, width - 6, height - 8),
+                                                            (height - 8) / 2, (height - 8) / 2, None))
+            ring.setFillColor_(_cg(mint, 0.18 if island.drop_hot else 0.06))
+            ring.setStrokeColor_(_cg(mint, 0.9))
+            ring.setLineWidth_(1.6)
+            ring.setLineDashPattern_([5, 4])
+            view.layer().addSublayer_(ring)
+            march = Quartz.CABasicAnimation.animationWithKeyPath_("lineDashPhase")
+            march.setFromValue_(0)
+            march.setToValue_(-18)
+            march.setDuration_(0.8)
+            march.setRepeatCount_(1e9)
+            ring.addAnimation_forKey_(march, "march")
+            icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("tray.and.arrow.down.fill", 14))
+            icon.setContentTintColor_(_ns(mint))
+            icon.setFrame_(AppKit.NSMakeRect(18, mid - 9, 22, 18))
+            view.addSubview_(icon)
+            self.label(view, "Let go to hand it over" if island.drop_hot else "Drop here for Mint", 46, mid - 9,
+                       width - 52, size=13)
+            return
+        top = height - 14
+        right = width - (48 if island.face_right and island.face_top else 14)
+        first = self.paths[0] if self.paths else ""
+        if first:
+            picture = AppKit.NSWorkspace.sharedWorkspace().iconForFile_(first)
+            image = AppKit.NSImageView.imageViewWithImage_(picture)
+            image.setFrame_(AppKit.NSMakeRect(14, top - 34, 34, 34))
+            view.addSubview_(image)
+        else:
+            badge = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("text.quote", 16))
+            badge.setContentTintColor_(_ns(mint))
+            badge.setFrame_(AppKit.NSMakeRect(18, top - 30, 26, 24))
+            view.addSubview_(badge)
+        name = (os.path.basename(first) if first else " ".join(self.text.split())[:40] or "Text")
+        more = f"  +{len(self.paths) - 1} more" if len(self.paths) > 1 else ""
+        self.label(view, name + more, 56, top - 15, right - 56, size=14, weight="bold")
+        self.label(view, "What should I do with it?", 56, top - 32, right - 56, size=11, weight="medium", rgb=DIM)
+        y = top - 50
+        actions = DROP_ACTIONS[drop_kind(self.paths, self.text)] + [("mic.fill", "Tell Mint what to do")]
+        for n, (symbol, words) in enumerate(actions):
+            y -= 36
+            last = n == len(actions) - 1
+            act = _IslandAct.alloc().initWithFn_(lambda w=words, lst=last: self.choose(w, lst))
+            self._acts.append(act)
+            row = _IslandButton.alloc().initWithFrame_(AppKit.NSMakeRect(10, y + 1, width - 20, 32))
+            row.setBordered_(False)
+            row.setTitle_("")
+            row.setTarget_(act)
+            row.setAction_("fire:")
+            row.setWantsLayer_(True)
+            row.layer().setCornerRadius_(9)
+            row.layer().setBackgroundColor_(_cg(mint if last else (1, 1, 1), 0.16 if last else 0.06))
+            view.addSubview_(row)
+            icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(symbol, 12))
+            icon.setContentTintColor_(_ns(mint if last else INK))
+            icon.setFrame_(AppKit.NSMakeRect(22, y + 8, 20, 18))
+            view.addSubview_(icon)
+            self.label(view, words, 50, y + 8, width - 70, size=13, weight="semibold", rgb=mint if last else INK)
+
+    def choose(self, words: str, tell: bool) -> None:
+        what = ", ".join(self.paths) if self.paths else ""
+        if tell:
+            request = (f"(The user dropped {'these files' if len(self.paths) > 1 else 'this file' if self.paths else 'this text'} "
+                       f"on you: {what or self.text[:2000]}) Ask in a few words what they'd like done with it, then wait.")
+            island.hud._fire("wake")
+        elif self.paths:
+            request = f"{words}: {what}"
+        else:
+            request = f"{words}:\n{self.text[:6000]}"
+        island.hud._fire("submit", request)
+        self.mode = ""
+        print(f"  {time.strftime('%H:%M:%S')} [dropped -> {words}]", flush=True)
+
+
+class VideoEditScene(Scene):
+    """A video being edited (video_edit.py): what it is doing and how far it has got."""
+
+    key = "video_edit"
+    priority = 57
+
+    def provide(self, now):
+        from mint.tools import video_edit
+        self.snap = video_edit.snapshot()
+        return self if self.snap else None
+
+    def size(self):
+        return (40 + 236, ROW)
+
+    def mood(self):
+        return "working"
+
+    def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
+        mint = tuple(_gfx.accent())
+        mid = height / 2
+        icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol("scissors", 12, "bold"))
+        icon.setContentTintColor_(_ns(mint))
+        icon.setFrame_(AppKit.NSMakeRect(10, mid - 8, 18, 16))
+        view.addSubview_(icon)
+        self.step = self.label(view, "", 34, mid, 160, size=12)
+        self.track = Quartz.CALayer.layer()
+        self.track.setFrame_(Quartz.CGRectMake(34, mid - 9, 190, 4))
+        self.track.setCornerRadius_(2)
+        self.track.setBackgroundColor_(_cg((1, 1, 1), 0.12))
+        view.layer().addSublayer_(self.track)
+        self.fill = Quartz.CALayer.layer()
+        self.fill.setFrame_(Quartz.CGRectMake(34, mid - 9, 2, 4))
+        self.fill.setCornerRadius_(2)
+        self.fill.setBackgroundColor_(_cg(mint))
+        view.layer().addSublayer_(self.fill)
+        self.percent = self.label(view, "", 196, mid, 34, size=11, mono=True, rgb=DIM)
+        self.percent.setAlignment_(AppKit.NSTextAlignmentRight)
+        self.tick(time.time())
+
+    def tick(self, now):
+        from mint.tools import video_edit
+        snap = video_edit.snapshot() or self.snap
+        if not hasattr(self, "fill"):
+            return
+        percent = max(0.0, min(100.0, float(snap.get("percent") or 0)))
+        self.step.setStringValue_(str(snap.get("step") or "Editing the video"))
+        self.percent.setStringValue_(f"{percent:.0f}%" if percent else "")
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.3)
+        self.fill.setFrame_(Quartz.CGRectMake(34, ROW / 2 - 9, max(2.0, 190 * percent / 100), 4))
+        Quartz.CATransaction.commit()
+
+
+class ConvertScene(VideoEditScene):
+    """A document being converted or translated (convert.py): the step and its parts done."""
+
+    key = "convert"
+    priority = 56
+
+    def provide(self, now):
+        from mint.tools import convert
+        self.snap = convert.snapshot()
+        return self if self.snap else None
+
+    def build(self, view, width, height):
+        super().build(view, width, height)
+        icon = next(v for v in view.subviews() if isinstance(v, AppKit.NSImageView))
+        icon.setImage_(gfx.symbol("doc.text.fill", 12, "bold"))
+
+    def tick(self, now):
+        from mint.tools import convert
+        snap = convert.snapshot() or self.snap
+        if not hasattr(self, "fill"):
+            return
+        total, done = int(snap.get("total") or 0), int(snap.get("done") or 0)
+        percent = 100.0 * done / total if total else 0.0
+        self.step.setStringValue_(str(snap.get("step") or snap.get("title") or "Converting"))
+        self.percent.setStringValue_(f"{done}/{total}" if total else "")
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.3)
+        self.fill.setFrame_(Quartz.CGRectMake(34, ROW / 2 - 9, max(2.0, 190 * percent / 100), 4))
+        Quartz.CATransaction.commit()
+
+
+class TrackerScene(Scene):
+    """A tracker: "Tracking · <what>" for a moment when it starts; when it ends, "✓ Download finished"
+    (click: open it / bring the app forward) - or "Needs you" when a Claude session waits for approval."""
+
+    key = "tracker"
+    ICONS = {"download": "arrow.down.circle.fill", "claude": "sparkles", "terminal": "terminal.fill",
+             "window": "macwindow", "file": "doc.fill"}
+
+    def provide(self, now):
+        from mint.tools import trackers
+        ended = trackers.recent(8.0)
+        if ended:
+            self.item, self.mode = ended, ended["outcome"]
+            self.priority = 40
+            return self
+        started = trackers.just_started(3.5)
+        if started:
+            self.item, self.mode = started, "started"
+            self.priority = 25
+            return self
+        return None
+
+    def signature(self):
+        return f"tracker:{self.mode}:{self.item.get('id')}"
+
+    def size(self):
+        attrs = {AppKit.NSFontAttributeName: _font(13, "semibold")}
+        measured = AppKit.NSString.stringWithString_(self._title()).sizeWithAttributes_(attrs).width
+        return (40 + min(320.0, 42 + measured + 14), ROW)
+
+    def mood(self):
+        return "awake"
+
+    def _title(self) -> str:
+        kind, label = self.item.get("kind", ""), self.item.get("label", "")
+        if self.mode == "started":
+            return f"Tracking · {label}"
+        if self.mode == "waiting":
+            return "Needs you · " + label
+        if self.mode == "failed":
+            return "Didn't finish · " + label
+        opened = Path(self.item.get("open") or "").name
+        if kind == "download":
+            return f"Downloaded · {opened}" if opened else "Download finished"
+        if kind == "file":
+            return f"Ready · {opened}" if opened else "File ready"
+        return {"claude": "Claude is done · ", "terminal": "Command finished · "}.get(kind, "Done · ") + label
+
+    def build(self, view, width, height):
+        from mint.ui import gfx as _gfx
+        mid = height / 2
+        rgb = {"done": GREEN, "failed": ORANGE, "waiting": ORANGE}.get(self.mode, tuple(_gfx.accent()))
+        badge = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(8, mid - 13, 26, 26))
+        badge.setWantsLayer_(True)
+        badge.layer().setCornerRadius_(13)
+        badge.layer().setBackgroundColor_(_cg(rgb, 0.2))
+        view.addSubview_(badge)
+        symbol = "checkmark" if self.mode == "done" else self.ICONS.get(self.item.get("kind"), "eye.fill")
+        icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(symbol, 11, "bold"))
+        icon.setContentTintColor_(_ns(rgb))
+        icon.setFrame_(AppKit.NSMakeRect(5, 5, 16, 16))
+        badge.addSubview_(icon)
+        if self.mode == "done":
+            pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
+            pop.setFromValue_(0.3)
+            pop.setToValue_(1.0)
+            pop.setDamping_(9)
+            pop.setStiffness_(240)
+            pop.setDuration_(pop.settlingDuration())
+            badge.layer().addAnimation_forKey_(pop, "pop")
+        self.label(view, self._title(), 42, mid - 9, width - 50, size=13, rgb=INK)
+
+    def clicked(self) -> None:
+        """Open what finished: the downloaded file, the app, or Claude."""
+        item = self.item
+        if item.get("open"):
+            subprocess.run(["open", item["open"]], check=False)
+        elif item.get("kind") == "claude":
+            subprocess.run(["open", "-a", "Claude"], check=False)
+        elif item.get("app"):
+            subprocess.run(["open", "-a", item["app"]], check=False)
+
+
+TINTS = {"mint": None, "blue": BLUE, "orange": ORANGE, "green": GREEN, "purple": PURPLE, "red": RED, "teal": TEAL}
+
+
+class InfoCard(Scene):
+    """An answer as a card: a count ("12 unread emails" - a big number) or a short list (files, emails,
+    downloads, automations, trackers...) with icons; a row with a file opens it on click."""
+
+    key = "info"
+    priority = 32
+    card = True
+    WIDTH = 324
+    ROWS = 7
+
+    def __init__(self, data: dict) -> None:
+        super().__init__()
+        self.data = data
+        self.items = [i for i in (data.get("items") or []) if isinstance(i, dict) and i.get("title")]
+
+    def signature(self):
+        return f"info:{id(self)}"
+
+    def _number(self) -> str:
+        number = self.data.get("number")
+        return "" if number in (None, "") else str(number)
+
+    def size(self):
+        h = 16 + (46 if self.data.get("subtitle") else 36)    # padding + header
+        if self._number():
+            h += 62
+        shown = min(len(self.items), self.ROWS)
+        if shown:
+            h += 6 + shown * 34
+        if len(self.items) > self.ROWS or self.data.get("more"):
+            h += 20
+        return (self.WIDTH, h + 12)
+
+    def clicked(self) -> None:
+        island.dismiss(self)
+
+    def _tint(self):
+        from mint.ui import gfx as _gfx
+        return TINTS.get(str(self.data.get("tint") or "mint")) or tuple(_gfx.accent())
+
+    def build(self, view, width, height):
+        tint = self._tint()
+        top = height - 14
+        right = width - (48 if island.face_right and island.face_top else 14)
+        badge = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(16, top - 32, 32, 32))
+        badge.setWantsLayer_(True)
+        badge.layer().setCornerRadius_(10)
+        badge.layer().setBackgroundColor_(_cg(tint, 0.2))
+        view.addSubview_(badge)
+        icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(str(self.data.get("icon") or "sparkles"), 14))
+        icon.setContentTintColor_(_ns(tint))
+        icon.setFrame_(AppKit.NSMakeRect(6, 6, 20, 20))
+        badge.addSubview_(icon)
+        self.label(view, str(self.data.get("title") or ""), 58, top - 14, right - 58, size=15, weight="bold",
+                   rounded=True, h=19)
+        if self.data.get("subtitle"):
+            self.label(view, str(self.data["subtitle"]), 58, top - 31, right - 58, size=11, weight="medium", rgb=DIM)
+        y = top - (46 if self.data.get("subtitle") else 36)
+        number = self._number()
+        if number:
+            y -= 62
+            big = self.label(view, number, 18, y + 4, 200, size=46, weight="bold", rgb=tint, rounded=True, h=56)
+            big.sizeToFit()
+            nw = big.frame().size.width
+            if self.data.get("unit"):
+                self.label(view, str(self.data["unit"]), 18 + nw + 8, y + 14, width - 44 - nw, size=15,
+                           weight="semibold", rgb=INK, alpha=0.9)
+            pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
+            pop.setFromValue_(0.6)
+            pop.setToValue_(1.0)
+            pop.setDamping_(10)
+            pop.setStiffness_(220)
+            pop.setDuration_(pop.settlingDuration())
+            big.setWantsLayer_(True)
+            big.layer().addAnimation_forKey_(pop, "pop")
+        if self.items:
+            y -= 6
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
+        for n, item in enumerate(self.items[: self.ROWS]):
+            y -= 34
+            if n % 2 == 0:
+                stripe = Quartz.CALayer.layer()
+                stripe.setFrame_(Quartz.CGRectMake(10, y + 1, width - 20, 32))
+                stripe.setCornerRadius_(8)
+                stripe.setBackgroundColor_(_cg((1, 1, 1), 0.04))
+                view.layer().addSublayer_(stripe)
+            path = str(item.get("path") or "")
+            if path and os.path.exists(os.path.expanduser(path)):
+                picture = workspace.iconForFile_(os.path.expanduser(path))
+                image = AppKit.NSImageView.imageViewWithImage_(picture)
+                image.setFrame_(AppKit.NSMakeRect(16, y + 5, 24, 24))
+            else:
+                image = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(str(item.get("icon") or "circle.fill"),
+                                                                          10 if not item.get("icon") else 13))
+                image.setContentTintColor_(_ns(tint))
+                image.setFrame_(AppKit.NSMakeRect(18, y + 8, 20, 18))
+            view.addSubview_(image)
+            trailing = str(item.get("trailing") or "")
+            tw = 0
+            if trailing:
+                tw = min(96, 12 + len(trailing) * 6.6)
+                tail = self.label(view, trailing, width - 16 - tw, y + 10, tw, size=11, weight="semibold", rgb=DIM,
+                                  mono=bool(re.match(r"^[\d:.,% ]+[a-zA-Z]{0,3}$", trailing)))
+                tail.setAlignment_(AppKit.NSTextAlignmentRight)
+            detail = str(item.get("detail") or "")
+            text_w = width - 50 - 18 - tw
+            if detail:
+                self.label(view, str(item["title"]), 48, y + 16, text_w, size=13, weight="semibold")
+                self.label(view, detail, 48, y + 2, text_w, size=10.5, weight="medium", rgb=DIM)
+            else:
+                self.label(view, str(item["title"]), 48, y + 9, text_w, size=13, weight="semibold")
+            if path:                                   # the whole row opens it
+                act = _IslandAct.alloc().initWithFn_(lambda p=path: subprocess.run(["open", os.path.expanduser(p)],
+                                                                                   check=False))
+                self._acts.append(act)
+                row = _IslandButton.alloc().initWithFrame_(AppKit.NSMakeRect(10, y + 1, width - 20, 32))
+                row.setTransparent_(True)
+                row.setTarget_(act)
+                row.setAction_("fire:")
+                row.setToolTip_(f"Open {os.path.basename(path)}")
+                view.addSubview_(row)
+        extra = max(0, len(self.items) - self.ROWS) + int(self.data.get("more") or 0)
+        if extra:
+            y -= 20
+            self.label(view, f"+ {extra} more", 48, y + 2, 200, size=11, weight="semibold", rgb=DIM)
 
 
 class ScheduleCard(Scene):
@@ -743,6 +1502,9 @@ class Island:
         self.mood = ""
         self.closing = False
         self.hover_since = 0.0
+        self.dragging = False
+        self.drop_hot = False
+        self.drag_count = -1
 
     # --- building --------------------------------------------------------------------------------
 
@@ -753,8 +1515,9 @@ class Island:
         screen = AppKit.NSScreen.mainScreen().frame()
         self.screen = screen
         self.panel = _panel(screen, click_through=True)
-        root = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, screen.size.width, screen.size.height))
+        root = _IslandRoot.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, screen.size.width, screen.size.height))
         root.setWantsLayer_(True)
+        root.registerForDraggedTypes_([AppKit.NSPasteboardTypeFileURL, AppKit.NSPasteboardTypeString])
         self.panel.setContentView_(root)
         self.root = root
 
@@ -789,8 +1552,10 @@ class Island:
         self.face_button.setHidden_(True)
         root.addSubview_(self.face_button)
 
-        meeting, screen_scene, teach_scene, tutor_scene = MeetingScene(), ScreenScene(), TeachScene(), TutorScene()
-        self.providers = [meeting.provide, screen_scene.provide, teach_scene.provide, tutor_scene.provide]
+        self.drop = DropScene()
+        scenes = (MeetingScene(), ScreenScene(), TeachScene(), TutorScene(), VideoScene(), TrackerScene(),
+                  DictationScene(), VideoEditScene(), ConvertScene(), self.drop)
+        self.providers = [scene.provide for scene in scenes]
         self._hide_bubble_while_shown()
 
         self.ticker = _IslandTicker.alloc().initWithOwner_(self)
@@ -825,6 +1590,36 @@ class Island:
 
     def show_schedule(self, data: dict, seconds: float = 40.0) -> None:
         AppHelper.callAfter(self._push, ScheduleCard(data), seconds)
+
+    def drop_hover(self, hot: bool) -> None:
+        self.drop_hot = hot
+
+    def dropped(self, paths: list[str], text: str) -> None:
+        """Something was dropped on the capsule: offer what to do with it."""
+        self.dragging, self.drop_hot = False, False
+        drop = self.drop
+        drop.paths, drop.text = paths, text
+        drop.mode, drop.dropped_at = "actions", time.time()
+        print(f"  {time.strftime('%H:%M:%S')} [dropped on Mint: {', '.join(os.path.basename(p) for p in paths) or 'text'}]",
+              flush=True)
+
+    def _watch_drag(self) -> None:
+        """A drag (files or text) started anywhere: show the drop target until the button is let go."""
+        board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
+        count = board.changeCount()
+        pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+        if count != self.drag_count:
+            self.drag_count = count
+            types = [str(t) for t in (board.types() or [])]
+            if pressed and any(t in types for t in (str(AppKit.NSPasteboardTypeFileURL),
+                                                    str(AppKit.NSPasteboardTypeString))):
+                self.dragging = True
+        if self.dragging and not pressed:
+            self.dragging, self.drop_hot = False, False
+
+    def show_card(self, data: dict, seconds: float = 20.0) -> None:
+        """An answer as a card (see InfoCard): a count, a list of files, emails, things."""
+        AppHelper.callAfter(self._push, InfoCard(data), seconds)
 
     def dismiss(self, scene: Scene) -> None:
         self.pushed = [(s, until) for s, until in self.pushed if s is not scene]
@@ -869,6 +1664,8 @@ class Island:
     def _tick(self) -> None:
         now = time.time()
         self.frame += 1
+        if self.frame % 3 == 0:
+            self._watch_drag()
         if self.frame % 3 == 0 and not self.closing:
             scene = self._pick(now)
             sig = scene.signature() if scene is not None else ""
@@ -962,7 +1759,7 @@ class Island:
     # --- motion ----------------------------------------------------------------------------------
 
     @staticmethod
-    def _spring(layer, key, old, new, damping=17.0, stiffness=190.0) -> None:
+    def _spring(layer, key, old, new, damping=20.0, stiffness=190.0) -> None:
         anim = Quartz.CASpringAnimation.animationWithKeyPath_(key)
         anim.setFromValue_(old)
         anim.setToValue_(new)
@@ -972,7 +1769,7 @@ class Island:
         anim.setDuration_(anim.settlingDuration())
         layer.addAnimation_forKey_(anim, key)
 
-    def _shape(self, rect, radius, animate: bool = True, damping=17.0) -> None:
+    def _shape(self, rect, radius, animate: bool = True, damping=20.0) -> None:
         """Move the black capsule to `rect` (screen points), springing from wherever it is now."""
         x, y, w, h = rect
         lx, ly = self._local(x, y)
@@ -1022,7 +1819,8 @@ class Island:
         x, y, w, h = rect
         lx, ly = self._local(x, y)
         if scene.card:
-            frame = AppKit.NSMakeRect(lx, ly, w, h)
+            strip = 0.0 if self.face_top else ROW - 6         # the face's own strip at the bottom
+            frame = AppKit.NSMakeRect(lx, ly + strip, w, h - strip)
         elif self.face_right:
             frame = AppKit.NSMakeRect(lx, ly, w - ROW, h)
         else:
@@ -1071,7 +1869,7 @@ class Island:
         def grow():
             if self.scene is not scene or not self.shown:
                 return
-            self._shape(rect, self._radius(scene, height), damping=15.0)
+            self._shape(rect, self._radius(scene, height), damping=19.0)      # a small bounce, not a wobble
             shown = self.face_host.presentationLayer() or self.face_host
             Quartz.CATransaction.begin()
             Quartz.CATransaction.setDisableActions_(True)

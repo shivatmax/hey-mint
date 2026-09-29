@@ -117,6 +117,26 @@ class Presence:
             print(f"  [shortcut: {hotkeys.display(keys['toggle'])} opens and closes {prefs.name()}]", flush=True)
         if keys.get("close"):
             self._hotkeys.register(keys["close"], lambda: self.fire("dismiss"))
+        if keys.get("talk") and self._hotkeys.register(keys["talk"], lambda: self.fire("wake")):
+            print(f"  [shortcut: {hotkeys.display(keys['talk'])} - talk to {prefs.name()} without the wake word]",
+                  flush=True)
+        self._register_dictation(keys)
+
+    def _register_dictation(self, keys: dict) -> None:
+        """Dictation (dictation.py): hold the key to dictate at the cursor, tap it twice for hands-free."""
+        from mint.voice import dictation
+        if getattr(self, "_dictation_hold", None) is not None:
+            self._dictation_hold.stop()
+            self._dictation_hold = None
+        key = str(keys.get("dictate") or "")
+        if key in hotkeys.MODIFIER_KEYS:
+            self._dictation_hold = hotkeys.ModifierHold(key, dictation.start, dictation.finish, dictation.toggle)
+            self._dictation_hold.start()
+            print(f"  [shortcut: hold {hotkeys.display(key)} to dictate, tap it twice for hands-free]", flush=True)
+        elif key and self._hotkeys.register(key, dictation.start, on_release=dictation.finish):
+            print(f"  [shortcut: hold {hotkeys.display(key)} to dictate]", flush=True)
+        if keys.get("dictate_toggle"):
+            self._hotkeys.register(keys["dictate_toggle"], dictation.toggle)
 
     # --- menus --------------------------------------------------------------------
 

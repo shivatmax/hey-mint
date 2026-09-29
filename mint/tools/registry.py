@@ -618,6 +618,9 @@ _tools_before_power = tools
 def _power_modules():
     from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import briefing
+    from mint.tools import cards
+    from mint.tools import convert
+    from mint.voice import dictation
     from mint.tools import mac as macctl
     from mint.tools import mailtriage
     from mint.tools import meetings
@@ -627,10 +630,12 @@ def _power_modules():
     from mint.tools import sheets
     from mint.knowledge import teach
     from mint.tools import tidy
+    from mint.tools import trackers
     from mint.tools import translate
     from mint.ui import tutor
+    from mint.tools import video_edit
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -650,7 +655,9 @@ def _power(name: str):
 _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
-                                                  "screen_record")})
+                                                  "screen_record", "track", "show_card",
+                                                  "dictation", "edit_video", "video_info", "ocr_copy",
+                                                  "data_to_sheet", "convert_document")})
 
 
 # --- Tasks that last: sub-steps, replanning, resuming (tasks.py; run by the session) --

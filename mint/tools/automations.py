@@ -409,10 +409,30 @@ def change(action: str, what: str) -> str:
     return f"FAILED: unknown action {action}."
 
 
+def _card(rows: list[dict]) -> None:
+    """The automations as a card on the island."""
+    try:
+        from mint.tools import cards
+        items = []
+        for r in rows:
+            t, on = r["trigger"], r.get("enabled", True)
+            nxt = (dt.datetime.fromtimestamp(r["next_run"]).strftime("%a %-I:%M%p").lower()
+                   if on and r.get("next_run") else ("paused" if not on else ""))
+            when = describe(r).split(": ", 1)[-1].split(" → ")[0]
+            icon = {"daily": "sunrise.fill", "every": "arrow.clockwise", "at": "clock.fill", "folder": "folder.fill",
+                    "app_opens": "app.badge", "before_event": "calendar"}.get(t["type"], "bolt.fill")
+            items.append({"title": r["name"], "detail": when, "trailing": nxt, "icon": icon})
+        cards.show("Automations", len(rows), "automation" + ("s" if len(rows) != 1 else ""),
+                   items=items, icon="bolt.fill", tint="purple")
+    except Exception:
+        pass
+
+
 def listing() -> str:
     rows = load()
     if not rows:
         return "No automations yet. Make one with automation action=create."
+    _card(rows)
     lines = []
     for r in rows:
         last = r.get("runs") or []

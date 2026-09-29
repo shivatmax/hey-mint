@@ -492,6 +492,12 @@ class Mint:
             # started; our own microphone takes over once that has caught up.
             self._mic_alive = True
             return
+        from mint.voice import dictation
+        if dictation.capturing():
+            # The user is dictating text (dictation.py): the words are theirs to type, not a
+            # request - Mint neither hears nor answers them.
+            dictation.feed(pcm)
+            return
         if self.paused:
             return
         if self.enroller is not None:
@@ -1728,6 +1734,8 @@ class Mint:
         automations.start()                 # schedules and triggers (they report through the hub)
         from mint.knowledge import timeline
         timeline.start()                    # the activity timeline (does nothing unless it is on)
+        from mint.tools import trackers
+        trackers.start_service()            # "let me know when ..." trackers left running before a restart
         from mint.knowledge import teach
 
         def teaching(state, detail=""):
@@ -1974,8 +1982,9 @@ class Mint:
             from mint.tools import meetings
             from mint.tools import screenrec
             from mint.knowledge import teach
+            from mint.tools import trackers
             from mint.ui import tutor
-            if tutor.keep_loaded() or teach.recording() or meetings.busy() or screenrec.busy():
+            if tutor.keep_loaded() or teach.recording() or meetings.busy() or screenrec.busy() or trackers.busy():
                 return False
         except Exception:
             pass

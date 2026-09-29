@@ -5,7 +5,10 @@ Control-M uses. It needs no permission, works whichever app is in front, and
 consumes the keystroke, so the app in front does not also act on it. Must be
 called on the main thread; Cocoa's run loop delivers the events.
 
-Shortcuts are written "cmd+j", "ctrl+option+space", "cmd+shift+h".
+Shortcuts are written "cmd+j", "ctrl+option+space", "cmd+shift+h". A shortcut can also
+report its release (hold-to-talk). A single modifier key held down on its own - "right_option",
+"right_command", "right_control", "right_shift", "fn" (Wispr-Flow style) - is watched by
+ModifierHold instead: hold it to act while held, or tap it twice to start and tap once more to stop.
 """
 
 from __future__ import annotations
@@ -46,6 +49,8 @@ _carbon.UnregisterEventHotKey.argtypes = [ctypes.c_void_p]
 _carbon.GetEventParameter.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
                                       ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p]
 _carbon.GetEventParameter.restype = ctypes.c_int32
+_carbon.GetEventKind.argtypes = [ctypes.c_void_p]
+_carbon.GetEventKind.restype = ctypes.c_uint32
 
 _SIGNATURE = _code("JRVS")
 _MODIFIERS = {
@@ -73,7 +78,9 @@ def parse(shortcut: str) -> tuple[int, int] | None:
 
 
 def display(shortcut: str) -> str:
-    """'cmd+shift+j' -> '⇧⌘J', the way macOS menus write it."""
+    """'cmd+shift+j' -> '⇧⌘J', the way macOS menus write it; 'right_option' -> 'Right ⌥'."""
+    if shortcut in MODIFIER_NAMES:
+        return MODIFIER_NAMES[shortcut]
     parts = [p.strip().lower() for p in shortcut.split("+") if p.strip()]
     if not parts:
         return ""
@@ -86,6 +93,7 @@ def display(shortcut: str) -> str:
 class HotKeys:
     def __init__(self) -> None:
         self._callbacks: dict[int, callable] = {}
+        self._releases: dict[int, callable] = {}
         self._refs: dict[int, ctypes.c_void_p] = {}
         self._next = 1
         self._handler = None
@@ -99,7 +107,8 @@ class HotKeys:
             status = _carbon.GetEventParameter(event, _code("----"), _code("hkid"), None,
                                                ctypes.sizeof(hot), None, ctypes.byref(hot))
             if status == 0 and hot.signature == _SIGNATURE:
-                callback = self._callbacks.get(hot.id)
+                released = _carbon.GetEventKind(event) == 6            # kEventHotKeyReleased
+                callback = (self._releases if released else self._callbacks).get(hot.id)
                 if callback is not None:
                     try:
                         callback()
@@ -108,15 +117,17 @@ class HotKeys:
             return 0
 
         self._handler = _HANDLER(handle)   # keep a reference, or ctypes frees it
-        spec = _EventTypeSpec(_code("keyb"), 5)   # kEventClassKeyboard, kEventHotKeyPressed
+        # kEventClassKeyboard: kEventHotKeyPressed (5) and kEventHotKeyReleased (6)
+        specs = (_EventTypeSpec * 2)(_EventTypeSpec(_code("keyb"), 5), _EventTypeSpec(_code("keyb"), 6))
         ref = ctypes.c_void_p()
         status = _carbon.InstallEventHandler(_carbon.GetApplicationEventTarget(), self._handler,
-                                             1, ctypes.byref(spec), None, ctypes.byref(ref))
+                                             2, specs, None, ctypes.byref(ref))
         if status != 0:
             raise OSError(f"InstallEventHandler failed ({status})")
 
-    def register(self, shortcut: str, callback) -> bool:
-        """Register a shortcut. False if it cannot be parsed or is taken."""
+    def register(self, shortcut: str, callback, on_release=None) -> bool:
+        """Register a shortcut (`on_release` too, for hold-to-talk). False if it cannot be parsed or is
+        taken."""
         parsed = parse(shortcut or "")
         if parsed is None:
             if shortcut:
@@ -135,6 +146,8 @@ class HotKeys:
             print(f"  [shortcut {display(shortcut)} is taken by another app ({status})]", flush=True)
             return False
         self._callbacks[ident] = callback
+        if on_release is not None:
+            self._releases[ident] = on_release
         self._refs[ident] = ref
         return True
 
@@ -143,3 +156,99 @@ class HotKeys:
             _carbon.UnregisterEventHotKey(ref)
         self._refs.clear()
         self._callbacks.clear()
+        self._releases.clear()
+
+
+# --- a modifier key on its own -------------------------------------------------------------
+
+MODIFIER_KEYS = {"right_option": (61, 1 << 19), "right_command": (54, 1 << 20), "right_control": (62, 1 << 18),
+                 "right_shift": (60, 1 << 17), "fn": (63, 1 << 23)}
+MODIFIER_NAMES = {"right_option": "Right ⌥", "right_command": "Right ⌘", "right_control": "Right ⌃",
+                  "right_shift": "Right ⇧", "fn": "fn"}
+
+
+class ModifierHold:
+    """One modifier key on its own: hold it (on_hold, then on_release when let go), or tap it twice
+    quickly (on_double_tap). Typing with it (right-option accents) does nothing: any other key while it
+    is down cancels. Needs Accessibility, like any app watching keys (Mint has it)."""
+
+    HOLD = 0.28           # held this long with nothing else pressed: it is a hold
+    DOUBLE = 0.42         # two taps within this: a double tap
+
+    def __init__(self, name: str, on_hold, on_release, on_double_tap=None) -> None:
+        self.code, self.flag = MODIFIER_KEYS[name]
+        self.on_hold, self.on_release, self.on_double_tap = on_hold, on_release, on_double_tap
+        self.down_at = 0.0
+        self.last_tap = 0.0
+        self.holding = False
+        self.spoiled = False
+        self.monitors = []
+
+    def start(self) -> None:
+        import AppKit
+        mask_flags = AppKit.NSEventMaskFlagsChanged
+        mask_keys = AppKit.NSEventMaskKeyDown
+        self.monitors = [
+            AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask_flags, self._flags),
+            AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask_keys, self._key),
+            AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask_flags, self._local_flags),
+            AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask_keys, self._local_key)]
+
+    def stop(self) -> None:
+        import AppKit
+        for monitor in self.monitors:
+            if monitor is not None:
+                AppKit.NSEvent.removeMonitor_(monitor)
+        self.monitors = []
+
+    def _local_flags(self, event):
+        self._flags(event)
+        return event
+
+    def _local_key(self, event):
+        self._key(event)
+        return event
+
+    def _key(self, event) -> None:
+        if self.down_at:
+            self.spoiled = True              # a key with it: typing, not a hold
+
+    def _flags(self, event) -> None:
+        import time as _time
+
+        from PyObjCTools import AppHelper
+        if int(event.keyCode()) != self.code:
+            if self.down_at:
+                self.spoiled = True          # another modifier joined: a shortcut, not ours
+            return
+        down = bool(int(event.modifierFlags()) & self.flag)
+        now = _time.monotonic()
+        if down and not self.down_at:
+            self.down_at, self.spoiled = now, False
+            stamp = now
+
+            def check():
+                if self.down_at == stamp and not self.spoiled:
+                    self.holding = True
+                    self._call(self.on_hold)
+            AppHelper.callLater(self.HOLD, check)
+        elif not down and self.down_at:
+            held, self.down_at = now - self.down_at, 0.0
+            if self.holding:
+                self.holding = False
+                self._call(self.on_release)
+            elif not self.spoiled and held < self.HOLD:
+                if now - self.last_tap < self.DOUBLE and self.on_double_tap is not None:
+                    self.last_tap = 0.0
+                    self._call(self.on_double_tap)
+                else:
+                    self.last_tap = now
+
+    @staticmethod
+    def _call(fn) -> None:
+        if fn is None:
+            return
+        try:
+            fn()
+        except Exception:
+            log.exception("modifier key handler failed")

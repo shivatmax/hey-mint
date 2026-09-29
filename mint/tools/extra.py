@@ -485,6 +485,9 @@ def prompt_text() -> str:
     from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import automations
     from mint.tools import briefing
+    from mint.tools import cards
+    from mint.tools import convert
+    from mint.voice import dictation
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
     from mint.tools import mac as macctl
@@ -497,13 +500,15 @@ def prompt_text() -> str:
     from mint.app import tasks
     from mint.knowledge import teach
     from mint.tools import tidy
+    from mint.tools import trackers
     from mint.tools import translate
     from mint.ui import tutor
     from mint.tools import video
+    from mint.tools import video_edit
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

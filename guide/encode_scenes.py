@@ -32,6 +32,20 @@ CUTS = {
     "tricks":   ("tricks", 900, 400, 540, 532, 0, None),
     "faces":    ("faces", 1300, 690, 140, 196, 0, None),
     "chat":     ("chat", 980, 150, 460, 740, 0, None),
+    # The island (made-up state on the real island; crops stay clear of the menu bar and the Dock).
+    "island-meeting":  ("island-meeting", 1080, 762, 360, 96, 0, None),
+    "island-teach":    ("island-teach", 200, 128, 1240, 738, 0, None),
+    "island-video":    ("island-video", 1040, 640, 400, 226, 0, None),
+    "island-schedule": ("island-schedule", 1050, 490, 390, 376, 0, None),
+    "island-area":     ("island-area", 200, 128, 1240, 738, 0, None),
+    "island-tutor":    ("island-tutor", 200, 128, 1240, 738, 0, None),
+    "island-trackers": ("island-trackers", 990, 762, 450, 96, 0, None),
+    "island-cards":    ("island-cards", 1050, 520, 390, 346, 0, None),
+    "translate":       ("translate", 900, 300, 500, 360, 0, None),
+    "dictation":       ("dictation", 200, 128, 1240, 738, 0, None),
+    "drop":            ("drop", 1050, 470, 390, 396, 0, None),
+    "convert":         ("convert", 1050, 560, 390, 306, 0, None),
+    "video-edit":      ("video-edit", 1050, 520, 390, 346, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -80,8 +94,39 @@ def stitch_agent():
     return speed
 
 
+PROBES = [(40, 60), (1400, 60), (40, 840), (1000, 120), (1180, 300), (140, 400)]   # never under Mint's UI
+
+
+def foreign(src, start=0.0, length=None) -> list[float]:
+    """Moments (seconds) where the raw recording is not all the demo backdrop at points Mint never draws
+    on - the real screen showing through (a switch to a full-screen Space, say)."""
+    scan = Path("/tmp/_raw_scan")
+    subprocess.run(["rm", "-rf", str(scan)], check=False)
+    scan.mkdir()
+    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", str(start), "-i", str(src)]
+    if length:
+        cmd += ["-t", str(length)]
+    subprocess.run(cmd + ["-vf", "fps=4,scale=720:-1", str(scan / "f%04d.png")], check=True)
+    bad = []
+    for frame in sorted(scan.glob("f*.png")):
+        im = Image.open(frame).convert("RGB")
+        k = im.width / 1440
+        for px, py in PROBES:
+            r, g, b = im.getpixel((int(px * k), int(py * k)))
+            if min(r, g, b) < 180 or max(r, g, b) > 252:
+                bad.append(start + (int(frame.stem[1:]) - 1) / 4)
+                break
+    return bad
+
+
 def encode(name, scene, x, y, w, h, start, length):
     src = RAW / f"{scene}.mov"
+    leaked = foreign(src, start, length)
+    if leaked:
+        print(f"  {name:9s} REJECTED: the real screen shows at {leaked[:6]} s - record the scene again")
+        for old in (OUT / f"{name}.mp4", OUT / f"{name}.jpg"):
+            old.unlink(missing_ok=True)
+        return
     px, py, pw, ph = (int(v * 2) for v in (x, y, w, h))
     pw, ph = pw - pw % 2, ph - ph % 2
     scale = f",scale={MAX_W}:-2:flags=lanczos" if pw > MAX_W else ""
@@ -107,6 +152,25 @@ def encode(name, scene, x, y, w, h, start, length):
             if min(ImageStat.Stat(im.crop((x0, y0, x0 + 24, y0 + 24))).mean) < 150:
                 bad += 1
     size = Image.open(OUT / f"{name}.jpg").size
+    # Every frame, four a second: a corner that is not the pastel backdrop means the real screen showed
+    # (a switch to a full-screen Space, say). Such a clip is thrown away, never published.
+    scan = Path("/tmp/_scene_scan")
+    subprocess.run(["rm", "-rf", str(scan)], check=False)
+    scan.mkdir()
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(mp4), "-vf", "fps=4,scale=96:-1", str(scan / "f%04d.png")],
+                   check=True)
+    leaked = []
+    for frame in sorted(scan.glob("f*.png")):
+        im = Image.open(frame).convert("RGB")
+        W, H = im.size
+        if any(min(ImageStat.Stat(im.crop((x0, y0, x0 + 6, y0 + 6))).mean) < 150
+               for x0, y0 in ((0, 0), (W - 6, 0), (0, H - 6), (W - 6, H - 6))):
+            leaked.append(int(frame.stem[1:]) / 4)
+    if leaked:
+        mp4.unlink(missing_ok=True)
+        (OUT / f"{name}.jpg").unlink(missing_ok=True)
+        print(f"  {name:9s} REJECTED: something other than the backdrop at {leaked[:6]} s - record it again")
+        return
     print(f"  {name:9s} {size[0]}x{size[1]}  {dur:5.1f}s  {mp4.stat().st_size // 1024:6d} KB"
           + (f"  CHECK: {bad} odd corners" if bad else ""))
 

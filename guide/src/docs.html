@@ -85,12 +85,51 @@ open ~/Applications/Mint.app</pre>
   </details>
 </section>
 
+<section id="shortcuts" data-group="Start">
+  <h2>Shortcuts and dictation</h2>
+  <p class="lead">No need to say “Hey Mint”: press a key. And hold a key to dictate anywhere, like Wispr Flow: talk, let go, and your words are typed where your cursor is, cleaned up.</p>
+  {{video dictation | <b>Dictation.</b> Hold Right ⌥, talk, let go: “um, looks good, no wait, let's ship it Thursday” lands as clean text in the comment box.}}
+  <ul class="plain">
+    <li><kbd>⌃⌥Space</kbd> <b>Talk to Mint</b>, without the wake word.</li>
+    <li><b>Hold Right ⌥</b> <b>Dictate</b> at the cursor, in any app. Tap it twice to dictate hands-free, and once more to finish.</li>
+    <li><kbd>⌘J</kbd> <b>Open or close the chat.</b></li>
+  </ul>
+  <p>Change any of them in Settings ▸ Shortcuts: click one and press the keys you want. Dictation can be one key on its own (Right ⌥, Right ⌘, Right ⌃, Right ⇧ or fn) or a combination. It writes what you meant: punctuation, no “um”s, your corrections applied, lists as lists, Hindi, English or both in the script you'd type. It knows the app you're in, so a chat gets a chat message and Mail gets an email. Add names and jargon under “Words to spell exactly”.</p>
+  <p class="note">While you dictate, Mint doesn't listen or answer. Your clipboard is put back after the paste. “Paste my last dictation” brings back the last one if it landed nowhere.</p>
+</section>
+
+<section id="island" data-group="Using Mint">
+  <h2>The island: Mint changes shape</h2>
+  <p class="lead">Like the Dynamic Island, the orb turns into whatever is going on, then springs back. A tiny Mint, still blinking and watching your pointer, stays where the orb was. Click it for the chat.</p>
+  {{video island-meeting | <b>On a call.</b> Record, with your mic and video switches. Then the timer and level bars, the notes being written, and “Notes ready”.}}
+  <ul class="plain">
+    <li><b>On a call:</b> ● record · 🎙 mic on or off · 🎥 video on or off · ×</li>
+    <li><b>Recording:</b> the time, bars that move with the call, and Stop</li>
+    <li><b>Teaching Mint a skill:</b> the time, steps so far, pause, done, cancel</li>
+    <li><b>Watching a video:</b> the title, keyframes popping in, and what it's doing</li>
+    <li><b>Your day:</b> a card with the weather, today's timeline, reminders and headlines</li>
+    <li><b>A lesson, a screen recording:</b> the step and what to do, or “Record this area?”</li>
+  </ul>
+  <h3>Answers as cards</h3>
+  <p>When the answer is a number or a short list, the island shows it too: a big count, or rows with icons. A file opens with a click.</p>
+  {{video island-cards 390 | “How many unread emails?”, “what did I download today?”, “what automations do I have?”}}
+  <ul class="say"><li><q>how many unread emails do I have?</q></li><li><q>what did I download today?</q></li><li><q>what automations do I have?</q></li><li><q>what are you tracking?</q></li></ul>
+  <p class="note">While the island shows, Mint's word bubble stays hidden; the words are still in the chat. Like all of Mint, it never appears in screenshots or screen shares.</p>
+</section>
+
+<section id="drop" data-group="Using Mint">
+  <h2>Drop things on Mint</h2>
+  <p class="lead">Drag a file, a few files, a folder or some text towards Mint: a drop target appears. Let go, and Mint offers what fits: summarize, translate into a Word doc, make a spreadsheet, copy the text, watch a video, add captions, transcribe audio. Or just tell it.</p>
+  {{video drop 390 | A PDF dropped on Mint, and what it can do with it.}}
+  <p class="note">The drop target shows only while you're dragging and closes when you let go elsewhere.</p>
+</section>
+
 <section id="showing" data-group="Using Mint">
   <h2>Showing you where</h2>
-  <p class="lead">Ask where something is, in any app. Mint finds the words on screen, scrolls to them, marks them, and flies over to look.</p>
+  <p class="lead">Ask where something is, in any app. Mint finds the words on screen, scrolls to them, marks them, and flies over to look. Things without words, like an icon, a button or a picture, it finds by looking at the screen.</p>
   {{video marks | Box, highlight and arrow, each with a note. The orb swoops over beside each mark.}}
   <ul class="say"><li><q data-try="mark:#m-deadline:box:the deadline">where's the deadline?</q></li><li><q data-try="mark:#m-owner:underline">underline who owns the notes</q></li>
-    <li><q data-try="mark:#m-budget:highlight:budget cap">highlight the budget</q></li><li><q data-try="mark:#m-risk:circle">circle the biggest risk</q></li><li><q data-try="clear">clear the marks</q></li></ul>
+    <li><q data-try="mark:#m-budget:highlight:budget cap">highlight the budget</q></li><li><q data-try="mark:#m-risk:circle">circle the biggest risk</q></li><li><q data-try="clear">clear the marks</q></li><li><q>where's the share button?</q></li><li><q>point at the settings gear</q></li></ul>
   <div class="sample"><h4>Launch plan</h4>
     <p>We ship the new voice experience next week. <span id="m-deadline">The deadline is Friday, 3 October.</span></p>
     <p><span id="m-owner">Priya handles the release notes</span> and the demo. <span id="m-budget">Budget stays under $4,000.</span></p>
@@ -109,6 +148,7 @@ open ~/Applications/Mint.app</pre>
 <section id="videos" data-group="Using Mint">
   <h2>Watching videos</h2>
   <p class="lead">Give Mint a link, a file or “this video” on screen. In seconds it tells you what the video is, the key moments with timestamps, and how it looks and feels.</p>
+  {{video island-video | While it watches, the island shows the keyframes as they're picked, and each step: downloading, listening, writing it up.}}
   <ul class="say"><li><q>watch this and tell me what it's about</q></li><li><q>what did he say about pricing?</q></li><li><q>show me the frame at 3:20</q></li>
     <li><q>what's the aesthetic of this reel?</q></li><li><q>transcribe my screen recording</q></li></ul>
   <p>Mint doesn't sit through the video. It reads what's said, from the captions or by transcribing the audio, and looks at about a dozen frames picked where the scene changes. A 15-minute talk takes about 15 seconds. The transcript and notes are saved in Documents ▸ Mint ▸ videos.</p>
@@ -117,10 +157,30 @@ open ~/Applications/Mint.app</pre>
 
 <section id="meetings" data-group="Using Mint">
   <h2>Meeting notes</h2>
-  <p class="lead">Click <b>Record meeting</b> in the menu bar and Mint quietly records the call. No bot joins. At the end you get a transcript and notes.</p>
-  <ul class="say"><li><q>take notes of this meeting</q></li><li><q>stop recording</q></li><li><q>what did we decide in the Acme call?</q></li><li><q>open yesterday's meeting notes</q></li></ul>
+  <p class="lead">When a call starts, the orb turns into a recorder. Press ● and Mint quietly records the call. No bot joins. At the end you get a transcript and notes.</p>
+  {{video island-meeting | Record with video on, the recording, then the notes being written and ready.}}
+  <ul class="say"><li><q>take notes of this meeting</q></li><li><q>record this meeting with video</q></li><li><q>what's been said so far?</q></li><li><q>the meeting is over</q></li><li><q>what did we decide in the Acme call?</q></li><li><q>open yesterday's meeting notes</q></li></ul>
   <p>Mint records the call's sound and your microphone separately, so the notes know what you said and what everyone else said. They have a summary, decisions, action items with owners, open questions and key quotes, all with timestamps. They're saved in your Mint folder ▸ Meetings. It works with Google Meet, Zoom, Teams, Slack huddles and FaceTime.</p>
-  <p class="note">The first time, macOS asks to let Mint record system audio. Mint records only after you click Record meeting. When a call starts it offers, and you can turn that off in Settings ▸ Storage &amp; Privacy.</p>
+  <p>Turn on 🎥 and Mint also records a video of the call's window, with sound, into the same meeting folder. Turn off 🎙 and only the call is recorded. Asking for a summary in the middle doesn't stop the recording: you get the notes so far, and it carries on.</p>
+  <p class="note">The first time, macOS asks to let Mint record system audio. Mint records only after you press record. When a call starts it offers, and you can turn that off in Settings ▸ Storage &amp; Privacy.</p>
+</section>
+
+<section id="documents" data-group="Using Mint">
+  <h2>Documents: copy, spreadsheet, translate</h2>
+  <p class="lead">Copy the text off anything on screen, turn a table in a picture or PDF into a real Excel file, or turn an English PDF into a Hindi Word document, with its headings, lists and tables kept.</p>
+  {{video convert 390 | A 21-page PDF into a Hindi Word document: the progress on the island, then the file.}}
+  <ul class="say"><li><q>OCR this and copy the text</q></li><li><q>copy the text from this image</q></li><li><q>make an Excel of this table</q></li>
+    <li><q>put the data in this PDF into a spreadsheet</q></li><li><q>convert this English PDF to a Hindi Word doc</q></li><li><q>translate report.docx to Spanish as a PDF</q></li><li><q>turn this PDF into a Word document</q></li></ul>
+  <p>Text is read on your Mac (scanned PDFs too) and copied as it reads, tables with tabs. Spreadsheets get a bold, frozen header, filters and real numbers and dates, and phone numbers stay as text. Translations keep the document's shape and are saved next to the original, like “report (Hindi).docx”. Long documents carry on in the background, and Mint tells you when they're done.</p>
+</section>
+
+<section id="video-editing" data-group="Using Mint">
+  <h2>Editing videos by voice</h2>
+  <p class="lead">Say what to change: Mint plans the edit, renders it next to the original (never over it) and checks the result before telling you.</p>
+  {{video video-edit 390 | “Make it vertical for Reels and add captions”: the edit, then Mint's check of the result.}}
+  <ul class="say"><li><q>cut the first 10 seconds</q></li><li><q>trim it to 0:30 to 1:45</q></li><li><q>make it vertical for Reels</q></li><li><q>add captions</q></li>
+    <li><q>remove the silent parts</q></li><li><q>compress it under 25 MB</q></li><li><q>make a GIF of 0:10 to 0:15</q></li><li><q>join these clips</q></li><li><q>add this music quietly underneath</q></li></ul>
+  <p>It works on the video you just edited, the one selected in Finder, or the newest one, and the island shows the progress. Every edit is checked: the length, the size, the sound, and the captions on a few frames. Needs ffmpeg (<code>brew install ffmpeg</code>).</p>
 </section>
 
 <section id="edit" data-group="Using Mint">
@@ -132,21 +192,54 @@ open ~/Applications/Mint.app</pre>
   <p>Tidying shows the plan first and moves nothing until you say yes. Nothing is ever deleted. Simple commands like volume, next song, pause and mute happen the moment you stop talking.</p>
 </section>
 
+<section id="mac" data-group="Using Mint">
+  <h2>Your Mac's switches, windows and recordings</h2>
+  <p class="lead">Brightness, keep awake, Do Not Disturb, window layouts, music, Night Shift and Settings pages. Record the screen, a window, or just the part you describe.</p>
+  <ul class="say"><li><q>brighter</q></li><li><q>keep the Mac awake for two hours</q></li><li><q>turn on Do Not Disturb</q></li>
+    <li><q>Chrome on the left, Slack on the right</q></li><li><q>full screen</q></li><li><q>show the desktop</q></li><li><q>play my music</q></li>
+    <li><q>record my screen</q></li><li><q>record just this part of the page</q></li><li><q>stop screen recording</q></li></ul>
+  {{video island-area | “Record this area?”: Mint outlines the part you described and records only after you say yes. Then the island shows the recording's time and Stop.}}
+  <p>Window layouts go through Rectangle when you have it, otherwise Mint places the windows itself. Screen recordings are saved in your Mint folder ▸ Videos ▸ Recordings, without Mint's orb or voice in them. Do Not Disturb runs two small shortcuts Mint makes for you: the first time, click <b>Add Shortcut</b> for each.</p>
+  <p class="note">Showing the desktop, Mission Control, keep awake, snapping a window left or right, full screen and starting or stopping a screen recording all happen the moment you stop talking.</p>
+</section>
+
 <section id="teach" data-group="Learning">
   <h2>Teach it, or learn from it</h2>
   <p class="lead">Show Mint a task once and it can do it from then on. Or ask Mint to show you, and it points at each button while you do it yourself.</p>
-  <ul class="say"><li><q>watch me do this once</q></li><li><q>done, that's how</q></li><li><q>show me how to export a PDF in Preview</q></li><li><q>next</q></li><li><q>stop the lesson</q></li></ul>
+  {{video island-teach | <b>Teaching.</b> A mint ring on the pointer, and every click captured with a ripple and its step number. The island counts the steps; ✓ saves the skill.}}
+  <ul class="say"><li><q>watch me do this once</q></li><li><q>pause, don't record this</q></li><li><q>carry on</q></li><li><q>done, that's how</q></li><li><q>show me how to export a PDF in Preview</q></li><li><q>next</q></li><li><q>stop the lesson</q></li></ul>
+  <p>While Mint watches, your pointer gets a ring in Mint's colour, and each click snaps a little frame and shows its step number, so it's clear what's being recorded. Pause it from the island, and nothing is recorded until you carry on. Clicks on Mint itself are never part of the skill.</p>
+  {{video island-tutor | <b>A lesson.</b> The island shows the step and what to do; the arrow points at it on screen.}}
   <p class="note">While it watches, Mint notes which buttons you click and what you type. It never records passwords, and it stops by itself after 10 minutes. The first time, macOS asks for Input Monitoring.</p>
 </section>
 
 <section id="briefing" data-group="Using Mint">
   <h2>Briefings, email, translation and more</h2>
   <p class="lead">A one-minute spoken rundown of your day. Your Apple Shortcuts by voice. Any screenshot, found by what's in it.</p>
+  {{video island-schedule 380 | <b>Your day, at a glance.</b> The weather, today's timeline (now highlighted, the next one “in 2h”), reminders and headlines. It shows with a briefing or “what's on my calendar today?”}}
   <ul class="say"><li><q>good morning, brief me</q></li><li><q>every weekday at 8:30, give me my daily briefing</q></li>
     <li><q>turn on the living room lights</q></li><li><q>run my Good Night shortcut</q></li><li><q>find the screenshot with the invoice number</q></li>
     <li><q>add my action items from that meeting to Reminders</q></li><li><q>translate this page</q></li>
     <li><q>triage my email</q></li><li><q>draft a reply to the second one saying I'll send it Friday</q></li></ul>
-  <p>The briefing covers your calendar, reminders due, which emails need you, unfinished tasks, the weather and a few headlines. For lights and scenes, save them as shortcuts in the Shortcuts app and Mint runs them. The text in your screenshots is read on your Mac. Foreign text on screen gets its translation pinned right beside it. Email replies are written the way you write, and they stay drafts until you send them.</p>
+  {{video translate | <b>Translated in place.</b> Each paragraph is covered in its own colours and the translation written over it, on dark or light pages alike.}}
+  <p>The briefing covers your calendar, reminders due, which emails need you, unfinished tasks, the weather and a few headlines. For lights and scenes, save them as shortcuts in the Shortcuts app and Mint runs them. The text in your screenshots is read on your Mac. Foreign text on screen is translated in place: each paragraph is covered in its own background and the translation is written over it, in a colour and size that fit, for a minute (“clear the marks” takes it away). Email replies are written the way you write, and they stay drafts until you send them.</p>
+</section>
+
+<section id="trackers" data-group="Using Mint">
+  <h2>Let me know when it's done</h2>
+  <p class="lead">Ask Mint to keep an eye on something and carry on with your day. The moment it finishes, Mint says so, shows a notification, and the island shows what finished. Click it to open.</p>
+  {{video island-trackers | A download tracked from start to finish, then a Claude session finishing its turn.}}
+  <ul class="say"><li><q>let me know when this download finishes</q></li><li><q>tell me when the Task auditor Claude session is done</q></li>
+    <li><q>ping me when the build finishes</q></li><li><q>let me know when the upload is complete</q></li><li><q>tell me when report.pdf has finished exporting</q></li>
+    <li><q>what are you tracking?</q></li><li><q>stop tracking the download</q></li></ul>
+  <ul class="plain">
+    <li><b>Downloads</b> (Chrome, Brave, Edge, Arc, Safari, Firefox): the browser's partial file in Downloads; its size and speed show the progress.</li>
+    <li><b>Claude Code sessions</b> (the terminal and the desktop app's Code tab): the session's own log. Mint also tells you when a session is waiting for your approval.</li>
+    <li><b>Commands in Terminal or iTerm:</b> done when nothing but the shell is left running in that tab; you hear how it ended.</li>
+    <li><b>Anything in a window</b> (an upload, a render, an export, an AI chat): progress bars and the window's text, and every so often Gemini checks a small picture of the window against what you asked for.</li>
+    <li><b>A file:</b> it exists and has stopped growing.</li>
+  </ul>
+  <p class="note">Trackers keep running for up to 12 hours and survive a restart. Saying “stop” doesn't end them; “stop tracking …” does. The first time Mint watches a Terminal or iTerm tab, macOS asks to let Mint control it.</p>
 </section>
 
 <section id="automations" data-group="Using Mint">

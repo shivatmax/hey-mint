@@ -386,6 +386,15 @@ until you click **Stop recording**, or say "stop recording" once the call is ove
 - **Afterwards:** "what did we decide in the Acme call?", "open yesterday's meeting notes", "list my
   meetings" → `meeting action=open/list`.
 
+### Teaching: the pointer and the clicks look recorded
+
+While Mint watches you (`teach`), `mint/ui/teach_fx.py` puts a ring in Mint's own colour round the pointer
+(macOS does not let an app recolour the system pointer in other apps, so the ring is the colour) and
+every click snaps a camera-like frame, rolls a ripple and floats the step's number up from it. Clicks on
+Mint itself (pause, done, cancel on the island) get no effect and are never recorded. "pause" / "carry
+on" (`teach action=pause/resume`) stop and restart the recording; paused, the ring goes grey. None of it
+is in screenshots, so the skill's own screenshots stay clean.
+
 ### The island: Mint changes shape
 
 Like the Dynamic Island, the orb turns into whatever is going on and springs back when it is over. A
@@ -398,7 +407,8 @@ click it to open the chat.
 | Recording a meeting | ● 12:34 · level bars · (video icon) · ■ Stop, the face bobbing with the call |
 | Writing the notes / done | "Notes · 3/10" with a spinner, then "✓ Notes ready" (click to open) |
 | A screen recording | ● 0:12 · ■ Stop; for an area, "Record this area? ✓ ✕" |
-| Teaching Mint a skill | 👁 Learning · 0:42 · 12 clicks · ✓ Done · ✕ |
+| Teaching Mint a skill | ● 0:42 · "4 steps" (pops on each one) · ⏸ pause / ▶ carry on · ✓ Done · ✕; then "Saving the skill…" and "✓ Learned · <title>" |
+| Watching a video | a card: the title, the step (downloading, listening part 2 of 4, writing it up), keyframes popping in under a sweeping mint scan line; then "✓ Watched" |
 | A lesson (tutor) | STEP 2 OF 5 · what to do · → next · ✕ |
 | A briefing, or "what's on my calendar today?" | a card: the day and date, weather, today's timeline (now highlighted, past dimmed, "in 2h" on the next one), reminders, headlines; click or wait 40 s to close it |
 
@@ -480,6 +490,62 @@ click it to open the chat.
 - **Instant:** "show the desktop", "mission control", "keep the Mac awake", "snap this window to the
   left/right", "maximise", "full screen", "record my screen" and "stop screen recording" run the moment
   you stop talking.
+
+### Documents and video editing
+
+| Say | Tool |
+|---|---|
+| "OCR this and copy it", "copy the text from this image / PDF" | `ocr_copy` (Vision on the Mac, scanned PDFs too; tables with tabs) |
+| "make an Excel of this table / of the data in this PDF" | `data_to_sheet` (Gemini reads the tables; openpyxl writes a clean .xlsx in Spreadsheets) |
+| "convert this English PDF to a Hindi Word doc" | `convert_document` (headings, lists, tables kept; docx written directly, PDF via headless Chrome in its own profile) |
+| "cut the first 10 s", "vertical for Reels", "add captions", "remove silences", "compress under 25 MB" | `edit_video` (Gemini plans from a fixed list of safe operations; ffmpeg renders beside the original; QA of length, size, sound, captions) |
+
+### Shortcuts, dictation and dropping things on Mint
+
+| Key / action | What happens |
+|---|---|
+| ⌃⌥Space (`shortcuts.talk`) | Mint wakes and listens, no wake word |
+| Hold Right ⌥ (`shortcuts.dictate`) | Dictation: talk, let go, clean text is pasted at the cursor; tap twice for hands-free, once more to finish; ✕ on the island throws it away |
+| `shortcuts.dictate_toggle` (unset) | hands-free dictation start/stop on a key combination |
+| ⌘J (`shortcuts.toggle`) | open or close the chat |
+| Drag a file / files / folder / text | the island shows "Drop here for Mint"; dropped, a card offers actions for that kind of thing (PDF, image, video, audio, sheet, folder, text) or "Tell Mint what to do" |
+
+- **Settings ▸ Shortcuts:** click a shortcut and press the keys (Esc cancels); dictation also takes one
+  modifier on its own (Right ⌥/⌘/⌃/⇧, fn). A hold of that key with any other key pressed is typing, not
+  dictation. `mint/core/hotkeys.py` (Carbon press+release; `ModifierHold` for single modifiers).
+- **Dictation** (`mint/voice/dictation.py`): the session's own microphone feed (echo-cancelled; Mint does not
+  hear or answer while dictating; a separate microphone stream if Mint lent the mic to a call). Two quick
+  Gemini Flash Lite steps (word for word from audio, then tidied as text: punctuation, fillers dropped,
+  self-corrections applied, lists, the app's style, Hindi/English/Hinglish script), ~3 s; pasted with the
+  clipboard put back; the last 50 kept in `dictations.jsonl` ("paste my last dictation").
+- **Dropping:** `island.DropScene`; the drag pasteboard is watched while the mouse is down.
+
+### Answers as cards, and translation in place
+
+- `show_card` (`mint/tools/cards.py`): the island shows a count as a big number or a short list (files with their
+  own icons and click-to-open, emails, events, results). The automations and trackers lists show theirs.
+- `translate_screen` now writes translations over the original: Vision finds each line's box, Gemini
+  groups and translates by line number, the background and text colours are sampled from the screenshot,
+  and `marks.cover` paints the cover and fits the text (never under ~80% of the original size; the cover
+  grows instead).
+
+### "Let me know when it's done" (trackers)
+
+| Say | What Mint watches |
+|---|---|
+| "let me know when this download finishes" | the browser's partial file in Downloads/Desktop (`.crdownload` Chrome/Brave/Edge/Arc, `.download` Safari with its %, `.part` Firefox); size and speed as progress; gone with no file = cancelled |
+| "tell me when the Task auditor Claude session is done" | the session's transcript in `~/.claude/projects` (last assistant step `end_turn`); also "needs you" when a tool call waits for approval; an idle session is reported when it next finishes |
+| "ping me when the build finishes" | the Terminal / iTerm tab's tty: done when only the shell is in the foreground; the tab's last lines come with the report |
+| "let me know when the upload is complete" | the app's window: progress bars (Accessibility), percentages in its text, and Gemini Flash Lite checking a small picture of the window against the goal (when it changes, at most every 12 s, else every 45 s) |
+| "tell me when report.pdf has exported" | the file exists and stopped growing |
+| "what are you tracking?" / "stop tracking the download" | `track action=list` / `stop` |
+
+- **Telling you:** Mint says it (waking if asleep), a macOS notification, and the island ("Downloaded ·
+  file", "Claude is done · session"; click to open).
+- **Lasting:** up to 12 hours, saved in `trackers.json` and resumed after a restart; "stop" does not end
+  them; Mint stays loaded while one runs.
+- **Code:** `mint/tools/trackers.py` (`track` tool). Claude hooks were not used: they would need edits to your
+  `~/.claude/settings.json`; the transcript needs nothing.
 
 ### Power tools for everyday work
 
@@ -952,6 +1018,7 @@ each description.
 | `mail` | action, number, say, count | The Mail app's inbox, smarter: triage (sort the newest messages into needs a reply, to do, FYI, newsletters, promos, with one line each) and draft_reply (write a reply to message `number` in the user's own style, from what they say, and open it as a draft - never sent). |
 | `mac` | control, value, minutes, app, app2 | The Mac's own switches: brightness, keep_awake, focus (Do Not Disturb), window layouts (Rectangle or Accessibility), music, night_shift, wifi, show (desktop, Mission Control...), settings pages. |
 | `screen_record` | action, target, app, region, audio, mic, confirm, reveal | Record a video (.mp4) of the screen, one window or a part of the screen; a window or area is shown as a box first and recorded only after confirm. |
+| `track` | action, what, target, goal, which | Keep an eye on something and tell the user the moment it finishes: a download, a Claude Code session, a Terminal/iTerm command, an upload/render in a window, a file. |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |

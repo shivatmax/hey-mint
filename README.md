@@ -37,7 +37,9 @@ https://github.com/user-attachments/assets/4cebe235-08a1-4ff4-b96f-83eb65fad462
 ## What it can do
 
 Mint is a small orb with a face that lives in the corner of your screen. Ask in your own
-words, by voice or by typing (<kbd>⌘J</kbd>):
+words: say “Hey Mint”, press <kbd>⌃⌥Space</kbd>, or type (<kbd>⌘J</kbd>). Like the Dynamic Island,
+the orb changes shape for what's going on: a meeting recorder, your day's schedule, a lesson,
+a video it's watching, an answer as a card.
 
 | Ask | What happens |
 |---|---|
@@ -51,16 +53,31 @@ words, by voice or by typing (<kbd>⌘J</kbd>):
 | “remember my manager is Meera”, “save how to do that as a skill” | Long-term memory and self-learned skills, both editable |
 | “watch this video: what's the aesthetic?”, “what did he say at 3:20?” | Understands a video (link, file or the one on screen) in seconds from its transcript and a few keyframes, with timestamps |
 | “every weekday at 9, brief me on my calendar and mail”, “when a PDF lands in Downloads, file it” | Automations: schedules, folder and app triggers, reminders before meetings |
-| *(click Record meeting)* “what did we decide in the Acme call?” | Meeting notes with no bot: records the call and your mic, then a transcript, decisions and action items |
+| *(on a call, press ● on the orb)* “what did we decide in the Acme call?” | Meeting notes with no bot: the orb turns into a recorder (mic and video switches), then a transcript, decisions and action items; “what's been said so far?” mid-call |
+| *hold Right ⌥ and talk* | Dictation, Wispr-Flow style: let go and clean text is typed where your cursor is (fillers dropped, corrections applied, Hindi or English) |
+| “let me know when this download finishes”, “tell me when the Claude session is done” | Trackers: downloads, Claude Code sessions, Terminal commands, uploads in any window, files; Mint speaks up the moment they finish |
 | “watch me do this once”, “show me how to export a PDF in Preview” | Learns a task from one demonstration; or guides you step by step, pointing at each control |
 | “good morning, brief me”, “turn on the living room lights”, “find the screenshot with the invoice number” | A spoken daily briefing, your Apple Shortcuts (Home scenes, Focus, music), screenshots found by what's in them |
-| “translate this page”, “triage my email”, “draft a reply saying I'll send it Friday” | Translations pinned on screen; inbox sorted by what needs you; replies drafted in your style (never sent) |
+| “translate this page”, “triage my email”, “draft a reply saying I'll send it Friday” | Translations written over the original, in its own colours; inbox sorted by what needs you; replies drafted in your style (never sent) |
+| “OCR this and copy it”, “make an Excel of this table”, “convert this English PDF to a Hindi Word doc” | Text off any screen or scan to the clipboard; tables to a clean .xlsx; documents translated and converted with headings, lists and tables kept |
+| “make it vertical for Reels and add captions”, “remove the silent parts”, “compress it under 25 MB” | Video editing by voice: planned by Gemini, rendered with ffmpeg next to the original, then checked (QA) |
+| “brighter”, “Chrome left, Slack right”, “turn on Do Not Disturb”, “record just this part of the screen” | Your Mac's switches (brightness, keep awake, Focus, Night Shift, windows via Rectangle) and screen recordings of the screen, a window or an area you describe |
+| *drag a file onto Mint* | Drop files, folders or text on the orb: it offers what fits (summarise, translate, spreadsheet, captions, transcribe) |
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
 
 <p align="center">
   <img src="docs/media/mark-box.gif" alt="Mint boxing the deadline in a document and flying over beside it" width="560">
+</p>
+
+<p align="center">
+  <img src="docs/media/island-recorder.gif" alt="On a call the orb turns into a recorder: record, mic and video switches, the timer and level bars, then the notes being written" width="480">
+</p>
+
+<p align="center">
+  <img src="docs/media/dictation.gif" alt="Holding Right Option to dictate: a waveform on the island, then clean text typed into the comment box" width="560">
+  <img src="docs/media/drop.gif" alt="A PDF dragged onto Mint: a drop target, then a card of things to do with it" width="320">
 </p>
 
 ### Agents that pop out of a toy box
@@ -181,6 +198,10 @@ tool is in [docs/usage.md](docs/usage.md); working on Mint is in [docs/developme
 - “Delete” means the Trash; files are backed up before being overwritten; private folders
   (keys, keychains, browser profiles, Mail, Messages) are off limits.
 - Invisible in screen shares by default (“Mint, be visible” to show it in a Google Meet).
+- Dictation listens only while you hold the key; meeting and screen recordings start only when you
+  press record (a window or area is shown first and needs your yes).
+- Trackers read local files only: the browser's partial download, a Claude session's own log, a
+  terminal tab's running process.
 - “Stop” halts everything at once.
 
 ## Project layout
@@ -196,7 +217,8 @@ mint/
   ui/          the orb, chat, settings, marks, critters, effects
   agents/      background agents, Codex, teams
   resources/   example skills
-launcher/      Mint.app's launcher, the low-memory Mint Ear, and the screen-control engine (Swift)
+launcher/      Mint.app's launcher, the low-memory Mint Ear, the screen-control engine, the meeting
+               recorder (MintRecorder) and the screen recorder (MintScreen) - all Swift
 packaging/     building the downloadable app and DMG
 guide/         the illustrated guide (static site)
 docs/          architecture, usage and development handbook

@@ -67,6 +67,8 @@ IGNORE_PIDS: set[int] = set()
 
 _lock = threading.RLock()
 _rec: "_Recording | None" = None
+_saving: dict = {}        # while stop() turns the recording into a skill: {"since", "goal"}
+_saved: dict = {}         # the last skill saved: {"title", "at"} (the island shows it for a moment)
 _listeners: list = []
 _last_result = ""
 
@@ -434,6 +436,7 @@ class _Recording:
         self.ready = threading.Event()
         self.tap_error = ""
         self.own_pid = os.getpid()
+        self.paused = False                  # the user paused: nothing is recorded until they resume
         self.last_front: tuple = ()
         self.last_url = ""
         self.last_url_check = 0.0
@@ -472,6 +475,8 @@ class _Recording:
                 if self.tap is not None and not self.stopping.is_set():
                     Quartz.CGEventTapEnable(self.tap, True)
                 return event
+            if self.paused:
+                return event                       # paused from the island: nothing is recorded
             source = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGEventSourceUnixProcessID)
             if source and (source == self.own_pid or source in IGNORE_PIDS):
                 return event                       # Mint's own clicks and typing are not the user's
@@ -1326,13 +1331,23 @@ def cancel() -> str:
 
 def stop(title: str = "", narration=None) -> str:
     """Stop watching and turn the recording into a skill. Returns what was saved."""
-    global _rec, _last_result
+    global _rec
     with _lock:
         rec, _rec = _rec, None
+        if rec is not None:
+            _saving.update(since=time.time(), goal=rec.goal)     # the island shows "Saving" without a gap
     if rec is None:
         return _last_result or "I wasn't watching anything. Say 'watch me do this' first."
-    _halt(rec)
-    _emit("stopped")
+    try:
+        _halt(rec)
+        _emit("stopped")
+        return _stop_and_save(rec, title, narration)
+    finally:
+        _saving.clear()
+
+
+def _stop_and_save(rec: "_Recording", title: str, narration) -> str:
+    global _last_result
     said = [f"[{_clock(t)}] {text}" for t, text in rec.narration]
     if isinstance(narration, str):
         narration = [narration]
@@ -1370,6 +1385,7 @@ def finish(actions: list[dict], narration: list[str], shots: list[dict], goal: s
         _emit("failed", message)
         return message
     _emit("saved", skill["title"])
+    _saved.update(title=skill["title"], at=time.time())
     return (f"{message} ({skill['category']}/{skill['name']}), from {len(actions)} recorded actions. "
             f"When: {skill['meta'].get('when', '')}\n{skill['body']}\n"
             "Read the steps back briefly and ask if anything should change (update_skill).")
@@ -1392,16 +1408,39 @@ def recording() -> bool:
         return _rec is not None and not _rec.stopping.is_set()
 
 
+def pause() -> str:
+    with _lock:
+        if _rec is None:
+            return "I wasn't watching anything."
+        _rec.paused = True
+        _rec.down = None
+    _emit("paused")
+    return "Paused - nothing is recorded until you resume."
+
+
+def resume() -> str:
+    with _lock:
+        if _rec is None:
+            return "I wasn't watching anything."
+        _rec.paused = False
+    _emit("recording")
+    return "Watching again."
+
+
 def snapshot() -> dict:
     """For the island: {"seconds", "clicks", "keys", "goal", "auto_stopped"} while watching, else {}."""
     with _lock:
         rec = _rec
         if rec is None or rec.stopping.is_set():
+            if _saving:
+                return {"saving": True, "goal": _saving.get("goal", "")}
+            if _saved and time.time() - _saved.get("at", 0) < 7:
+                return {"saved": _saved["title"]}
             return {}
         events = list(rec.events)
         return {"seconds": rec.t(), "clicks": sum(1 for e in events if e["type"] in ("click", "drag")),
                 "keys": sum(1 for e in events if e["type"] in ("char", "shortcut", "key")),
-                "goal": rec.goal, "auto_stopped": rec.auto_stopped}
+                "goal": rec.goal, "auto_stopped": rec.auto_stopped, "paused": rec.paused}
 
 
 # --- the tool --------------------------------------------------------------------------------
@@ -1411,7 +1450,8 @@ PROMPT = """Teach by showing: when the user wants to SHOW you how to do somethin
 their words, if they said it), say one short line, then stay quiet and do NOT use screen tools while they \
 work (your own clicks would be recorded). When they say "done", "that's it", "that's how you do it", call \
 teach action=stop with title if they named it and narration = what they said while showing you, as short \
-lines. Then read back the saved skill's steps briefly. "cancel"/"never mind" -> action=cancel."""
+lines. Then read back the saved skill's steps briefly. "cancel"/"never mind" -> action=cancel; "pause" / "hold \
+on, don't record this" -> action=pause, "carry on" -> action=resume."""
 
 
 def declarations():
@@ -1423,7 +1463,7 @@ def declarations():
                      "later. start: begin watching clicks, typing and pages (never passwords); stop: finish "
                      "and write the skill; cancel: throw the recording away; status: is it recording."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=S, enum=["start", "stop", "cancel", "status"]),
+            "action": types.Schema(type=S, enum=["start", "stop", "pause", "resume", "cancel", "status"]),
             "goal": types.Schema(type=S, description="start: the task in the user's words, e.g. 'file an expense in Expensify'"),
             "title": types.Schema(type=S, description="stop: a title for the skill, if the user gave one"),
             "narration": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=S),
@@ -1439,6 +1479,10 @@ def tool(args: dict) -> str:
         return stop(str(args.get("title") or ""), args.get("narration"))
     if action == "cancel":
         return cancel()
+    if action == "pause":
+        return pause()
+    if action == "resume":
+        return resume()
     return status()
 
 
