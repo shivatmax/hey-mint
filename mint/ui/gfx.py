@@ -128,3 +128,32 @@ def app_icon(kind: str, value: str):
     if not path:
         return None
     return workspace.iconForFile_(path)
+
+
+def number_badge(text: str, diameter: float, fill, ink, font_size: float = 11, ring=None):
+    """A round badge with its number truly centred (by the digits' cap height, not the line box).
+    fill/ink/ring are CGColors (ring: an outline, for an empty checkbox). Returns a CALayer."""
+    import Quartz
+    badge = Quartz.CALayer.layer()
+    badge.setBounds_(Quartz.CGRectMake(0, 0, diameter, diameter))
+    badge.setCornerRadius_(diameter / 2)
+    if fill is not None:
+        badge.setBackgroundColor_(fill)
+    if ring is not None:
+        badge.setBorderColor_(ring)
+        badge.setBorderWidth_(1.5)
+    if text:
+        font = AppKit.NSFont.monospacedDigitSystemFontOfSize_weight_(font_size, AppKit.NSFontWeightBold)
+        layer = Quartz.CATextLayer.layer()
+        layer.setString_(text)
+        layer.setFont_(font)
+        layer.setFontSize_(font_size)
+        layer.setForegroundColor_(ink)
+        layer.setAlignmentMode_(Quartz.kCAAlignmentCenter)
+        layer.setContentsScale_(2.0)
+        ascender, descender, cap = font.ascender(), font.descender(), font.capHeight()
+        height = ascender - descender
+        baseline = diameter / 2 - cap / 2
+        layer.setFrame_(Quartz.CGRectMake(0, baseline + descender, diameter, height))
+        badge.addSublayer_(layer)
+    return badge

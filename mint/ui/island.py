@@ -1331,9 +1331,17 @@ class InfoCard(Scene):
                 view.layer().addSublayer_(stripe)
             path = str(item.get("path") or "")
             if path and os.path.exists(os.path.expanduser(path)):
-                picture = workspace.iconForFile_(os.path.expanduser(path))
-                image = AppKit.NSImageView.imageViewWithImage_(picture)
-                image.setFrame_(AppKit.NSMakeRect(16, y + 5, 24, 24))
+                full = os.path.expanduser(path)
+                thumb = None
+                if full.lower().endswith((".png", ".jpg", ".jpeg", ".heic", ".gif", ".webp", ".tiff")):
+                    thumb = AppKit.NSImage.alloc().initWithContentsOfFile_(full)      # the picture itself
+                image = AppKit.NSImageView.imageViewWithImage_(thumb or workspace.iconForFile_(full))
+                image.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
+                image.setFrame_(AppKit.NSMakeRect(14, y + 4, 28, 26) if thumb else AppKit.NSMakeRect(16, y + 5, 24, 24))
+                if thumb is not None:
+                    image.setWantsLayer_(True)
+                    image.layer().setCornerRadius_(4)
+                    image.layer().setMasksToBounds_(True)
             else:
                 image = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(str(item.get("icon") or "circle.fill"),
                                                                           10 if not item.get("icon") else 13))

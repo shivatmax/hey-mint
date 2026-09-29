@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Clipboard** (`mint/tools/clipboard.py`, `mint/ui/clipboard_window.py`): everything you copy (⌘C), every
+  screenshot and everything Mint copies, kept on this Mac for 7 days. ⌃⌥V or "open my clipboard" turns the orb into
+  a compact card (All · Mint · Pinned, search): tap the circles to pick several in order, then paste, copy, pin (up
+  to 20) or delete; double-click pastes one; drag a clip out. By voice: "paste the last 5 screenshots in the chat",
+  labelled clips, pins, and secrets saved to the macOS Keychain (never in the history, cleared after 60 s).
 - **Documents** (`mint/tools/convert.py`): `ocr_copy` (screen, window, image, PDF or clipboard picture to the
   clipboard), `data_to_sheet` (tables on screen or in files to a clean .xlsx), `convert_document` (PDF/DOCX/text
   into another language and format - e.g. an English PDF to a Hindi Word doc - keeping headings, lists, tables).

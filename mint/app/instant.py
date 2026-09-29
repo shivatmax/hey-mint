@@ -105,6 +105,9 @@ def match(said: str) -> tuple[str, dict, str] | None:
         return "mac", {"control": "window", "value": "maximize"}, "Maximised"
     if full(r"(?:make (?:this|it) |go )?full ?screen(?: (?:this|it|the window))?|enter full ?screen"):
         return "mac", {"control": "window", "value": "fullscreen"}, "Full screen"
+    if full(r"(?:take a |a |quick )?screenshot(?: (?:this|it|now|please))?|snap (?:it|this|the screen)|"
+            r"(?:click|grab) (?:a )?screenshot"):
+        return "screenshot", {"what": "screen"}, "Screenshot"
     if full(r"(?:start )?(?:recording|record) (?:my |the )?(?:whole )?screen|start (?:a )?screen recording|"
             r"start (?:a )?video recording"):
         return "screen_record", {"action": "start", "target": "screen"}, "Recording the screen"

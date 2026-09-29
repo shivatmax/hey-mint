@@ -1558,6 +1558,14 @@ class Mint:
             prefs.set("storage_folder", path)
             return (f"From now on Mint saves meetings, videos, documents, spreadsheets and agent work in {config.storage()} "
                     f"(one sub-folder each). Files saved before stay where they are.")
+        if setting == "screenshot_to":
+            where = value.strip().lower()
+            where = "clipboard" if "clip" in where else "file" if where in ("file", "files", "desktop", "disk") else "both"
+            prefs.set("screenshot_to", where)
+            return {"clipboard": "Screenshots now go only to the clipboard (and the clipboard history, numbered) - no "
+                                 "files.",
+                    "file": "Screenshots are now saved as files only, not put on the clipboard.",
+                    "both": "Screenshots are saved as files and put on the clipboard."}[where]
         if setting == "activity_timeline" and value.strip().lower() in {"clear", "delete", "forget", "erase"}:
             from mint.knowledge import timeline
             return timeline.clear()
@@ -1736,6 +1744,8 @@ class Mint:
         timeline.start()                    # the activity timeline (does nothing unless it is on)
         from mint.tools import trackers
         trackers.start_service()            # "let me know when ..." trackers left running before a restart
+        from mint.tools import clipboard as clip_tools
+        clip_tools.start_watching()         # the clipboard history, from the start (it survives restarts)
         from mint.knowledge import teach
 
         def teaching(state, detail=""):

@@ -93,6 +93,7 @@ open ~/Applications/Mint.app</pre>
     <li><kbd>⌃⌥Space</kbd> <b>Talk to Mint</b>, without the wake word.</li>
     <li><b>Hold Right ⌥</b> <b>Dictate</b> at the cursor, in any app. Tap it twice to dictate hands-free, and once more to finish.</li>
     <li><kbd>⌘J</kbd> <b>Open or close the chat.</b></li>
+    <li><kbd>⌃⌥V</kbd> <b>Open the <a href="#clipboard">clipboard</a>.</b></li>
   </ul>
   <p>Change any of them in Settings ▸ Shortcuts: click one and press the keys you want. Dictation can be one key on its own (Right ⌥, Right ⌘, Right ⌃, Right ⇧ or fn) or a combination. It writes what you meant: punctuation, no “um”s, your corrections applied, lists as lists, Hindi, English or both in the script you'd type. It knows the app you're in, so a chat gets a chat message and Mail gets an email. Add names and jargon under “Words to spell exactly”.</p>
   <p class="note">While you dictate, Mint doesn't listen or answer. Your clipboard is put back after the paste. “Paste my last dictation” brings back the last one if it landed nowhere.</p>
@@ -122,6 +123,20 @@ open ~/Applications/Mint.app</pre>
   <p class="lead">Drag a file, a few files, a folder or some text towards Mint: a drop target appears. Let go, and Mint offers what fits: summarize, translate into a Word doc, make a spreadsheet, copy the text, watch a video, add captions, transcribe audio. Or just tell it.</p>
   {{video drop 390 | A PDF dropped on Mint, and what it can do with it.}}
   <p class="note">The drop target shows only while you're dragging and closes when you let go elsewhere.</p>
+</section>
+
+<section id="clipboard" data-group="Using Mint">
+  <h2>Clipboard</h2>
+  <p class="lead">Mint keeps everything you copy: text you copy with ⌘C, every screenshot, and whatever Mint copies for you. Press ⌃⌥V or say “open my clipboard” and Mint turns into it, right where the orb sits.</p>
+  {{video clipboard-window 372 | Mint turns into the clipboard: three screenshots picked in order, then the Mint and Pinned tabs.}}
+  <p><strong>Pick several.</strong> Tap the circle on a clip to add it (or ⌘-click; ⇧-click picks a run, ⌘A picks everything). Each circle shows its number, which is the order the clips are pasted in. Then press <em>Paste</em> to paste them into the app you were in, or <em>Copy</em> to paste them yourself. Several pictures or files are copied as files, so one ⌘V attaches them all. Double-click a clip to paste only that one, or drag it out into any app. Pasting doesn't remove anything from the list.</p>
+  <p><strong>Three tabs.</strong> <em>All</em> shows everything. <em>Mint</em> shows what Mint copied and your screenshots. <em>Pinned</em> keeps up to 20 clips for good, like an address, a sign-off or a reply you often use. The search box looks through all of them.</p>
+  {{video clipboard 560 | “Show my screenshots”, then “paste the last three into the chat”.}}
+  <ul class="say"><li><q>open my clipboard</q></li><li><q>paste the last 5 screenshots in the chat</q></li><li><q>copy this and call it the invoice number</q></li>
+    <li><q>pin this as my address</q></li><li><q>paste my address</q></li><li><q>save what I copied as my GitHub key</q></li><li><q>copy my GitHub key</q></li>
+    <li><q>what did I copy earlier?</q></li><li><q>screenshots to the clipboard only</q></li></ul>
+  <p>Screenshots are numbered, so “paste screenshot 3” works. By default they're saved as a file and copied to the clipboard; you can say “screenshots to the clipboard only” or “as files only” to change that. History stays on this Mac for 7 days (the last 150 clips).</p>
+  <p class="note">Passwords and keys are never kept in the history. “Save this as my … key” puts it in the macOS Keychain; copying it back clears it from the clipboard after 60 seconds. The clipboard never shows up in screen shares.</p>
 </section>
 
 <section id="showing" data-group="Using Mint">

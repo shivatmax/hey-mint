@@ -693,6 +693,95 @@ def video_edit_scene(p):
     time.sleep(5.5)
 
 
+@scene("clipboard", 13)
+def clipboard_scene(p):
+    """"Show my screenshots", then "paste the last three into the chat"."""
+    import AppKit
+    isl = _island()
+    media = Path(__file__).resolve().parent / "media"
+    shots = [media / f"{n}.jpg" for n in ("island-schedule", "island-cards", "translate", "drop", "convert")]
+    l = ms.labels
+    fx, fy, fw, fh = l["field"]
+    time.sleep(1.0)
+    isl.show_card({"title": "Screenshots", "subtitle": "newest first · say “paste number 2”", "icon": "doc.on.clipboard.fill",
+                   "tint": "teal", "items": [{"title": f"screenshot {5 - i} · {time.strftime('%H:%M')}",
+                                              "detail": "screenshot", "trailing": f"#{i + 1}", "path": str(shot)}
+                                             for i, shot in enumerate(shots)]}, seconds=4.4)
+    time.sleep(5.2)
+    box = {}
+
+    def thumbs():
+        views = []
+        win = next(w for w in AppKit.NSApp().windows()
+                   if w.frame().size.width >= ms.SW - 1 and w.level() == AppKit.NSFloatingWindowLevel)
+        for i, shot in enumerate(shots[:3]):
+            image = AppKit.NSImageView.imageViewWithImage_(AppKit.NSImage.alloc().initWithContentsOfFile_(str(shot)))
+            image.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
+            image.setFrame_(AppKit.NSMakeRect(fx + 10 + i * 70, ms.SH - fy - fh + 6, 62, 32))
+            image.setWantsLayer_(True)
+            image.layer().setCornerRadius_(5)
+            image.setAlphaValue_(0.0)
+            win.contentView().addSubview_(image)
+            views.append(image)
+        box["views"] = views
+    ms.main_sync(thumbs)
+    for view in box["views"]:
+        AppHelper.callAfter(view.setAlphaValue_, 1.0)
+        time.sleep(0.45)
+    isl.show_card({"title": "Pasted 3 screenshots", "subtitle": "into the chat, oldest first · not sent",
+                   "icon": "checkmark.circle.fill", "tint": "green"}, seconds=3.0)
+    time.sleep(3.6)
+    for view in box["views"]:
+        AppHelper.callAfter(view.removeFromSuperview)
+
+
+@scene("clipboard-window", 15)
+def clipboard_window_scene(p):
+    """Mint turns into the clipboard: everything copied, three screenshots picked in order, the Mint and Pinned tabs."""
+    import tempfile
+    from mint.tools import clipboard as C
+    from mint.ui import clipboard_window as CW
+    media = Path(__file__).resolve().parent / "media"
+    C.STORE = Path(tempfile.mkdtemp()) / "clipboard"
+    C._loaded = True
+    now = time.time()
+
+    def pic(name):
+        return C._png_file(C._as_png(media / name))
+    C.HISTORY[:] = [
+        {"id": "a1", "kind": "text", "text": "Looks good to me. Let's ship it on Thursday.", "label": "Looks good",
+         "source": "you", "at": now - 40},
+        {"id": "a2", "kind": "image", "image": pic("island-schedule.jpg"), "label": "screenshot 5 · screen",
+         "source": "screenshot", "at": now - 120},
+        {"id": "a3", "kind": "image", "image": pic("island-cards.jpg"), "label": "screenshot 4 · screen",
+         "source": "screenshot", "at": now - 300},
+        {"id": "a4", "kind": "text", "text": "https://hey-mint.pages.dev/docs#shortcuts", "label": "link",
+         "source": "mint", "at": now - 900},
+        {"id": "a6", "kind": "image", "image": pic("convert.jpg"), "label": "screenshot 3 · window",
+         "source": "screenshot", "at": now - 4000},
+        {"id": "a7", "kind": "text", "text": "Invoice #INV-2044 - due 12 October", "label": "Invoice",
+         "source": "mint", "at": now - 8000}]
+    C.VERSION[0] += 1
+    w = CW.window
+    C._save_pins({"invoice": dict(C.HISTORY[5], name="Invoice #INV-2044", at=now),
+                  "ship note": dict(C.HISTORY[0], name="Ship note", at=now - 60)})
+    time.sleep(0.8)
+    ms.main_sync(w.show)
+    time.sleep(0.6)
+    print("  clipboard frame", tuple(w.panel.frame().origin), tuple(w.panel.frame().size), flush=True)
+    time.sleep(1.8)
+    for chosen in ("a2", "a3", "a6"):
+        ms.main_sync(lambda c=chosen: w.click(c, c != "a2", False))
+        time.sleep(0.8)
+    time.sleep(1.4)
+    ms.main_sync(lambda: w.set_filter("mint"))
+    time.sleep(1.8)
+    ms.main_sync(lambda: w.set_filter("pinned"))
+    time.sleep(1.8)
+    ms.main_sync(w.close)
+    time.sleep(1.2)
+
+
 def tour(p):
     try:
         time.sleep(1.8)
@@ -701,7 +790,8 @@ def tour(p):
         for step in (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
-                     dictation_scene, drop_scene, convert_scene, video_edit_scene):
+                     dictation_scene, drop_scene, convert_scene, video_edit_scene,
+                     clipboard_scene, clipboard_window_scene):
             step(p)
         print("  [done]", flush=True)
     except Exception:

@@ -73,9 +73,11 @@ DEFAULTS: dict = {
     # modifier on its own: right_option, right_command, right_control, right_shift,
     # fn), tap it twice for hands-free; "dictate_toggle" starts/stops hands-free.
     "shortcuts": {"toggle": "cmd+j", "close": "", "talk": "ctrl+option+space", "dictate": "right_option",
-                  "dictate_toggle": ""},
+                  "dictate_toggle": "", "clipboard": "ctrl+option+v"},
     # Words dictation should spell exactly (names, jargon), comma-separated.
     "dictation_words": "",
+    # Where screenshots go: "both" (a file and the clipboard), "clipboard" or "file".
+    "screenshot_to": "both",
     # Keep hearing the user while a task runs; "stop" (any of stop_words) cuts it off.
     "listen_while_working": True,
     # The activity timeline (timeline.py) - off until the user turns it on.

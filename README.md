@@ -63,6 +63,7 @@ a video it's watching, an answer as a card.
 | “make it vertical for Reels and add captions”, “remove the silent parts”, “compress it under 25 MB” | Video editing by voice: planned by Gemini, rendered with ffmpeg next to the original, then checked (QA) |
 | “brighter”, “Chrome left, Slack right”, “turn on Do Not Disturb”, “record just this part of the screen” | Your Mac's switches (brightness, keep awake, Focus, Night Shift, windows via Rectangle) and screen recordings of the screen, a window or an area you describe |
 | *drag a file onto Mint* | Drop files, folders or text on the orb: it offers what fits (summarise, translate, spreadsheet, captions, transcribe) |
+| “open my clipboard”, “paste the last 5 screenshots in the chat”, “pin this as my address” | A clipboard that remembers everything you copy and every screenshot: Mint turns into it (⌃⌥V), pick several in order, pin up to 20, passwords and keys go to the Keychain |
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
@@ -78,6 +79,10 @@ a video it's watching, an answer as a card.
 <p align="center">
   <img src="docs/media/dictation.gif" alt="Holding Right Option to dictate: a waveform on the island, then clean text typed into the comment box" width="560">
   <img src="docs/media/drop.gif" alt="A PDF dragged onto Mint: a drop target, then a card of things to do with it" width="320">
+</p>
+
+<p align="center">
+  <img src="docs/media/clipboard.gif" alt="Mint turning into the clipboard: three screenshots picked in order, then the Mint and Pinned tabs" width="320">
 </p>
 
 ### Agents that pop out of a toy box

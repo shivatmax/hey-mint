@@ -421,7 +421,8 @@ class SettingsWindow:
         self._label(view, "Click a shortcut, then press the keys you want (Esc cancels). They work in any app.",
                     24, 336, 540, size=11, alpha=0.65)
         rows = (("toggle", "Open or close the chat", False), ("talk", f"Talk to {prefs.name()} (no wake word)", False),
-                ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free (start/stop)", False))
+                ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free (start/stop)", False),
+                ("clipboard", "Open the clipboard", False))
         y = 292
         for key, title, modifier_ok in rows:
             self._label(view, title, 24, y + 6, 230)

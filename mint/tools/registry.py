@@ -220,11 +220,13 @@ def declarations() -> list[types.FunctionDeclaration]:
             "effects, word-by-word captions, whether you listen while you work, and the activity "
             "timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> "
             "activity_timeline clear), where Mint saves what it makes ('save everything in my Dropbox' -> "
-            "storage_folder = that folder's path, e.g. ~/Dropbox/Mint; 'default' resets it), and instant "
-            "simple commands. Confirm briefly what you changed.",
+            "storage_folder = that folder's path, e.g. ~/Dropbox/Mint; 'default' resets it), instant "
+            "simple commands, and where screenshots go ('whenever I say screenshot, just put it on the clipboard' -> "
+            "screenshot_to = clipboard; file; both). Confirm briefly what you changed.",
             {"setting": {**STRING, "enum": ["spoken_replies", "microphone", "theme", "position",
                                             "face", "effects", "word_animation", "listen_while_working",
-                                            "activity_timeline", "storage_folder", "instant_commands"]},
+                                            "activity_timeline", "storage_folder", "instant_commands",
+                                            "screenshot_to"]},
              "value": {**STRING, "description":
                        "on/off for switches (activity_timeline also: clear); theme: mint (green), blue, aurora (teal/violet), sunset "
                        "(orange), rose (pink), mono (white); position: top-right, "

@@ -120,6 +120,10 @@ class Presence:
         if keys.get("talk") and self._hotkeys.register(keys["talk"], lambda: self.fire("wake")):
             print(f"  [shortcut: {hotkeys.display(keys['talk'])} - talk to {prefs.name()} without the wake word]",
                   flush=True)
+        if keys.get("clipboard"):
+            from mint.ui import clipboard_window
+            if self._hotkeys.register(keys["clipboard"], clipboard_window.window.toggle):
+                print(f"  [shortcut: {hotkeys.display(keys['clipboard'])} opens the clipboard]", flush=True)
         self._register_dictation(keys)
 
     def _register_dictation(self, keys: dict) -> None:
@@ -220,6 +224,8 @@ class Presence:
             else:
                 self._row(menu, "Record meeting", "meeting:start")
             self._row(menu, "Meeting notes…", "meeting:folder")
+            clip_key = hotkeys.display(prefs.get("shortcuts").get("clipboard", ""))
+            self._row(menu, "Clipboard…" + (f"  {clip_key}" if clip_key else ""), "clipboard:open")
         except Exception:
             pass
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
@@ -243,6 +249,9 @@ class Presence:
             prefs.set("position", value)
         elif kind == "meeting":
             self.fire(f"meeting_{value}")
+        elif kind == "clipboard":
+            from mint.ui import clipboard_window
+            clipboard_window.window.show()
         elif kind == "brain":
             from mint.ui import brain as brain_window
             brain_window.open_window(value or "skills")

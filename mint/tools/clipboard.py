@@ -9,10 +9,18 @@
   image / the path or address of "this", paste into the front app, clear, and
   a history of recent copies to bring one back.
 
-The history lives in memory only. Anything a password manager marks as
-concealed, and text that looks like a password, key or card number, is never
-kept. Mint's own windows are excluded from capture (see effects.SHARING), so
-the orb never appears in a screenshot.
+The history (text, pictures, files - the last 150, a week) is kept on this Mac only, in
+Application Support/Mint/clipboard (mode 700), so it survives a restart. Anything a
+password manager marks as concealed, and text that looks like a password, key or card
+number, is never kept there. Screenshots taken by Mint are numbered in it, so "paste the
+last three screenshots into the chat" pastes them one after another.
+
+Named clips: "pin this as the invoice template", then "paste the invoice template".
+Secrets: "this is my OpenAI key" / "save this password as bank" puts what is on the
+clipboard into the macOS Keychain (never a file, never the model); "copy my OpenAI key"
+puts it back - hidden from clipboard managers, cleared after a minute. Mint never reads a
+secret out and never pastes into a password field. Mint's own windows are excluded from
+capture (see effects.SHARING), so the orb never appears in a screenshot.
 """
 
 from __future__ import annotations
@@ -72,12 +80,25 @@ def declarations() -> list[types.FunctionDeclaration]:
             "copy_image (the image file at `path`, as a picture); copy_path (copy the path of `path`; with no "
             "path: the file selected in Finder, else the address of the page open in the browser, else the "
             "file open in the front window); copy_selection (copy what is selected in the front app); paste "
-            "(paste into the front app - first putting `text` on the clipboard if given); history (recent "
-            "copies); restore (put history item `index` back); clear.",
+            "(paste into the front app - first putting `text` on the clipboard if given); open (the clipboard "
+            "window: everything copied and screenshotted, with filters and multi-select); history (recent "
+            "copies, shown as a card; kind filters: text, image, screenshot, files); restore (put history item "
+            "`index` back); paste_many (paste several history items into the front app one after another: the "
+            "last `count` of `kind`, e.g. the last 5 screenshots, or `indexes`); pin (keep what is on the "
+            "clipboard, or history item `index`, under `label`); pins; paste_pin / copy_pin (`label`); unpin; "
+            "save_secret (put what is ON THE CLIPBOARD NOW into the macOS Keychain as `label` - a password, API "
+            "key or token; the value never reaches you); copy_secret (`label`: back on the clipboard, hidden, "
+            "cleared after a minute); secrets (their names only); forget_secret; clear.",
             {"action": _enum(("get", "copy", "copy_file", "copy_image", "copy_path", "copy_selection", "paste",
-                              "history", "restore", "clear"), "what to do"),
+                              "open", "history", "restore", "paste_many", "pin", "pins", "paste_pin", "copy_pin", "unpin",
+                              "save_secret", "copy_secret", "secrets", "forget_secret", "clear"), "what to do"),
              "text": STRING, "path": STRING,
-             "index": {**INTEGER, "description": "for restore: the number from history"}},
+             "index": {**INTEGER, "description": "for restore / pin: the number from history"},
+             "count": {**INTEGER, "description": "for paste_many: how many (newest ones, pasted oldest first)"},
+             "kind": _enum(("any", "text", "image", "screenshot", "files"), "for history / paste_many"),
+             "indexes": {"type": types.Type.ARRAY, "items": types.Schema(type=types.Type.INTEGER),
+                         "description": "for paste_many: history numbers"},
+             "label": {**STRING, "description": "for pins and secrets: the name ('invoice template', 'OpenAI key')"}},
             ["action"]),
     ]
 
@@ -91,7 +112,15 @@ PROMPT = """
   Say where it was saved, and that it is on the clipboard.
 - "Copy X" = clipboard copy; "copy the path / link of this" = copy_path (no path: Finder selection, browser page,
   or the open document); "copy this file" = copy_file; "copy what I selected" = copy_selection; "paste it
-  (here)" = paste; "what did I copy before" = history, then restore. Never paste into a password field.
+  (here)" = paste; "what did I copy before" / "show my clipboard" = history, then restore. Never paste into a
+  password field.
+- "Open my clipboard" / "show the clipboard window" = open.
+- "Paste the last 5 screenshots (into the chat)" = paste_many kind=screenshot count=5 (items 2 and 4 = indexes).
+  "Whenever I say screenshot, just put it on the clipboard" = set_preference screenshot_to=clipboard (or file,
+  both).
+- "Pin this as X" / "paste X" = pin / paste_pin. "This is my OpenAI key" / "save this password as bank" (it is on
+  the clipboard) = save_secret label=...; "copy my OpenAI key" = copy_secret. Never ask the user to say or type a
+  secret to you, never repeat one.
 """
 
 
@@ -154,9 +183,65 @@ def _short(path: str) -> str:
 
 # --- history ------------------------------------------------------------------------------------
 
-HISTORY: list[dict] = []           # newest first: {at, kind, text?, files?, png?, label}
-KEEP = 30
+HISTORY: list[dict] = []           # newest first: {at, kind, text?, files?, image?, label, source?}
+KEEP = 150
+KEEP_IMAGES = 80
+KEEP_DAYS = 7
+STORE = Path.home() / "Library" / "Application Support" / "Mint" / "clipboard"
 _watch_started = False
+_loaded = False
+_screenshot_count = {"n": 0}
+VERSION = [0]                      # bumped on every change (the clipboard window redraws)
+_own_counts: set[int] = set()      # pasteboard changes that were Mint putting a clip back: not new copies
+_restoring = [False]
+
+
+def _store() -> Path:
+    STORE.mkdir(parents=True, exist_ok=True)
+    (STORE / "images").mkdir(exist_ok=True)
+    os.chmod(STORE, 0o700)
+    return STORE
+
+
+def _load() -> None:
+    """The history saved by an earlier run (text, files, and pictures on disk)."""
+    global _loaded
+    if _loaded:
+        return
+    _loaded = True
+    import json
+    try:
+        rows = json.loads((_store() / "history.json").read_text())
+    except (OSError, ValueError):
+        rows = []
+    cutoff = time.time() - KEEP_DAYS * 86400
+    HISTORY[:] = [r for r in rows if r.get("at", 0) >= cutoff and (r["kind"] != "image" or Path(r.get("image", "")).exists())]
+    _screenshot_count["n"] = max([r.get("shot", 0) for r in HISTORY] + [0])
+
+
+def _save() -> None:
+    import json
+    VERSION[0] += 1
+    keep = {r.get("image") for r in HISTORY if r.get("image")} | {r.get("image") for r in _pins().values()}
+    try:
+        tmp = _store() / "history.tmp"
+        tmp.write_text(json.dumps(HISTORY, ensure_ascii=False))
+        os.chmod(tmp, 0o600)
+        tmp.replace(STORE / "history.json")
+        for old in (STORE / "images").glob("*.png"):          # pictures nothing points to any more
+            if str(old) not in keep:
+                old.unlink(missing_ok=True)
+    except OSError as error:
+        log.info("clipboard history: %s", error)
+
+
+def _png_file(data: bytes) -> str:
+    import hashlib
+    path = _store() / "images" / f"{hashlib.sha1(data).hexdigest()[:16]}.png"
+    if not path.exists():
+        path.write_bytes(data)
+        os.chmod(path, 0o600)
+    return str(path)
 
 
 def _snapshot(board) -> dict | None:
@@ -172,7 +257,11 @@ def _snapshot(board) -> dict | None:
         if _secret(text):
             return None
         return {"kind": "text", "text": text, "label": " ".join(text.split())[:80]}
-    png = board.dataForType_("public.png") or board.dataForType_("public.tiff")
+    png = board.dataForType_("public.png")
+    if png is None and board.dataForType_("public.tiff") is not None:
+        image = _image(board)
+        rep = _bitmap(image) if image is not None else None
+        png = rep.representationUsingType_properties_(4, None) if rep is not None else None   # 4 = PNG
     if png is not None:
         image = _image(board)
         rep = image.representations()[0] if image is not None and image.representations() else None
@@ -181,16 +270,84 @@ def _snapshot(board) -> dict | None:
     return None
 
 
+def _bitmap(image):
+    """The image as one bitmap (to turn a TIFF-only copy into PNG)."""
+    import AppKit
+    data = image.TIFFRepresentation()
+    return AppKit.NSBitmapImageRep.imageRepWithData_(data) if data is not None else None
+
+
 def _remember(entry: dict) -> None:
+    _load()
+    import uuid
     entry["at"] = time.time()
-    same = [h for h in HISTORY if h.get("label") == entry.get("label") and h.get("kind") == entry.get("kind")]
+    entry.setdefault("id", uuid.uuid4().hex[:10])
+    entry.setdefault("source", "you")
+    if entry.get("png") is not None:
+        entry["image"] = _png_file(entry.pop("png"))
+    if _pending_label:
+        entry.update(_pending_label)
+        _pending_label.clear()
+    same = [h for h in HISTORY if (h.get("image") and h.get("image") == entry.get("image"))
+            or (h.get("label") == entry.get("label") and h.get("kind") == entry.get("kind") and not h.get("image"))]
     for h in same:
+        if h.get("source") == "screenshot" and entry.get("source") != "screenshot":
+            entry.update(source="screenshot", shot=h.get("shot"), label=h.get("label"))
+        entry["id"] = h.get("id", entry["id"])
         HISTORY.remove(h)
     HISTORY.insert(0, entry)
     images = [h for h in HISTORY if h["kind"] == "image"]
-    for old in images[5:]:                      # keep the pictures of only the last few
-        old.pop("png", None)
+    for old in images[KEEP_IMAGES:]:
+        HISTORY.remove(old)
     del HISTORY[KEEP:]
+    _save()
+
+
+def delete(ids: list[str]) -> int:
+    """Remove clips from the history (the window's Delete)."""
+    _load()
+    before = len(HISTORY)
+    HISTORY[:] = [h for h in HISTORY if h.get("id") not in set(ids)]
+    _save()
+    return before - len(HISTORY)
+
+
+def entry(clip_id: str) -> dict | None:
+    _load()
+    return next((h for h in HISTORY if h.get("id") == clip_id), None)
+
+
+_pending_label: dict = {}
+
+
+_folder_seen = {"since": time.time(), "names": set(), "checked": 0.0}
+
+
+def _screenshots_saved() -> None:
+    """Screenshots macOS saved as files (⇧⌘3, ⇧⌘4) go into the history too, as screenshots."""
+    now = time.time()
+    if now - _folder_seen["checked"] < 3.0:
+        return
+    _folder_seen["checked"] = now
+    try:
+        folder = _save_folder()
+        for path in folder.iterdir():
+            name = path.name
+            if name in _folder_seen["names"] or not name.lower().endswith((".png", ".jpg", ".jpeg", ".heic")):
+                continue
+            if not re.match(r"(Screenshot|Screen Shot|CleanShot|Shottr)", name):
+                continue
+            if path.stat().st_mtime < _folder_seen["since"]:
+                _folder_seen["names"].add(name)
+                continue
+            _folder_seen["names"].add(name)
+            data = _as_png(path)
+            _load()
+            _screenshot_count["n"] += 1
+            _remember({"kind": "image", "png": data, "source": "screenshot", "shot": _screenshot_count["n"],
+                       "file": str(path), "label": f"screenshot {_screenshot_count['n']} · {name[:40]}"})
+    except Exception as error:
+        log.debug("screenshot folder: %s", error)
 
 
 def start_watching() -> None:
@@ -210,9 +367,10 @@ def start_watching() -> None:
                     count = board.changeCount()
                     if count != last:
                         last = count
-                        entry = _snapshot(board)
+                        entry = _snapshot(board) if count not in _own_counts else None
                         if entry:
                             _remember(entry)
+                    _screenshots_saved()
                 except Exception as error:
                     log.debug("clipboard watch: %s", error)
                 finally:
@@ -273,11 +431,17 @@ def _this_path() -> tuple[str, str]:
 
 
 def _note() -> None:
-    """Record what is on the clipboard now in the history (the watcher would, a second later)."""
+    """Record what Mint just put on the clipboard in the history (as Mint's). A clip being put back
+    from the history is not recorded again: the history keeps its order, so numbers stay put."""
     from mint.tools.everyday import BOARD_LOCK
     with BOARD_LOCK:
-        entry = _snapshot(_board())
+        board = _board()
+        if _restoring[0]:
+            _own_counts.add(board.changeCount())
+            return
+        entry = _snapshot(board)
         if entry:
+            entry.setdefault("source", "mint")
             _remember(entry)
 
 
@@ -290,8 +454,16 @@ def _put_text(text: str) -> None:
         _note()
 
 
-def _put_png(data: bytes) -> None:
+def _put_png(data: bytes, screenshot: str = "") -> None:
+    """Put a picture on the clipboard. `screenshot` (what it shows) numbers it as a screenshot in the
+    history, so it can be pasted back by number."""
     from mint.tools.everyday import BOARD_LOCK
+    if screenshot:
+        _load()
+        _screenshot_count["n"] += 1
+        n = _screenshot_count["n"]
+        _pending_label.update(source="screenshot", shot=n,
+                              label=f"screenshot {n} · {screenshot} · {time.strftime('%H:%M')}")
     with BOARD_LOCK:
         import AppKit
         from Foundation import NSData
@@ -408,35 +580,279 @@ def _clipboard(args: dict) -> str:
         return f"Pasted {_describe(board)[:120]} into {where}."
 
     if action == "history":
-        if not HISTORY:
-            return "No clipboard history yet (Mint starts noting copies from when it starts; hidden items and secrets are never kept)."
-        rows = []
-        for i, h in enumerate(HISTORY[:15], 1):
+        _load()
+        kind = str(args.get("kind") or "any")
+        rows = [(i, h) for i, h in enumerate(HISTORY, 1) if _is_kind(h, kind)][:15]
+        if not rows:
+            return ("No clipboard history yet (hidden items and secrets are never kept)." if kind == "any"
+                    else f"No {kind} in the clipboard history.")
+        _history_card(rows, kind)
+        lines = []
+        for i, h in rows:
             age = int(time.time() - h["at"])
-            when = f"{age // 60} min ago" if age >= 60 else "just now"
-            rows.append(f"{i}. [{h['kind']}] {h['label']}  ({when})")
-        return "Recent copies, newest first:\n" + "\n".join(rows)
+            when = f"{age // 3600} h ago" if age >= 3600 else f"{age // 60} min ago" if age >= 60 else "just now"
+            lines.append(f"{i}. [{h.get('source') or h['kind']}] {h['label']}  ({when})")
+        return "Recent copies, newest first (shown on screen as a card):\n" + "\n".join(lines)
 
     if action == "restore":
+        _load()
         index = int(args.get("index") or 0)
         if not 1 <= index <= len(HISTORY):
             return f"FAILED: history has {len(HISTORY)} items; give index 1-{len(HISTORY)}."
-        h = HISTORY[index - 1]
-        if h["kind"] == "text":
-            _put_text(h["text"])
-        elif h["kind"] == "files":
-            _put_files(h["files"])
-        elif h.get("png"):
-            _put_png(h["png"])
-        else:
-            return "FAILED: that picture is too old to bring back (only the last few images are kept)."
-        return f"Put back on the clipboard: {h['label']}"
+        problem = _put_back(HISTORY[index - 1])
+        return problem or f"Put back on the clipboard: {HISTORY[0]['label'] if HISTORY else ''}"
+
+    if action == "open":
+        from mint.ui import clipboard_window
+        clipboard_window.show()
+        return ("Opened the clipboard window: everything copied (by the user or you), every screenshot, pinned clips; "
+                "filters, multi-select, paste, copy, pin, delete, drag out.")
+
+    if action == "paste_many":
+        return _paste_many(args)
+
+    if action in ("pin", "pins", "paste_pin", "copy_pin", "unpin"):
+        return _pin_action(action, args)
+
+    if action in ("save_secret", "copy_secret", "secrets", "forget_secret"):
+        return _secret_action(action, str(args.get("label") or "").strip())
 
     if action == "clear":
         _board().clearContents()
         return "Cleared the clipboard."
 
     return "FAILED: unknown clipboard action."
+
+
+def _is_kind(h: dict, kind: str) -> bool:
+    if kind in ("", "any"):
+        return True
+    if kind == "screenshot":
+        return h.get("source") == "screenshot"
+    return h["kind"] == kind
+
+
+def _put_back(h: dict) -> str:
+    """Put a history (or pinned) item back on the clipboard; "" or why not. The history keeps its order."""
+    _restoring[0] = True
+    try:
+        if h["kind"] == "text":
+            _put_text(h["text"])
+        elif h["kind"] == "files":
+            _put_files(h["files"])
+        elif h.get("image") and Path(h["image"]).exists():
+            _put_png(Path(h["image"]).read_bytes())
+        else:
+            return "FAILED: that picture is no longer kept."
+    finally:
+        _restoring[0] = False
+    return ""
+
+
+def _history_card(rows: list, kind: str) -> None:
+    try:
+        from mint.tools import cards
+        items = []
+        for i, h in rows[:7]:
+            item = {"title": h["label"][:60], "trailing": f"#{i}"}
+            if h.get("image"):
+                item["path"] = h["image"]
+                item["detail"] = "screenshot" if h.get("source") == "screenshot" else "picture"
+            elif h["kind"] == "files":
+                item["path"] = h["files"][0]
+                item["detail"] = f"{len(h['files'])} file(s)"
+            else:
+                item.update(icon="text.alignleft", detail=f"{len(h.get('text', ''))} characters")
+            items.append(item)
+        title = {"screenshot": "Screenshots", "image": "Pictures copied", "text": "Text copied",
+                 "files": "Files copied"}.get(kind, "Clipboard")
+        cards.show(title, subtitle="newest first · say “paste number 2”", items=items, icon="doc.on.clipboard.fill",
+                   tint="teal", more=max(0, len(rows) - 7))
+    except Exception:
+        pass
+
+
+def _paste_many(args: dict) -> str:
+    """Paste several history items one after another (e.g. the last five screenshots into a chat)."""
+    from mint.tools.fastinput import press_key
+    from mint.tools.harness import _password_field
+    _load()
+    if _password_field():
+        return "REFUSED: the focused field is a password field."
+    indexes = [int(i) for i in (args.get("indexes") or []) if str(i).lstrip("-").isdigit()]
+    if indexes:
+        picked = [HISTORY[i - 1] for i in indexes if 1 <= i <= len(HISTORY)]
+    else:
+        kind = str(args.get("kind") or "any")
+        count = max(1, min(int(args.get("count") or 1), 20))
+        picked = [h for h in HISTORY if _is_kind(h, kind)][:count]
+        picked.reverse()                      # oldest first, the order they were taken in
+    if not picked:
+        return "Nothing in the clipboard history matches that."
+    front = _front_app()
+    board = _board()
+    saved = board.stringForType_("public.utf8-plain-text")
+    done = 0
+    for h in picked:
+        if _put_back(h):
+            continue
+        press_key("v", ["command"])
+        done += 1
+        time.sleep(0.45 if h["kind"] == "image" else 0.2)   # let a chat take in each picture
+    if saved is not None and picked[-1]["kind"] != "text":
+        time.sleep(0.4)
+        _restoring[0] = True
+        try:
+            _put_text(str(saved))             # the user's own clipboard back (not a new copy)
+        finally:
+            _restoring[0] = False
+    where = front.localizedName() if front is not None else "the front app"
+    return (f"Pasted {done} item(s) into {where}, oldest first: " + "; ".join(h["label"][:40] for h in picked)
+            + ". Check the chat box before sending - Mint never sends by itself.")
+
+
+# --- pinned clips -----------------------------------------------------------------------------
+
+def _pins() -> dict:
+    import json
+    try:
+        return json.loads((_store() / "pins.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_pins(pins: dict) -> None:
+    import json
+    path = _store() / "pins.json"
+    path.write_text(json.dumps(pins, ensure_ascii=False))
+    os.chmod(path, 0o600)
+
+
+def _pin_action(action: str, args: dict) -> str:
+    _load()
+    pins = _pins()
+    label = str(args.get("label") or "").strip()
+    key = label.lower()
+    if action == "pins":
+        if not pins:
+            return "No pinned clips. Say 'pin this as …' to keep one."
+        try:
+            from mint.tools import cards
+            cards.show("Pinned clips", len(pins), "pinned", icon="pin.fill", tint="orange",
+                       items=[{"title": p["name"], "detail": p["label"][:50], "path": p.get("image", ""),
+                               "icon": "pin.fill"} for p in pins.values()])
+        except Exception:
+            pass
+        return "Pinned: " + "; ".join(f"{p['name']} ({p['kind']})" for p in pins.values())
+    if not label:
+        return "FAILED: give the pin a name (label)."
+    if action == "pin":
+        index = int(args.get("index") or 0)
+        if index:
+            if not 1 <= index <= len(HISTORY):
+                return f"FAILED: history has {len(HISTORY)} items."
+            entry = dict(HISTORY[index - 1])
+        else:
+            entry = _snapshot(_board())
+            if entry is None:
+                return "FAILED: the clipboard is empty, hidden (a password) or looks like a secret - use save_secret."
+            if entry.get("png") is not None:
+                entry["image"] = _png_file(entry.pop("png"))
+        if key not in pins and len(pins) >= 20:
+            return "FAILED: 20 clips are pinned already - unpin one first."
+        entry.update(name=label, at=time.time())
+        pins[key] = entry
+        _save_pins(pins)
+        return f"Pinned as '{label}': {entry['label'][:60]}. Say 'paste {label}' any time."
+    found = pins.get(key) or next((p for k, p in pins.items() if key in k), None)
+    if found is None:
+        return f"No pinned clip called '{label}'. Pinned: {', '.join(p['name'] for p in pins.values()) or 'none'}."
+    if action == "unpin":
+        pins.pop(found["name"].lower(), None)
+        _save_pins(pins)
+        return f"Unpinned '{found['name']}'."
+    problem = _put_back(found)
+    if problem:
+        return problem
+    if action == "copy_pin":
+        return f"'{found['name']}' is on the clipboard."
+    from mint.tools.fastinput import press_key
+    from mint.tools.harness import _password_field
+    if _password_field():
+        return "REFUSED: the focused field is a password field."
+    press_key("v", ["command"])
+    return f"Pasted '{found['name']}'."
+
+
+# --- secrets (the macOS Keychain) -------------------------------------------------------------
+
+KEYCHAIN = "Mint clipboard"
+
+
+def _secret_names() -> list[str]:
+    import json
+    try:
+        return json.loads((_store() / "secrets.json").read_text())
+    except (OSError, ValueError):
+        return []
+
+
+def _secret_action(action: str, label: str) -> str:
+    """Secrets live in the Keychain only; their values never reach the model or a file."""
+    names = _secret_names()
+    if action == "secrets":
+        return ("Saved secrets (names only): " + ", ".join(names)) if names else "No saved secrets."
+    if not label:
+        return "FAILED: give the secret a name (label), e.g. 'OpenAI key'."
+    import json
+    if action == "save_secret":
+        board = _board()
+        value = board.stringForType_("public.utf8-plain-text")
+        if not value:
+            return "FAILED: there is no text on the clipboard - copy the password or key first, then ask again."
+        done = subprocess.run(["security", "add-generic-password", "-U", "-s", KEYCHAIN, "-a", label, "-w"],
+                              input=f"{value}\n{value}\n", capture_output=True, text=True, timeout=10)
+        if done.returncode != 0:
+            return "FAILED: the Keychain did not take it."
+        if label not in names:
+            names.append(label)
+            (_store() / "secrets.json").write_text(json.dumps(names))
+        # It was on the clipboard as plain text: take it out of the history too.
+        HISTORY[:] = [h for h in HISTORY if h.get("text") != str(value)]
+        _save()
+        board.clearContents()
+        return (f"Saved '{label}' in the macOS Keychain and cleared it from the clipboard. Say 'copy my {label}' "
+                "when you need it (do not repeat or describe the value).")
+    match = next((n for n in names if n.lower() == label.lower()), None) or \
+        next((n for n in names if label.lower() in n.lower()), None)
+    if match is None:
+        return f"No saved secret called '{label}'. Saved: {', '.join(names) or 'none'}."
+    if action == "forget_secret":
+        subprocess.run(["security", "delete-generic-password", "-s", KEYCHAIN, "-a", match], capture_output=True,
+                       timeout=10)
+        names.remove(match)
+        (_store() / "secrets.json").write_text(json.dumps(names))
+        return f"Forgot '{match}' (removed from the Keychain)."
+    done = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN, "-a", match, "-w"],
+                          capture_output=True, text=True, timeout=10)
+    if done.returncode != 0:
+        return f"FAILED: '{match}' is not in the Keychain any more."
+    value = done.stdout.rstrip("\n")
+    from mint.tools.everyday import BOARD_LOCK
+    with BOARD_LOCK:
+        board = _board()
+        board.clearContents()
+        board.setString_forType_(value, "public.utf8-plain-text")
+        board.setString_forType_("", "org.nspasteboard.ConcealedType")   # clipboard managers skip it
+        count = board.changeCount()
+
+    def clear_later():
+        with BOARD_LOCK:
+            if _board().changeCount() == count:
+                _board().clearContents()
+    threading.Timer(60.0, clear_later).start()
+    return (f"'{match}' is on the clipboard (hidden from clipboard history, cleared in a minute). Tell the user to "
+            "paste it with ⌘V - never read it out.")
 
 
 # --- screenshots ------------------------------------------------------------------------------
@@ -610,8 +1026,10 @@ def screenshot(args: dict) -> str:
     target = str(args.get("target") or "").strip()
     size = str(args.get("size") or "").strip()
     fmt = "jpg" if str(args.get("format") or "").lower() in {"jpg", "jpeg"} else "png"
-    copy = args.get("copy") is not False
-    save = args.get("save") is not False
+    from mint.core import prefs
+    where = str(prefs.get("screenshot_to") or "both")      # "clipboard", "file" or "both"
+    copy = args["copy"] if isinstance(args.get("copy"), bool) else where in ("both", "clipboard")
+    save = args["save"] if isinstance(args.get("save"), bool) else where in ("both", "file")
     stamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
     name = str(args.get("name") or "").strip()
     name = re.sub(r"[/:]", "-", name) if name else f"Mint Screenshot {stamp}"
@@ -696,7 +1114,7 @@ def screenshot(args: dict) -> str:
     with Image.open(path) as image:
         pixels = f"{image.width}x{image.height}"
     if copy:
-        _put_png(_as_png(path))
+        _put_png(_as_png(path), screenshot=str(described)[:40])
     if box:
         try:
             from mint.ui.effects import fx
@@ -709,7 +1127,7 @@ def screenshot(args: dict) -> str:
     else:
         path.unlink(missing_ok=True)
     if copy:
-        parts.append("It is on the clipboard, ready to paste.")
+        parts.append(f"It is on the clipboard, ready to paste (screenshot {_screenshot_count['n']} in the history).")
     return " ".join(parts)
 
 

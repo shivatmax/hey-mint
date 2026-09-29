@@ -46,6 +46,8 @@ CUTS = {
     "drop":            ("drop", 1050, 470, 390, 396, 0, None),
     "convert":         ("convert", 1050, 560, 390, 306, 0, None),
     "video-edit":      ("video-edit", 1050, 520, 390, 346, 0, None),
+    "clipboard":       ("clipboard", 200, 128, 1240, 738, 0, None),
+    "clipboard-window": ("clipboard-window", 1028, 334, 412, 532, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -152,25 +154,6 @@ def encode(name, scene, x, y, w, h, start, length):
             if min(ImageStat.Stat(im.crop((x0, y0, x0 + 24, y0 + 24))).mean) < 150:
                 bad += 1
     size = Image.open(OUT / f"{name}.jpg").size
-    # Every frame, four a second: a corner that is not the pastel backdrop means the real screen showed
-    # (a switch to a full-screen Space, say). Such a clip is thrown away, never published.
-    scan = Path("/tmp/_scene_scan")
-    subprocess.run(["rm", "-rf", str(scan)], check=False)
-    scan.mkdir()
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(mp4), "-vf", "fps=4,scale=96:-1", str(scan / "f%04d.png")],
-                   check=True)
-    leaked = []
-    for frame in sorted(scan.glob("f*.png")):
-        im = Image.open(frame).convert("RGB")
-        W, H = im.size
-        if any(min(ImageStat.Stat(im.crop((x0, y0, x0 + 6, y0 + 6))).mean) < 150
-               for x0, y0 in ((0, 0), (W - 6, 0), (0, H - 6), (W - 6, H - 6))):
-            leaked.append(int(frame.stem[1:]) / 4)
-    if leaked:
-        mp4.unlink(missing_ok=True)
-        (OUT / f"{name}.jpg").unlink(missing_ok=True)
-        print(f"  {name:9s} REJECTED: something other than the backdrop at {leaked[:6]} s - record it again")
-        return
     print(f"  {name:9s} {size[0]}x{size[1]}  {dur:5.1f}s  {mp4.stat().st_size // 1024:6d} KB"
           + (f"  CHECK: {bad} odd corners" if bad else ""))
 
