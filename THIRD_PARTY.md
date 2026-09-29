@@ -26,10 +26,10 @@ review before redistributing a build:
 
 | Component | How it is used | Where it comes from |
 |---|---|---|
-| openWakeWord (code and feature models) | Speech features for the “Hey Mint” detector | `pip install openwakeword`; models downloaded by `install.sh` |
-| 3D-Speaker CAM++ speaker model | The voice lock | Downloaded by `install.sh` from the sherpa-onnx releases |
+| openWakeWord code (Apache-2.0) and its shared melspectrogram / embedding feature models (Apache-2.0, from Google's speech embedding) | Speech features for the “Hey Mint” detector. None of openWakeWord's own pre-trained wake word models (CC BY-NC-SA 4.0) are used | `pip install openwakeword`; feature models downloaded by `install.sh` |
+| 3D-Speaker CAM++ speaker model (Apache-2.0) | The voice lock | Downloaded by `install.sh` from the sherpa-onnx releases |
 | Google Gemini API | Voice, reasoning, background work | Your own API key |
-| OpenAI / OpenRouter | Background agents | Your own API key |
+| OpenAI API | Background agents (GPT-6 Luna) and Codex | Your own API key or ChatGPT sign-in |
 | TypeSafe Jev | Fast choices, and every action of the screen-control engine | Your own API key |
 | PyObjC, NumPy, Pillow, mss, onnxruntime, PyAudio, kaldi-native-fbank | Runtime libraries | `requirements.txt` |
 | yt-dlp (Unlicense) | Fetching web videos and their captions for `watch_video` | `requirements.txt` |
@@ -40,3 +40,9 @@ review before redistributing a build:
 `models/hey_mint.json` and `models/hey_mint_data.npz` were trained for this project from
 synthetic “Hey Mint” phrases (macOS system voices) and public speech (LibriSpeech, CC BY 4.0)
 features; see `scripts/train_hey_mint.py`.
+
+**Wake word training data, note for commercial builds:** the synthetic phrases were spoken by macOS system
+voices (`say`). Apple's macOS licence allows those voices for personal, non-commercial use, so any paid,
+hosted or commercial build must first retrain the detector from commercially licensed recordings (your own
+voice recordings, or a text-to-speech service whose terms allow it). LibriSpeech (CC BY 4.0) only needs
+attribution.

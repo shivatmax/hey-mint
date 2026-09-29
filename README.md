@@ -313,8 +313,17 @@ Security issues: [SECURITY.md](SECURITY.md).
 
 ## License
 
-[GNU General Public License v3.0](LICENSE). You may use, study, share and modify Hey Mint;
-if you distribute a modified version, it must stay open source under the same license.
+Copyright © 2026 shivatmax (github.com/shivatmax). Hey Mint is free software under the
+[GNU General Public License v3.0 or later](LICENSE): use it, study it, share it and change it. If you
+distribute a modified version, it must stay open source under the same licence.
+
+- **Building Hey Mint into a closed-source product?** A commercial licence is available. Open an issue or
+  get in touch through [github.com/shivatmax](https://github.com/shivatmax).
+- **The name, logo and orb character** are not covered by the GPL. See [TRADEMARKS.md](TRADEMARKS.md);
+  forks need their own name.
+- **Contributing** needs a one-time [Contributor License Agreement](CLA.md) (a bot asks on your first
+  pull request). See [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Privacy:** what stays on your Mac and what goes where. See [PRIVACY.md](PRIVACY.md).
 
 Built with [Gemini Live](https://ai.google.dev/), [openWakeWord](https://github.com/dscripka/openWakeWord),
 [3D-Speaker CAM++](https://github.com/modelscope/3D-Speaker) via

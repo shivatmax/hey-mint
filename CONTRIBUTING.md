@@ -57,7 +57,15 @@ pushing a `vX.Y.Z` tag; GitHub Actions builds the DMG and publishes it
 Use the bug report template. Include your macOS version, what you said or typed, what you
 expected, and the relevant lines from `mint.log` (remove anything personal first).
 
-## License
+## License and CLA
 
-By contributing you agree that your contributions are licensed under the
-[GPL-3.0](LICENSE), the same license as the project.
+Hey Mint is released under the [GPL-3.0-or-later](LICENSE). Before your first pull request can be
+merged, please sign the [Contributor License Agreement](CLA.md): the CLA bot comments on your pull
+request, and you reply with the sentence it gives you. You sign once, for all future contributions.
+
+The CLA lets the maintainer also offer Hey Mint under other terms (for example a commercial licence or a
+paid edition) while the public code stays GPL. You keep the copyright in your work. If you write code as
+part of a job, make sure your employer agrees before you contribute.
+
+Please don't submit code copied from elsewhere unless its licence is compatible with the GPL. Say where
+it came from in the pull request.
