@@ -12,7 +12,9 @@ CHECKS = Path(__file__).parent / "checks"
 
 def run(name: str) -> None:
     result = subprocess.run([sys.executable, str(CHECKS / f"{name}.py")], capture_output=True, text=True, timeout=600)
-    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
+    # The failing lines first: CI shows only the start of the message as the error.
+    failed = [line.strip() for line in result.stdout.splitlines() if "FAIL" in line]
+    assert result.returncode == 0, " | ".join(failed[:8]) + "\n" + result.stdout[-3000:] + result.stderr[-2000:]
 
 
 def test_autopilot():
