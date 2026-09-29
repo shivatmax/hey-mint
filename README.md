@@ -1,3 +1,7 @@
+
+https://github.com/user-attachments/assets/6cb3ff8e-8778-4e16-b3f2-fe447f29aa1c
+
+
 <div align="center">
 
 # Hey Mint
@@ -22,7 +26,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 <br>
 
-https://github.com/user-attachments/assets/4cebe235-08a1-4ff4-b96f-83eb65fad462
+https://github.com/user-attachments/assets/24e6249c-3859-4013-8a46-baf96e40488b
 
 <p align="center">
   <sub>▶ <b>The 1-minute film</b> · unmute for the voiceover · also on <a href="https://youtu.be/OfXFNvbwlT0">YouTube</a></sub>
