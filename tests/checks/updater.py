@@ -153,7 +153,9 @@ def identity(name: str) -> tuple[str, pathlib.Path]:
     keychain = folder / "id.keychain-db"
     keychains.append(keychain)
     run("security", "create-keychain", "-p", "check", keychain)
-    run("security", "list-keychains", "-d", "user", "-s", *search_list)      # create-keychain added it
+    # On the list while the check runs (GitHub's runner found "no identity" in a keychain off the list, even
+    # with --keychain); the finally block puts the list back as it was.
+    run("security", "list-keychains", "-d", "user", "-s", *search_list, *keychains)
     run("security", "unlock-keychain", "-p", "check", keychain)
     run("security", "import", folder / "id.p12", "-k", keychain, "-P", "check", "-T", "/usr/bin/codesign")
     run("security", "set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", "check", keychain)
