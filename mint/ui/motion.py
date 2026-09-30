@@ -200,9 +200,11 @@ class Leg:
     """One piece of a flight."""
 
     def __init__(self, path, seconds, ease=in_out, land=0.0, spin=0.0, on_end=None, gaze=None,
-                 stretch=True):
+                 stretch=True, scale=None, free=False):
         self.path, self.seconds, self.ease = path, max(0.05, seconds), ease
         self.land, self.spin, self.on_end, self.gaze, self.stretch = land, spin, on_end, gaze, stretch
+        self.scale = scale        # (from, to): the orb grows or shrinks along the leg
+        self.free = free          # may leave the visible frame (flying into the notch, over the menu bar)
 
 
 class MintMotionTicker(AppKit.NSObject):
@@ -234,6 +236,7 @@ class Motion:
         self._ticker = None
         self._squash, self._squash_v = 0.0, 0.0
         self._spin_base = 0.0
+        self._size = 1.0            # the orb's drawn size (shrinks flying into the notch)
 
     # --- geometry (main thread) ---------------------------------------------------------
 
@@ -283,6 +286,7 @@ class Motion:
             self._timer = None
         self._legs = []
         self._squash = self._squash_v = 0.0
+        self._size = 1.0
         self._deform(0, 0, 0)
 
     def _cancel(self) -> None:
@@ -312,7 +316,10 @@ class Motion:
         leg = self._legs[self._leg]
         t = min(1.0, (now - self._leg_start) / leg.seconds)
         u = leg.ease(t)
-        x, y = self._clamp(*leg.path(u))
+        x, y = leg.path(u) if leg.free else self._clamp(*leg.path(u))
+        if leg.scale is not None:
+            a, b = leg.scale
+            self._size = a + (b - a) * u
         self._place(x, y)
         lx, ly = self._last or (x, y)
         vx, vy = (x - lx) * FPS, (y - ly) * FPS
@@ -363,7 +370,8 @@ class Motion:
         k = min(0.2, speed / 3000.0)
         lean = max(-0.28, min(0.28, -vx / 1800.0))
         s = max(-0.35, min(0.35, self._squash))
-        if k < 0.002 and abs(lean) < 0.002 and abs(s) < 0.002 and abs(spin) < 0.002:
+        size = getattr(self, "_size", 1.0)
+        if k < 0.002 and abs(lean) < 0.002 and abs(s) < 0.002 and abs(spin) < 0.002 and abs(size - 1) < 0.002:
             transform = Quartz.CATransform3DIdentity
         else:
             b = layer.bounds().size
@@ -371,6 +379,7 @@ class Motion:
             px, py = b.width / 2 - anchor.x * b.width, b.height / 2 - anchor.y * b.height
             theta = math.atan2(vy, vx)
             t = Quartz.CATransform3DMakeTranslation(px, py, 0)
+            t = Quartz.CATransform3DScale(t, size, size, 1)
             t = Quartz.CATransform3DRotate(t, lean + spin, 0, 0, 1)
             t = Quartz.CATransform3DRotate(t, theta, 0, 0, 1)
             t = Quartz.CATransform3DScale(t, 1 + k, 1 - 0.6 * k, 1)

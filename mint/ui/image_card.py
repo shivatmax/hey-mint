@@ -292,7 +292,7 @@ class ImageCard:
         card.addSubview_(self.title)
         self.subtitle = _label("", 11, AppKit.NSFontWeightMedium, DIM)
         card.addSubview_(self.subtitle)
-        self.x_button = self._round_button("xmark", "close:", 24, (1, 1, 1), 0.1, INK, 9, "Close (Esc)")
+        self.x_button = gfx.close_button(self.target, "close:", "Close (Esc)")      # the same × as the island's
         card.addSubview_(self.x_button)
         from mint.ui.orb import Orb
         self.face_host = Quartz.CALayer.layer()
@@ -545,7 +545,7 @@ class ImageCard:
         self.face_host.setFrame_(Quartz.CGRectMake(W - 46, H - 46, 40, 40))
         Quartz.CATransaction.commit()
         self.face_button.setFrame_(AppKit.NSMakeRect(W - 46, H - 46, 40, 40))
-        self.x_button.setFrame_(AppKit.NSMakeRect(W - 46 - 28, H - 38, 24, 24))
+        self.x_button.setFrameOrigin_(AppKit.NSMakePoint(W - 46 - 20, H - 26 - gfx.CLOSE / 2))   # beside the face
         y = 16 + 38 + 12
         at(self.box, y, IMG)
         y += IMG + 14
@@ -689,6 +689,7 @@ class ImageCard:
         frame = self.panel.frame()
         fx, fy = frame.origin.x + W - 26, frame.origin.y + frame.size.height - 26
         self.face.tick(time.monotonic(), 0.0, (mouse.x - fx, mouse.y - fy), False, bool(self.busy))
+        gfx.track_close(self.x_button, AppKit.NSPointInRect(mouse, frame), mouse)
         if self._flash_until and time.monotonic() > self._flash_until:
             self._flash_until = 0.0
             self._paint_hint()

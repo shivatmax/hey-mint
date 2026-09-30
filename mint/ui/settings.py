@@ -678,6 +678,14 @@ class SettingsWindow:
         self._row_switch(page, "face", "Face on the orb")
         self._row_switch(page, "cursor_effects", "On-screen effects", "Sparks, ripples and highlights.")
         page.end()
+        page.section("Notch (Dynamic Island)")
+        self._row_switch(page, "notch_mode", "Mint lives in the notch",
+                         "Like the iPhone's Dynamic Island, at the camera. Mint restarts to change its look.")
+        self._row_switch(page, "notch_words", "Words in the notch", "What Mint says, word by word, as it drops down.")
+        self._row_switch(page, "notch_controls", "Controls on hover", "Mic, voice, chat, sleep and more when you point at it.")
+        self._row_switch(page, "notch_idle_face", "Little Mint when idle", "Off: a plain notch until something happens.")
+        self._row_switch(page, "notch_playful", "Playful motion", "Bouncy springs, a hop as it opens, breathing with the voice.")
+        page.end()
 
     def _page_shortcuts(self, page) -> None:
         name = prefs.name()

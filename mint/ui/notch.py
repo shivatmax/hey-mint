@@ -44,10 +44,12 @@ log = logging.getLogger("mint.ui.notch")
 
 PREF = "notch_mode"
 FACE = 20              # the little Mint's diameter
-WING = 38              # how far the compact shape reaches out on each side of the camera
+WING = 32              # how far the compact shape reaches out on each side of the camera
 EAR = 7                # the concave top corners, where the shape meets the screen edge
-OPEN_W = 440           # the dropped-down shape's width
-WIN_W, WIN_H = 700, 300
+MAX_W = 380            # the widest the dropped-down shape gets for words
+PAD_X = 16             # text inset from the shape's sides
+BTN, STEP = 26, 32     # hover controls: button size, spacing
+WIN_W, WIN_H = 760, 820    # room for the notch to wrap a card or the chat hanging under it
 # Over the menu bar, as notch apps do (main menu + 3).
 LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 3
 
@@ -176,6 +178,8 @@ class Notch:
         self.left_at = 0.0
         self._acts = []
         self._ind = ""
+        self._styled: dict = {}             # guest windows dressed as part of the notch -> how they were
+        self.phase = "off"                  # off / entering / on / leaving
 
     # --- building -------------------------------------------------------------------------------
 
@@ -209,6 +213,9 @@ class Notch:
 
         # The black shape, and a container for everything inside it, clipped to the same shape.
         self.shape = Quartz.CAShapeLayer.layer()
+        self.shape.setBounds_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        self.shape.setAnchorPoint_(Quartz.CGPointMake(0.5, 1.0))      # breathes from the top centre
+        self.shape.setPosition_(Quartz.CGPointMake(WIN_W / 2, WIN_H))
         self.shape.setFillColor_(AppKit.NSColor.blackColor().CGColor())
         self.shape.setShadowColor_(AppKit.NSColor.blackColor().CGColor())
         self.shape.setShadowOpacity_(0.0)
@@ -241,7 +248,7 @@ class Notch:
 
         # The dropped-down part: status, words, progress, controls.
         self.status = self._label(11, _white(0.55), AppKit.NSFontWeightMedium)
-        self.words = self._label(14, _white(0.95), AppKit.NSFontWeightMedium, lines=3)
+        self.words = self._label(13, _white(0.95), AppKit.NSFontWeightMedium, lines=4)
         self.track = Quartz.CALayer.layer()
         self.track.setBackgroundColor_(_white(0.15).CGColor())
         self.track.setCornerRadius_(1.5)
@@ -260,17 +267,19 @@ class Notch:
                                 ("slider.horizontal.3", "Settings", self._menu_from_button)):
             act = MintNotchAct.alloc().initWithFn_(fn)
             self._acts.append(act)
-            button = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 13), act, "fire:")
+            button = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 12), act, "fire:")
             button.setBordered_(False)
             button.setToolTip_(tip)
             button.setContentTintColor_(_white(0.85))
+            button.setWantsLayer_(True)
+            button.layer().setCornerRadius_(BTN / 2)
+            button.layer().setBackgroundColor_(_white(0.1).CGColor())
             button.setAlphaValue_(0.0)
             button.setHidden_(True)
             box.addSubview_(button)
             self.buttons.append((symbol, button))
 
         self._resize(self.nw + 2 * WING, self.nh, animate=False)
-        panel.orderFrontRegardless()
         self.ticker = MintNotchTicker.alloc().initWithOwner_(self)
         timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
             1 / 30, self.ticker, "tick:", None, True)
@@ -357,7 +366,7 @@ class Notch:
         w, h = round(w), round(h)
         if (w, h) == self.size:
             return
-        radius = 10.0 if h <= self.nh + 2 else 22.0
+        radius = 10.0 if h <= self.nh + 2 else (26.0 if h > 180 else 20.0)
         path = island_path(WIN_W, WIN_H, w, h, r=radius)
         for layer in (self.shape, self.mask):
             old = (layer.presentationLayer() or layer).path() if animate else None
@@ -369,8 +378,9 @@ class Notch:
                 spring = Quartz.CASpringAnimation.animationWithKeyPath_("path")
                 spring.setFromValue_(old)
                 spring.setToValue_(path)
-                spring.setDamping_(17.0)
-                spring.setStiffness_(210.0)
+                playful = prefs.get("notch_playful") is not False
+                spring.setDamping_(13.5 if playful else 24.0)          # a little bounce, or none
+                spring.setStiffness_(240.0 if playful else 280.0)
                 spring.setMass_(1.0)
                 spring.setDuration_(spring.settlingDuration())
                 layer.addAnimation_forKey_(spring, "path")
@@ -390,8 +400,8 @@ class Notch:
 
     def tick(self) -> None:
         hud = self.hud
-        if hud is None or not getattr(hud, "_built", False):
-            return
+        if hud is None or not getattr(hud, "_built", False) or self.phase != "on":
+            return                              # off, or a transition is steering the shape
         now = time.monotonic()
         mouse = AppKit.NSEvent.mouseLocation()
         island = self._island()
@@ -407,29 +417,43 @@ class Notch:
         chat_open = getattr(getattr(hud, "chat", None), "is_open", False)
         state = getattr(hud, "_state", "")
         activity = getattr(hud, "_activity", None)
-        status = ""
-        try:
-            status = hud._status_line(now)
-        except Exception:
-            pass
+        said = getattr(getattr(hud, "_said", None), "words", None)
+        you = getattr(getattr(hud, "_you", None), "words", None)
+        # Only real words or a task open the shape: a bare status ("Mic off") stays an icon.
+        caption = self.caption if (said or you or activity) and prefs.get("notch_words") is not False else None
+        compact_w = self.nw + 2 * WING
+        playful = prefs.get("notch_playful") is not False
 
-        if island is not None and island.shown and island.rect is not None:
-            mode = "island"
-            x, y, w, h = island.rect
-            width = max(self.nw + 2 * WING, w + 20)
-            height = self.top - y + 10
-        elif hovering and not chat_open:
+        guests = self._guests(chat_open)
+        shown_island = island is not None and island.shown and island.rect is not None
+        if shown_island or guests:
+            mode = "wrap"
+            width, height = self._wrap(island.rect if shown_island else None, guests, compact_w)
+        elif hovering and prefs.get("notch_controls") is not False and not chat_open:
             mode = "hover"
-            width, height = OPEN_W, self.nh + (self._text_height() + 64 if self.caption else 70)
-        elif (self.caption or activity or self.progress) and not chat_open:
+            text_w, text_h = self._text_size(caption)
+            row_w = len(self.buttons) * STEP + 20
+            width = max(compact_w, row_w, text_w + 2 * PAD_X)
+            height = self.nh + (text_h + 10 if caption else 4) + BTN + 14
+        elif (caption or self.progress) and not chat_open:
             mode = "open"
-            width, height = OPEN_W, self.nh + self._text_height() + 20
+            text_w, text_h = self._text_size(caption)
+            width = max(compact_w, text_w + 2 * PAD_X)
+            height = self.nh + text_h + 18 + (8 if self.progress else 0)
+        elif prefs.get("notch_idle_face") is False and state in ("sleeping", "awake") and not activity:
+            mode = "plain"                      # just the notch until something happens
+            width, height = self.nw, self.nh
         else:
             mode = "compact"
-            width, height = self.nw + 2 * WING, self.nh
+            width, height = compact_w, self.nh
+        if playful and mode in ("open", "hover", "wrap") and self.mode in ("compact", "plain"):
+            self.orb.hop()                      # the little Mint hops as the shape opens
         self._resize(width, height)
-        self._layout_content(mode, status)
+        self._breathe(state, mode, playful)
+        self._layout_content(mode, caption, width, height)
         self._indicator(state, activity, now)
+        showing_face = mode != "plain"
+        self.face_host.setOpacity_(1.0 if showing_face else 0.0)
         # Clicks only on the shape itself; everywhere else the window is air.
         self.panel.setIgnoresMouseEvents_(not inside)
         self.mode = mode
@@ -441,65 +465,154 @@ class Notch:
         except Exception:
             return None
 
-    def _words_height(self, width) -> float:
+    # --- the notch becomes the card ---------------------------------------------------------
+
+    def _guests(self, chat_open) -> list:
+        """Mint's windows that hang under the notch right now: the chat, the clipboard, the
+        image card. The notch grows around them, so it becomes them rather than a card
+        floating below it."""
+        import sys
+        found = []
+        if chat_open and getattr(self.hud.chat, "window", None) is not None:
+            found.append(("chat", self.hud.chat.window))
+        for module, attr in (("mint.ui.clipboard_window", "window"), ("mint.ui.image_card", "card")):
+            owner = getattr(sys.modules.get(module), attr, None)
+            panel = getattr(owner, "panel", None)
+            if panel is not None and panel.isVisible() and panel.alphaValue() > 0.3:
+                found.append((module, panel))
+        for key, window in found:
+            self._dress(key, window)
+        return [window for _, window in found]
+
+    def _dress(self, key, window) -> None:
+        """Once per window: above the black shape, no shadow of its own, black like the notch."""
+        ident = id(window)
+        if ident in self._styled:
+            return
+        layer = window.contentView().layer() if key != "chat" else None
+        self._styled[ident] = (window, key, window.level(), window.hasShadow(), window.appearance(),
+                               layer.backgroundColor() if layer is not None else None,
+                               layer.borderWidth() if layer is not None else 0.0)
+        try:
+            window.setLevel_(LEVEL + 1)
+            window.setHasShadow_(False)
+            if key == "chat":
+                window.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+            else:
+                layer = window.contentView().layer()
+                if layer is not None:
+                    layer.setBackgroundColor_(AppKit.NSColor.blackColor().CGColor())
+                    layer.setBorderWidth_(0.0)
+        except Exception:
+            log.debug("could not dress a window for the notch", exc_info=True)
+
+    def undress(self) -> None:
+        """Leaving the notch: every dressed window goes back to how it was."""
+        for window, key, level, shadow, appearance, background, border in self._styled.values():
+            try:
+                window.setLevel_(level)
+                window.setHasShadow_(shadow)
+                window.setAppearance_(appearance)
+                layer = window.contentView().layer() if key != "chat" else None
+                if layer is not None:
+                    layer.setBackgroundColor_(background)
+                    layer.setBorderWidth_(border)
+            except Exception:
+                log.debug("could not undress a window", exc_info=True)
+        self._styled.clear()
+        self.panel.setIgnoresMouseEvents_(True)
+
+    def _wrap(self, island_rect, guests, compact_w):
+        """Stack the island's scene and the guests under the notch (never on top of each other)
+        and return the shape's size that wraps them all."""
+        rects = []
+        below = self.top - self.nh - 6
+        if island_rect is not None:
+            rects.append(island_rect)
+            below = island_rect[1] - 8
+        for window in sorted(guests, key=lambda w: -w.frame().origin.y):
+            f = window.frame()
+            if f.origin.y + f.size.height > below + 1:          # would overlap what is above: move down
+                window.setFrameOrigin_(AppKit.NSMakePoint(f.origin.x, below - f.size.height))
+                f = window.frame()
+            rects.append((f.origin.x, f.origin.y, f.size.width, f.size.height))
+            below = f.origin.y - 8
+        reach = max(max(abs(x - self.cx), abs(x + w - self.cx)) for x, y, w, h in rects)
+        width = max(compact_w, 2 * reach + 16)
+        height = self.top - min(y for x, y, w, h in rects) + 8
+        return min(width, WIN_W - 2 * EAR - 2), min(height, WIN_H)
+
+    # --- sizes ---------------------------------------------------------------------------------
+
+    def _text_size(self, caption):
+        """(width, height) the words need: as wide as the sentence up to MAX_W, then wrapping."""
+        if not caption:
+            return 0.0, 0.0
+        full = caption[1]
+        options = AppKit.NSStringDrawingUsesLineFragmentOrigin | AppKit.NSStringDrawingUsesFontLeading
+        one_line = full.boundingRectWithSize_options_(AppKit.NSMakeSize(4000, 400), options).size.width
+        width = min(MAX_W - 2 * PAD_X, math.ceil(one_line) + 14)
         # The field draws with a few points of padding: measure a little narrower than it is,
         # or a line that "fits" wraps anyway and the last words are cut off.
-        rect = self.caption[1].boundingRectWithSize_options_(
-            AppKit.NSMakeSize(width - 10, 400),
-            AppKit.NSStringDrawingUsesLineFragmentOrigin | AppKit.NSStringDrawingUsesFontLeading)
-        return min(math.ceil(rect.size.height) + 4, 4 * 18 + 4)
+        rect = full.boundingRectWithSize_options_(AppKit.NSMakeSize(width - 10, 400), options)
+        return width, min(math.ceil(rect.size.height) + 4, 4 * 18 + 4)
 
-    def _text_height(self) -> float:
-        # The words already start with the status line (the HUD puts it there).
-        height = self._words_height(OPEN_W - 44) if self.caption else 16.0
-        if self.progress:
-            height += 10
-        return height
+    def _breathe(self, state, mode, playful) -> None:
+        """While Mint speaks, the shape swells a touch with its voice."""
+        scale = 1.0
+        if playful and state == "speaking" and mode in ("open", "compact"):
+            level = float(getattr(self.hud, "_level", 0.0) or 0.0)
+            scale = 1.0 + min(0.04, level * 0.06)
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        self.shape.setAffineTransform_(Quartz.CGAffineTransformMakeScale(scale, 1.0 + (scale - 1.0) * 0.6))
+        Quartz.CATransaction.commit()
 
-    def _layout_content(self, mode, status) -> None:
-        left = WIN_W / 2 - OPEN_W / 2 + 22
-        width = OPEN_W - 44
-        y = WIN_H - self.nh - 8
+    def _layout_content(self, mode, caption, width, height) -> None:
         show_text = mode in ("open", "hover")
-        # With no words to show, a status line of its own (e.g. "Listening" while hovering).
-        from mint.ui.hud import TITLES
-        self.status.setStringValue_(status or TITLES.get(self.hud._state, "") or "Mint")
-        self.status.setFrame_(AppKit.NSMakeRect(left, y - 16, width, 16))
-        if not self.caption:
-            y -= 20
-        if self.caption and show_text:
-            shown, full = self.caption
-            th = self._words_height(width)
+        left = WIN_W / 2 - width / 2 + PAD_X
+        inner = width - 2 * PAD_X
+        y = WIN_H - self.nh - 6
+        if caption and show_text:
+            shown, full = caption
+            _, th = self._text_size(caption)
             if shown is not getattr(self, "_shown", None):
                 self._shown = shown
                 self.words.setAttributedStringValue_(shown)
-            self.words.setFrame_(AppKit.NSMakeRect(left, y - th, width, th))
-            y -= th + 6
-        self._fade(self.status, show_text and not self.caption)
-        self._fade(self.words, show_text and bool(self.caption))
-        # progress
+            self.words.setFrame_(AppKit.NSMakeRect(left - 2, y - th, inner + 4, th))
+            y -= th + 4
+        self._fade(self.status, False)
+        self._fade(self.words, show_text and bool(caption))
         visible = show_text and bool(self.progress)
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
-        self.track.setFrame_(Quartz.CGRectMake(left, y - 4, width, 3))
-        self.fill.setPosition_(Quartz.CGPointMake(left, y - 2.5))
-        self.fill.setBounds_(Quartz.CGRectMake(0, 0, width * float(self.progress or 0), 3))
+        self.track.setFrame_(Quartz.CGRectMake(left, y - 5, inner, 3))
+        self.fill.setPosition_(Quartz.CGPointMake(left, y - 3.5))
+        self.fill.setBounds_(Quartz.CGRectMake(0, 0, inner * float(self.progress or 0), 3))
         self.fill.setBackgroundColor_(gfx.cg(gfx.accent()))
         Quartz.CATransaction.commit()
         self.track.setOpacity_(1.0 if visible else 0.0)
         self.fill.setOpacity_(1.0 if visible else 0.0)
-        # controls
+        # Controls: one row along the bottom, popping in one after another.
         hover = mode == "hover"
-        count = len(self.buttons)
-        spacing = 44
-        start = WIN_W / 2 - (count - 1) * spacing / 2
+        entering = hover and self.mode != "hover"
+        start = WIN_W / 2 - (len(self.buttons) - 1) * STEP / 2
+        row_y = WIN_H - height + 9
         for i, (symbol, button) in enumerate(self.buttons):
-            below = (self._text_height() + 50) if self.caption else 60
-            button.setFrame_(AppKit.NSMakeRect(start + i * spacing - 15, WIN_H - self.nh - below, 30, 30))
-            if hover and button.isHidden():
+            button.setFrame_(AppKit.NSMakeRect(start + i * STEP - BTN / 2, row_y, BTN, BTN))
+            if entering:
                 button.setHidden_(False)
-            self._fade(button, hover)
+                button.setAlphaValue_(0.0)
+                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode == "hover" and self._pop(b))
+            elif not hover:
+                self._fade(button, False)
         self._paint_buttons()
+
+    def _pop(self, button) -> None:
+        AppKit.NSAnimationContext.beginGrouping()
+        AppKit.NSAnimationContext.currentContext().setDuration_(0.16)
+        button.animator().setAlphaValue_(1.0)
+        AppKit.NSAnimationContext.endGrouping()
 
     def _fade(self, view, on: bool) -> None:
         want = 1.0 if on else 0.0
@@ -616,58 +729,51 @@ notch = Notch()
 # --- installing into the HUD ---------------------------------------------------------------------
 
 def install(hud) -> bool:
-    """HUD.build, before the expressions attach: in notch mode, move the orb into the notch."""
+    """HUD.build, before the expressions attach. Hooks the HUD once (the hooks only act while
+    Mint is in the notch) and, in notch mode, moves Mint into the notch straight away."""
+    notch.hud = hud
+    _hook(hud)
+    _watch_setting()
     if not enabled():
-        _watch_setting(False)
         return False
     try:
-        notch.build(hud)
+        enter(animated=False)
     except Exception:
         log.exception("notch mode failed to build; keeping the orb")
         print("  [notch mode failed to build - using the orb]", flush=True)
-        _watch_setting(False)
         return False
-    old = hud.orb
-    hud.orb = notch.orb
-    hud.orb.apply_state(getattr(hud, "_state", "starting"), bool(prefs.get("voice")))
-    AppHelper.callLater(0.3, hud.orb.boot)
-    try:
-        old.root.setHidden_(True)
-    except Exception:
-        pass
-    # The floating orb's window stays, hidden, parked on the little Mint: everything that places
-    # itself by the orb (the chat, click sparks, critters, cards) then finds the notch.
-    face = notch.global_face()
-    hud._home_center = lambda: face
-    window = hud._orb_window
-    size = window.frame().size
-    window.setFrameOrigin_(AppKit.NSMakePoint(face[0] - size.width / 2, face[1] - size.height / 2))
-    window.orderOut_(None)
-    window.setAlphaValue_(0.0)
-    try:
-        window.orderFrontRegardless = lambda: None     # nothing brings the floating orb back
-    except Exception:
-        pass
-    hud._bubble.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
-    _route_words(hud)
-    _route_chat(hud)
-    _route_progress(hud)
-    _still_orb()
-    AppHelper.callLater(0.5, _hang_island_scenes)
-    _watch_setting(True)
-    print(f"  [notch mode: Mint lives in the {'notch' if notch.real else 'top of the screen'}]", flush=True)
     return True
 
 
-def _route_words(hud) -> None:
-    """The words (word by word) show inside the notch instead of in a bubble beside the orb."""
+# --- the HUD's hooks: they route to the notch only while Mint lives there ------------------------
+
+_live = [False]          # Mint is in the notch now
+_busy = [False]          # a transition is playing
+
+
+def active() -> bool:
+    return _live[0]
+
+
+def _hook(hud) -> None:
+    if getattr(hud, "_notch_hooked", False):
+        return
+    hud._notch_hooked = True
+    from mint.ui.chat import H as CHAT_H
+    from mint.ui.chat import W as CHAT_W
+    render_orig, hide_orig = hud._render_bubble, hud._hide_bubble
+    chat_orig, home_orig, progress_orig = hud._chat_frame, hud._home_center, hud.progress
+    hud._orb_home = home_orig                        # where the floating orb lives
+
     def render(now):
+        if not _live[0]:
+            return render_orig(now)
+        # The words (word by word) show inside the notch instead of in a bubble beside the orb.
         if hud.chat.is_open:
             notch.show_words(None, None)
             hud._bubble_dirty = False
             return
-        animate = bool(prefs.get("word_animation"))
-        shown, full, moving = hud._bubble_text(now, animate)
+        shown, full, moving = hud._bubble_text(now, bool(prefs.get("word_animation")))
         hud._bubble_moving = moving
         hud._bubble_dirty = moving
         if full.length() == 0:
@@ -677,48 +783,221 @@ def _route_words(hud) -> None:
         hud._bubble_visible = True
 
     def hide():
+        if not _live[0]:
+            return hide_orig()
         notch.show_words(None, None)
         hud._bubble_visible = False
-    hud._render_bubble = render
-    hud._hide_bubble = hide
 
-
-def _route_chat(hud) -> None:
-    """The chat opens centred under the notch."""
-    from mint.ui.chat import H as CHAT_H
-    from mint.ui.chat import W as CHAT_W
-
-    def frame():
-        visible = notch.screen.visibleFrame()
+    def chat_frame():
+        if not _live[0]:
+            return chat_orig()
+        visible = notch.screen.visibleFrame()          # the chat opens centred under the notch
         x = min(max(notch.cx - CHAT_W / 2, visible.origin.x + 6), visible.origin.x + visible.size.width - CHAT_W - 6)
         y = max(visible.origin.y + 6, notch.top - notch.nh - 12 - CHAT_H)
         return AppKit.NSMakeRect(x, y, CHAT_W, CHAT_H)
-    hud._chat_frame = frame
 
-
-def _route_progress(hud) -> None:
-    original = hud.progress
+    def home():
+        return notch.global_face() if _live[0] else home_orig()
 
     def progress(done, total, label=""):
-        original(done, total, label)
-        AppHelper.callAfter(notch.set_progress, (done / total) if total and done < total else None)
-    hud.progress = progress
+        progress_orig(done, total, label)
+        if _live[0]:
+            AppHelper.callAfter(notch.set_progress, (done / total) if total and done < total else None)
+    hud._render_bubble, hud._hide_bubble = render, hide
+    hud._chat_frame, hud._home_center, hud.progress = chat_frame, home, progress
+    _hook_motion()
 
 
-def _still_orb() -> None:
-    """The orb's tricks and trips across the screen do not apply: Mint stays in the notch."""
+def _hook_motion() -> None:
+    """In the notch the orb's tricks and trips across the screen do not apply."""
     try:
         from mint.ui.motion import motion
     except Exception:
         return
     message = ("Mint is in notch mode (Dynamic Island) and stays in the notch; switch to orb mode "
                "(display_mode orb) to move it around.")
-    motion.nudge = lambda *a, **k: message
-    motion.trick = lambda *a, **k: message
-    motion.tricks = lambda *a, **k: message
-    motion.wander = lambda *a, **k: message
-    motion.circle = lambda *a, **k: message
-    motion.visit_quartz = lambda *a, **k: None
+    for name in ("nudge", "trick", "tricks", "wander", "circle", "visit_quartz"):
+        original = getattr(motion, name)
+
+        def gated(*args, _orig=original, _name=name, **kwargs):
+            if _live[0]:
+                return None if _name == "visit_quartz" else message
+            return _orig(*args, **kwargs)
+        setattr(motion, name, gated)
+
+
+# --- into the notch and out again ----------------------------------------------------------------
+
+def enter(animated: bool = True) -> None:
+    """Mint moves into the notch. Animated: the orb looks up, crouches, and flies into the notch in a
+    spinning arc, shrinking as it goes; the notch opens its mouth, swallows it, and the little Mint
+    pops out beside the camera."""
+    hud = notch.hud
+    if hud is None or _live[0] or _busy[0]:
+        return
+    if getattr(notch, "panel", None) is None:
+        notch.build(hud)
+    notch.phase = "entering"
+    notch.panel.orderFrontRegardless()
+    if not animated:
+        _arrive()
+        return
+    _busy[0] = True
+    from mint.ui.motion import Leg, cubic, hold, in_quad, motion
+    start = hud.orb_center()
+    target = notch.global_face()
+    notch._resize(notch.nw, notch.nh, animate=False)      # it starts as just the notch
+    notch.face_host.setOpacity_(0.0)
+    distance = math.hypot(target[0] - start[0], target[1] - start[1])
+    seconds = min(1.25, max(0.75, distance / 1000))
+    up = (start[0] + (target[0] - start[0]) * 0.15, start[1] + 140)
+    near = (target[0], target[1] - 90)
+    flight = [Leg(hold(start), 0.32, gaze=target, stretch=False, land=0.32),        # look up, crouch
+              Leg(cubic(start, up, near, target), seconds, ease=in_quad, spin=1.5,  # launch, faster and faster
+                  scale=(1.0, 0.42), free=True, gaze=target)]
+    hud.orb.apply_state("awake", bool(prefs.get("voice")))
+    AppHelper.callLater(0.32 + seconds * 0.55, lambda: notch._resize(notch.nw + 2 * WING + 22, notch.nh + 16))
+    print("  [display: the orb flies into the notch]", flush=True)
+    motion._fly(flight, then=_arrive)
+
+
+def _arrive() -> None:
+    """The swap: from here on the little Mint in the notch is Mint's orb."""
+    hud = notch.hud
+    window = hud._orb_window
+    window.orderOut_(None)
+    window.setAlphaValue_(0.0)
+    notch.old_orb = hud.orb if hud.orb is not notch.orb else getattr(notch, "old_orb", hud.orb)
+    hud.orb = notch.orb
+    hud.orb.apply_state(getattr(hud, "_state", "awake"), bool(prefs.get("voice")))
+    try:
+        from mint.ui.emotes import emotes
+        if emotes.orb is not None:                   # at start-up they attach to hud.orb themselves, later
+            emotes.rebind(notch.orb)
+    except Exception:
+        log.debug("expressions did not follow into the notch", exc_info=True)
+    try:
+        hud._hide_bubble()                           # the old bubble, if it was up
+    except Exception:
+        pass
+    _live[0] = True
+    face = notch.global_face()                       # the hidden floating window parks on the little Mint,
+    size = window.frame().size                       # so the chat, sparks and cards find the notch
+    window.setFrameOrigin_(AppKit.NSMakePoint(face[0] - size.width / 2, face[1] - size.height / 2))
+    hud._bubble.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+    _hang_island_scenes()
+    notch.phase = "on"
+    # The little Mint pops out beside the camera.
+    notch.face_host.setOpacity_(1.0)
+    pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
+    pop.setFromValue_(0.2)
+    pop.setToValue_(1.0)
+    pop.setDamping_(9.0)
+    pop.setStiffness_(260.0)
+    pop.setDuration_(pop.settlingDuration())
+    notch.orb.body.addAnimation_forKey_(pop, "arrive")
+    if _busy[0]:
+        notch.orb.burst(gfx.accent(), stars=True, amount=0.8)
+        AppHelper.callLater(0.35, notch.orb.hop)
+    else:
+        AppHelper.callLater(0.3, notch.orb.boot)
+    _busy[0] = False
+    print(f"  [notch mode: Mint lives in the {'notch' if notch.real else 'top of the screen'}]", flush=True)
+
+
+def leave(animated: bool = True) -> None:
+    """Mint comes out of the notch. Animated: the notch bulges and spits the little Mint out; it drops
+    from under the notch, growing as it falls, and bounces down to its spot as the floating orb."""
+    hud = notch.hud
+    if hud is None or not _live[0] or _busy[0]:
+        return
+    _busy[0] = True
+    notch.phase = "leaving"
+    home = hud._orb_home()
+    face = notch.global_face()
+    if animated:
+        notch._resize(notch.nw + 2 * WING + 26, notch.nh + 26)       # the notch bulges...
+        notch.orb.hop()
+
+    def spit():
+        _depart()
+        window = hud._orb_window
+        size = window.frame().size
+        window.setFrameOrigin_(AppKit.NSMakePoint(face[0] - size.width / 2, face[1] - size.height / 2))
+        window.setAlphaValue_(1.0)
+        window.orderFrontRegardless()
+        notch._resize(notch.nw, notch.nh)                             # ...and closes behind it
+        if not animated:
+            window.setFrameOrigin_(AppKit.NSMakePoint(home[0] - size.width / 2, home[1] - size.height / 2))
+            _gone()
+            return
+        from mint.ui.motion import Leg, hop, motion, out_quad, quad
+        drop = (face[0] + (home[0] - face[0]) * 0.25, face[1] - 110)
+        far = math.hypot(home[0] - drop[0], home[1] - drop[1])
+        flight = [Leg(quad(face, (face[0], face[1] - 40), drop), 0.42, ease=out_quad, spin=-1.0,
+                      scale=(0.42, 0.8), free=True),                   # out and down, spinning
+                  Leg(hop(drop, home, min(160, 60 + far * 0.15)), min(1.0, 0.5 + far / 1600),
+                      scale=(0.8, 1.0), land=0.34),                    # a big bouncing hop home
+                  Leg(hop(home, home, 20), 0.3, land=0.2)]             # and a little one
+        print("  [display: the orb drops out of the notch]", flush=True)
+        motion._fly(flight, then=_gone)
+    AppHelper.callLater(0.28 if animated else 0.0, spit)
+
+
+def _depart() -> None:
+    """The swap back: the floating orb is Mint again; the notch lets go of everything."""
+    hud = notch.hud
+    _live[0] = False
+    notch.face_host.setOpacity_(0.0)
+    notch.show_words(None, None)
+    notch.words.setAlphaValue_(0.0)
+    notch.track.setOpacity_(0.0)
+    notch.fill.setOpacity_(0.0)
+    for _, button in notch.buttons:
+        button.setHidden_(True)
+        button.setAlphaValue_(0.0)
+    old = getattr(notch, "old_orb", None)
+    if old is not None:
+        hud.orb = old
+        hud.orb.apply_state(getattr(hud, "_state", "awake"), bool(prefs.get("voice")))
+        try:
+            from mint.ui.emotes import emotes
+            emotes.rebind(old)
+        except Exception:
+            log.debug("expressions did not follow out of the notch", exc_info=True)
+    try:
+        from mint.ui import look
+        look.follow_system(hud._bubble)
+    except Exception:
+        pass
+    _unhang_island_scenes()
+    notch.undress()
+
+
+def _gone() -> None:
+    hud = notch.hud
+    notch.phase = "off"
+    _busy[0] = False
+    AppHelper.callLater(0.45, lambda: (not _live[0]) and notch.panel.orderOut_(None))
+    try:
+        hud._orb_moved(final=False)
+    except Exception:
+        pass
+    _emote("wave")
+    print("  [orb mode: Mint is the floating orb again]", flush=True)
+
+
+def _emote(name) -> None:
+    try:
+        from mint.ui.emotes import emotes
+        emotes.play(name)
+    except Exception:
+        pass
+
+
+# --- island.py's scenes under the notch -----------------------------------------------------------
+
+_island_saved = {}
 
 
 def _hang_island_scenes() -> None:
@@ -729,8 +1008,15 @@ def _hang_island_scenes() -> None:
         return
     isl = island_module.island
     if getattr(isl, "panel", None) is None:
+        AppHelper.callLater(0.5, lambda: _live[0] and _hang_island_scenes())    # not built yet (start-up)
         return
+    if not _island_saved:
+        _island_saved.update(level=isl.panel.level(), bg=isl.blob.backgroundColor(),
+                             border=isl.blob.borderWidth(), shadow=isl.blob.shadowOpacity())
     isl.panel.setLevel_(LEVEL + 1)                    # above the notch's black shape
+    isl.blob.setBackgroundColor_(AppKit.NSColor.blackColor().CGColor())     # one piece with the notch
+    isl.blob.setBorderWidth_(0.0)
+    isl.blob.setShadowOpacity_(0.0)
     try:
         isl.face_host.setHidden_(True)               # the notch has its own little Mint
     except Exception:
@@ -746,20 +1032,51 @@ def _hang_island_scenes() -> None:
     isl._upper = lambda: True
 
 
+def _unhang_island_scenes() -> None:
+    try:
+        from mint.ui import island as island_module
+    except Exception:
+        return
+    isl = island_module.island
+    for name in ("_layout", "_upper"):               # back to the class's own placement
+        isl.__dict__.pop(name, None)
+    if _island_saved and getattr(isl, "panel", None) is not None:
+        isl.panel.setLevel_(_island_saved["level"])
+        isl.blob.setBackgroundColor_(_island_saved["bg"])
+        isl.blob.setBorderWidth_(_island_saved["border"])
+        isl.blob.setShadowOpacity_(_island_saved["shadow"])
+        try:
+            isl.face_host.setHidden_(False)
+        except Exception:
+            pass
+
+
 # --- switching between the orb and the notch -----------------------------------------------------
 
 _watching = [False]
 
 
-def _watch_setting(active: bool) -> None:
+def _watch_setting() -> None:
     if _watching[0]:
         return
     _watching[0] = True
 
     def changed(key, value):
-        if key == PREF and bool(value) != active:
-            AppHelper.callAfter(_relaunch, bool(value))
+        if key == PREF:
+            AppHelper.callAfter(_switch, bool(value))
     prefs.on_change(changed)
+
+
+def _switch(want: bool) -> None:
+    try:
+        if want:
+            enter(animated=True)
+        else:
+            leave(animated=True)
+    except Exception:
+        log.exception("live switch failed - restarting Mint to change its look")
+        _busy[0] = False
+        _relaunch(want)
 
 
 def set_mode(mode: str) -> str:
@@ -768,11 +1085,11 @@ def set_mode(mode: str) -> str:
     want = mode in ("notch", "island", "dynamic island", "dynamic_island", "top")
     if mode not in ("orb", "circle", "floating", "notch", "island", "dynamic island", "dynamic_island", "top"):
         return "Say orb (the floating circle) or notch (the Dynamic Island at the camera)."
-    if bool(prefs.get(PREF)) == want:
+    if bool(prefs.get(PREF)) == want and active() == want:
         return f"Mint is already in {'notch' if want else 'orb'} mode."
     prefs.set(PREF, want)
-    return (f"Switching to {'notch mode: Mint moves into the camera notch like a Dynamic Island' if want else 'orb mode: the floating orb comes back'}. "
-            "Mint restarts in a few seconds to change its look - say one short sentence, then stop.")
+    return ("Flying into the notch now: Mint becomes the Dynamic Island at the camera." if want else
+            "Dropping out of the notch now: Mint is the floating orb again.")
 
 
 RESTART_CODE = 76     # Mint.app (the Ear) brings Mint straight back after any exit other than 0 and 75

@@ -251,8 +251,9 @@ def declarations() -> list[types.FunctionDeclaration]:
             "Switch how Mint looks on screen: 'orb' = the floating round orb (default); 'notch' = Mint "
             "lives in the MacBook's camera notch like the iPhone's Dynamic Island (it grows out of the "
             "notch to show words, tasks and controls). Use for 'go into the notch', 'dynamic island mode', "
-            "'be the notch', 'back to the orb', 'floating mode'. Mint restarts a few seconds later to "
-            "change its look: say one short sentence and stop.",
+            "'be the notch', 'become the notch', 'go to my notch', 'go out of the notch', 'come out', 'back to "
+            "the orb', 'floating mode'. The change plays right away as an animation (the orb flies into "
+            "the notch, or drops out of it): say one short playful sentence.",
             {"mode": {**STRING, "enum": ["orb", "notch"]}}, ["mode"]),
         _fn("express",
             "Play an expression on your orb body. ONLY when the user asks for one ('smile', "

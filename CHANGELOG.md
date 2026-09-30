@@ -4,8 +4,12 @@
 
 - **Notch mode (Dynamic Island at the camera):** Mint can live in the MacBook notch instead of the floating orb -
   its face beside the camera, the island dropping down from the notch for cards, calls and progress (menu bar
-  toggle, or "switch to notch mode"). The clipboard and picture cards open centred under the notch; switching modes
-  restarts Mint at once (exit 76), and Mint doesn't unload itself while in notch mode.
+  toggle, or "become the notch" / "go out of my notch"). Switching is live, with no restart: the orb flies into the
+  notch or drops back out. In notch mode the notch wraps each card into one black shape (compact sizing, Settings ▸
+  Appearance ▸ Notch). Mint doesn't unload itself while in notch mode.
+- **A close (×) button on every pop-up:** island scenes, the schedule and info cards, video, trackers, drop, lessons,
+  meetings, the picture card and the clipboard, in both modes. Closing hides the card; it never stops the work under
+  it (a recording keeps recording).
 - **Settings ▸ Models & agents:** keys for OpenAI, Anthropic (Claude), OpenRouter, Groq, xAI, Ollama and custom
   OpenAI-compatible endpoints, each with Test; up to three backup models for every agent with Gemini as the last
   resort; edit or add agents (name, role, instructions, model, backups, thinking, web tools). A second Gemini key

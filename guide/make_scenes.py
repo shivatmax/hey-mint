@@ -958,7 +958,7 @@ def _demo_prefs():
     """The demo's orb sits bottom-right, without touching the real Mint's settings (the same file)."""
     from mint.core import prefs
     real_get, real_set = prefs.get, prefs.set
-    fixed = {"position": "bottom-right", "origin": None, "meeting_offer": True, "face": True}
+    fixed = {"position": "bottom-right", "origin": None, "meeting_offer": True, "face": True, "notch_mode": False}
     prefs.get = lambda key: fixed[key] if key in fixed else real_get(key)
     prefs.set = lambda key, value: None if key in fixed else real_set(key, value)
 

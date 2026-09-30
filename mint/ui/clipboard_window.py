@@ -2,7 +2,7 @@
 wherever the orb sits) with Mint's little face in its corner, like the island.
 
 Open it with ⌃⌥V (Settings ▸ Shortcuts), "open my clipboard", or the menu bar; the same key,
-Esc or a click on the face closes it.
+Esc, the × or a click on the face closes it.
 
 * Everything is in it: what you copy (⌘C), every screenshot, and what Mint copies.
 * Three tabs: All · Mint · Pinned (up to 20 pins, kept for good), and a search box.
@@ -261,6 +261,10 @@ class ClipboardWindow:
         close.setAction_("close:")
         close.setToolTip_("Close (Esc)")
         card.addSubview_(close)
+        # A visible × beside the face too: the face alone didn't read as a way to close.
+        self.x_button = gfx.close_button(self.target, "close:", "Close (Esc)")
+        self.x_button.setFrameOrigin_(AppKit.NSMakePoint(W - 46 - 20, H - 26 - gfx.CLOSE / 2))
+        card.addSubview_(self.x_button)
 
         # Search, full width.
         field = AppKit.NSSearchField.alloc().initWithFrame_(AppKit.NSMakeRect(16, H - 82, W - 32, 28))
@@ -442,6 +446,7 @@ class ClipboardWindow:
         frame = self.panel.frame()
         fx, fy = frame.origin.x + W - 26, frame.origin.y + H - 26
         self.face.tick(time.monotonic(), 0.0, (mouse.x - fx, mouse.y - fy), False, False)
+        gfx.track_close(self.x_button, AppKit.NSPointInRect(mouse, frame), mouse)
         if force or clip_tools.VERSION[0] != self.version:
             self.version = clip_tools.VERSION[0]
             self.rebuild()

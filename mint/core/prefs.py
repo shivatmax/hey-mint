@@ -65,6 +65,10 @@ DEFAULTS: dict = {
     "cute_effects": True,       # a small flourish per action, paw prints on clicks (cute_fx.py)
     "auto_emotions": True,      # the orb shows feelings on its own in conversation (moods.py)
     "notch_mode": False,        # Mint lives in the camera notch like a Dynamic Island (notch.py)
+    "notch_words": True,        # notch mode: the words show in the notch as they are spoken
+    "notch_controls": True,     # notch mode: controls when the pointer rests on the notch
+    "notch_idle_face": True,    # notch mode: the little Mint beside the camera when idle (off: a plain notch)
+    "notch_playful": True,      # notch mode: bouncy springs, hops, breathing with the voice
     "word_animation": True,
     "voice": True,
     "mic": True,

@@ -184,12 +184,13 @@ class Emotes:
         if self._attach_tries < 60:
             AppHelper.callLater(1.0, self._find)
 
-    def attach(self, hud) -> None:
-        """Hook the HUD's orb: expressions draw on it; clicks and hovers are watched."""
-        if self.orb is not None:
+    def _wrap_tick(self, orb) -> None:
+        """Watch hovers and follow motion's gaze on this orb (once per orb)."""
+        if getattr(orb, "_emotes_wrapped", False):
             return
-        self.hud, self.orb = hud, hud.orb
-        original_tick = self.orb.tick
+        orb._emotes_wrapped = True
+        hud = self.hud
+        original_tick = orb.tick
 
         def tick(now, level, look, hovering, visible_work, _orig=original_tick):
             # While the orb points at something it marked, its eyes stay on it.
@@ -207,7 +208,33 @@ class Emotes:
                 self._watch_hover(now, hovering, visible_work)
             except Exception:
                 log.debug("hover watch failed", exc_info=True)
-        self.orb.tick = tick
+        orb.tick = tick
+
+    def rebind(self, orb) -> None:
+        """Draw on another orb from now on (Mint moving between the floating orb and the notch)."""
+        if orb is None or orb is self.orb:
+            return
+        try:
+            self._clear()                         # whatever was playing stays with the old orb
+        except Exception:
+            pass
+        self.orb = orb
+        self._wrap_tick(orb)
+        try:
+            from mint.ui import sharing
+            if sharing._dot is not None:
+                sharing._dot.removeFromSuperlayer()
+                sharing._dot = None
+            sharing.apply()                       # the "on air" dot follows onto the new orb
+        except Exception:
+            log.debug("sharing dot did not move", exc_info=True)
+
+    def attach(self, hud) -> None:
+        """Hook the HUD's orb: expressions draw on it; clicks and hovers are watched."""
+        if self.orb is not None:
+            return
+        self.hud, self.orb = hud, hud.orb
+        self._wrap_tick(self.orb)
 
         if hasattr(hud, "on_poke"):
             # The HUD's own extension point: called on each click of the orb;

@@ -17,8 +17,10 @@ the capsule springs back into the orb.
 
 Each scene is a small object (size, build, tick, mood); providers look at Mint's state ten times
 a second and the highest-priority scene wins. Scenes that are pushed (the schedule card) expire by
-themselves. The island never shows in screenshots or screen shares, and is click-through
-everywhere but the capsule itself. Main thread only, except the show_* entry points.
+themselves. Every scene gets a small × (brighter while the pointer is on the island): it only hides
+the scene - a pushed card goes, a live one (a recording, a lesson) keeps running out of sight until it
+changes. The island never shows in screenshots or screen shares, and is click-through everywhere but
+the capsule itself. Main thread only, except the show_* entry points.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ log = logging.getLogger("mint.ui.island")
 ROW = 40                   # a compact capsule's height
 FACE = 24                  # the little Mint's diameter
 ORB = 44                   # the real orb, what the island grows out of
+CLOSE_SLOT = 34            # the × at a compact capsule's far end (the face's end holds the face)
 CARD_RADIUS = 24
 INK = (1.0, 1.0, 1.0)
 DIM = (0.62, 0.63, 0.68)
@@ -192,6 +195,11 @@ class Scene:
 
     def clicked(self) -> None:
         """A click on the capsule, not on a button."""
+
+    def closable(self) -> bool:
+        """Whether the island adds its × (see Island.close_scene). False where the scene's own ✕
+        already is the way out."""
+        return True
 
     # building blocks
     def label(self, view, text, x, y, w, size=13, weight="semibold", rgb=INK, alpha=1.0, mono=False,
@@ -376,6 +384,9 @@ class MeetingScene(Scene):
     def mood(self) -> str:
         return {"writing": "thinking", "starting": "thinking", "stopping": "thinking"}.get(self.mode, "awake")
 
+    def closable(self) -> bool:
+        return self.mode != "offer"               # its own × ("Not this call") already closes it
+
     def level(self) -> float:
         if self.mode != "recording":
             return 0.0
@@ -500,6 +511,9 @@ class ScreenScene(Scene):
     def signature(self):
         return f"screen:{self.mode}"
 
+    def closable(self) -> bool:
+        return self.mode != "pending"             # "Record this area?" is a question: its ✕ is the no
+
     def size(self):
         return (40 + 140, ROW) if self.mode == "recording" else (40 + 196, ROW)
 
@@ -596,7 +610,8 @@ class TeachScene(Scene):
                     size=26, symbol_size=10, tip="Pause (nothing is recorded)" if recording else "Carry on")
         self.button(view, "checkmark", self.done, 172, mid - 14, GREEN, filled=True, size=28, symbol_size=11,
                     tip="Done - save it as a skill")
-        self.button(view, "xmark", self.cancel, 206, mid - 13, DIM, size=26, symbol_size=10, tip="Cancel")
+        self.button(view, "trash", self.cancel, 206, mid - 13, DIM, size=26, symbol_size=10,
+                    tip="Cancel - throw the demonstration away")      # not an ×: the island's × only hides
         self.tick(time.time())
 
     def tick(self, now):
@@ -695,7 +710,7 @@ class VideoScene(Scene):
         icon.setContentTintColor_(_ns(mint))
         icon.setFrame_(AppKit.NSMakeRect(5, 6, 20, 18))
         badge.addSubview_(icon)
-        right = width - (48 if island.face_right and island.face_top else 14)
+        right = island.right_edge(width)
         self.title = self.label(view, self.snap.get("title", ""), 52, top - 14, right - 52, size=13)
         self.step = self.label(view, "", 52, top - 30, right - 52 - 40, size=11, weight="medium", rgb=DIM)
         self.clock = self.label(view, "", right - 40, top - 30, 40, size=11, weight="medium", rgb=DIM, mono=True)
@@ -801,7 +816,8 @@ class TutorScene(Scene):
         self.say = self.label(view, "", 10, mid - 15, 214, size=13)
         self.button(view, "arrow.right", self.next, 228, mid - 14, TEAL, filled=True, size=28, symbol_size=11,
                     tip="Next step")
-        self.button(view, "xmark", self.stop, 262, mid - 13, DIM, size=26, symbol_size=10, tip="End the lesson")
+        self.button(view, "stop.fill", self.stop, 262, mid - 13, DIM, size=26, symbol_size=10,
+                    tip="End the lesson")                              # not an ×: the island's × only hides
         self.tick(time.time())
 
     def tick(self, now):
@@ -884,8 +900,8 @@ class DictationScene(Scene):
                 view.layer().addSublayer_(bar)
                 self.wave.append(bar)
             self.clock = self.label(view, "0:00", 136, mid - 8, 40, size=12, mono=True, rgb=DIM)
-            self.button(view, "xmark", self.cancel, 180, mid - 12, DIM, size=24, symbol_size=9,
-                        tip="Throw it away")
+            self.button(view, "trash", self.cancel, 180, mid - 12, DIM, size=24, symbol_size=9,
+                        tip="Throw it away")                       # not an ×: the island's × only hides
             self.tick(time.time())
         elif self.mode == "writing":
             self.spinner(view, 9, mid - 8, mint)
@@ -982,6 +998,9 @@ class DropScene(Scene):
     def card(self) -> bool:
         return self.mode == "actions"
 
+    def closable(self) -> bool:
+        return self.mode == "actions"             # the drop target lasts only while something is dragged
+
     def size(self):
         if self.mode == "target":
             return (40 + 196, ROW)
@@ -1019,7 +1038,7 @@ class DropScene(Scene):
                        width - 52, size=13)
             return
         top = height - 14
-        right = width - (48 if island.face_right and island.face_top else 14)
+        right = island.right_edge(width)
         first = self.paths[0] if self.paths else ""
         if first:
             picture = AppKit.NSWorkspace.sharedWorkspace().iconForFile_(first)
@@ -1286,7 +1305,7 @@ class InfoCard(Scene):
     def build(self, view, width, height):
         tint = self._tint()
         top = height - 14
-        right = width - (48 if island.face_right and island.face_top else 14)
+        right = island.right_edge(width)
         badge = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(16, top - 32, 32, 32))
         badge.setWantsLayer_(True)
         badge.layer().setCornerRadius_(10)
@@ -1410,7 +1429,7 @@ class ScheduleCard(Scene):
         self.label(view, self.data.get("day", ""), 18, top - 22, 170, size=19, weight="bold", rounded=True, h=24)
         self.label(view, self.data.get("date", ""), 18, top - 40, 170, size=12, weight="medium", rgb=DIM)
         weather = self.data.get("weather")
-        right = width - 48 if island.face_right and island.face_top else width - 14
+        right = island.right_edge(width)
         if weather:
             icon = AppKit.NSImageView.imageViewWithImage_(gfx.symbol(weather["symbol"], 15))
             config = AppKit.NSImageSymbolConfiguration.configurationWithPaletteColors_(
@@ -1513,6 +1532,9 @@ class Island:
         self.dragging = False
         self.drop_hot = False
         self.drag_count = -1
+        self.hidden: set[str] = set()     # signatures closed with the × (the work behind them goes on)
+        self.close_button = None
+        self._close_room = False          # while a scene builds: leave room for the ×
 
     # --- building --------------------------------------------------------------------------------
 
@@ -1632,6 +1654,33 @@ class Island:
     def dismiss(self, scene: Scene) -> None:
         self.pushed = [(s, until) for s, until in self.pushed if s is not scene]
 
+    def close_scene(self, scene: Scene) -> None:
+        """The ×: out of sight, nothing stopped. A pushed card goes; a live scene (a recording, a
+        lesson, dictation) only hides until it changes (recording -> saving) or ends."""
+        self._was_pressed = False             # the × took this click, not whatever shows next
+        if any(s is scene for s, _ in self.pushed):
+            self.dismiss(scene)
+        else:
+            self.hidden.add(scene.signature())
+
+    def right_edge(self, width: float) -> float:
+        """Where a card's header must stop: clear of the face in its top corner and of the × (which
+        sits beside the face, or in that corner when the face is elsewhere)."""
+        face = self.face_right and self.face_top
+        right = width - (48 if face else 14)
+        if self._close_room:
+            right -= 20 if face else 24
+        return right
+
+    def _face_shown(self) -> bool:
+        """False in notch mode: the notch has its own little Mint, so the face's end is free."""
+        host = getattr(self, "face_host", None)
+        return host is not None and not host.isHidden()
+
+    def _close_slot(self, scene: Scene) -> bool:
+        """A compact scene with a × and a face: the capsule grows a slot at the far end for the ×."""
+        return not scene.card and self._face_shown() and scene.closable()
+
     def _push(self, scene: Scene, seconds: float) -> None:
         self.pushed = [(s, until) for s, until in self.pushed if s.key != scene.key]
         self.pushed.append((scene, time.time() + seconds))
@@ -1654,6 +1703,9 @@ class Island:
             if scene is not None:
                 found.append(scene)
         found += [s for s, _ in self.pushed]
+        signatures = {s.signature() for s in found}
+        self.hidden &= signatures                      # changed or over: the next one shows again
+        found = [s for s in found if s.signature() not in self.hidden]
         return max(found, key=lambda s: s.priority) if found else None
 
     def tick(self) -> None:
@@ -1697,6 +1749,8 @@ class Island:
         mouse = AppKit.NSEvent.mouseLocation()
         inside = self._inside(mouse)
         self.panel.setIgnoresMouseEvents_(not inside)
+        if self.close_button is not None:
+            gfx.track_close(self.close_button, inside, mouse)
         pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
         if inside and pressed and not getattr(self, "_was_pressed", False):
             self._press_started = (mouse.x, mouse.y)
@@ -1744,6 +1798,8 @@ class Island:
         width, height = scene.size()
         if scene.card and not self._upper():
             height += ROW - 6
+        if self._close_slot(scene):
+            width += CLOSE_SLOT
         return width, height
 
     def _layout(self, width: float, height: float):
@@ -1826,29 +1882,63 @@ class Island:
             AppHelper.callLater(0.15, old.removeFromSuperview)
         x, y, w, h = rect
         lx, ly = self._local(x, y)
+        closable = scene.closable()
+        slot = CLOSE_SLOT if self._close_slot(scene) else 0.0
+        # A holder over the whole capsule: the scene's own view inside it, and the island's × beside it.
+        holder = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(lx, ly, w, h))
+        holder.setWantsLayer_(True)
+        holder.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+        holder.setAlphaValue_(0.0)
         if scene.card:
             strip = 0.0 if self.face_top else ROW - 6         # the face's own strip at the bottom
-            frame = AppKit.NSMakeRect(lx, ly + strip, w, h - strip)
+            frame = AppKit.NSMakeRect(0, strip, w, h - strip)
         elif self.face_right:
-            frame = AppKit.NSMakeRect(lx, ly, w - ROW, h)
+            frame = AppKit.NSMakeRect(slot, 0, w - ROW - slot, h)
         else:
-            frame = AppKit.NSMakeRect(lx + ROW, ly, w - ROW, h)
+            frame = AppKit.NSMakeRect(ROW, 0, w - ROW - slot, h)
         view = AppKit.NSView.alloc().initWithFrame_(frame)
         view.setWantsLayer_(True)
-        view.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
-        view.setAlphaValue_(0.0)
-        self.root.addSubview_positioned_relativeTo_(view, AppKit.NSWindowBelow, self.face_button)
+        holder.addSubview_(view)
+        self.root.addSubview_positioned_relativeTo_(holder, AppKit.NSWindowBelow, self.face_button)
         scene._acts = []
-        scene.build(view, frame.size.width, frame.size.height)
-        self.content = view
+        self._close_room = closable
+        try:
+            scene.build(view, frame.size.width, frame.size.height)
+        finally:
+            self._close_room = False
+        self.close_button = self._add_close(scene, holder, w, h) if closable else None
+        self.content = holder
 
         def appear():
-            if self.content is view:
+            if self.content is holder:
                 AppKit.NSAnimationContext.beginGrouping()
                 AppKit.NSAnimationContext.currentContext().setDuration_(0.2)
-                view.animator().setAlphaValue_(1.0)
+                holder.animator().setAlphaValue_(1.0)
                 AppKit.NSAnimationContext.endGrouping()
         AppHelper.callLater(delay, appear)
+
+    def _add_close(self, scene: Scene, holder, w: float, h: float):
+        """The scene's × (gfx.close_button). Cards: the top corner by the face - beside it when the face
+        is up there, else where it would be. Compact capsules: the slot at the far end from the face,
+        or the face's own end when the notch hides the face."""
+        size = gfx.CLOSE
+        act = _IslandAct.alloc().initWithFn_(lambda: self.close_scene(scene))
+        scene._acts.append(act)
+        pushed = any(s is scene for s, _ in self.pushed)
+        button = gfx.close_button(act, "fire:", "Close" if pushed else "Hide (nothing stops)")
+        if scene.card:
+            beside_face = self.face_right and self.face_top
+            x = w - 40 - size if beside_face else w - 10 - size
+            y = h - ROW / 2 - size / 2
+        else:
+            # Concentric with a rounded end of the capsule: the far end from the face, or the face's
+            # own end when there is no face (notch mode).
+            at_left = self.face_right if self._face_shown() else not self.face_right
+            x = ROW / 2 - size / 2 if at_left else w - ROW / 2 - size / 2
+            y = h / 2 - size / 2
+        button.setFrameOrigin_(AppKit.NSMakePoint(x, y))
+        holder.addSubview_(button)
+        return button
 
     def _open(self, scene: Scene) -> None:
         """The orb becomes the capsule: it fades into a black circle the same size, which springs open."""
@@ -1929,6 +2019,7 @@ class Island:
             if self.content is not None:
                 self.content.removeFromSuperview()
                 self.content = None
+            self.close_button = None
             self.scene, self.shown, self.rect, self.closing = None, False, None, False
             self.hud.island_active = False
             self.panel.setIgnoresMouseEvents_(True)

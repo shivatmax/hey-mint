@@ -157,3 +157,57 @@ def number_badge(text: str, diameter: float, fill, ink, font_size: float = 11, r
         layer.setFrame_(Quartz.CGRectMake(0, baseline + descender, diameter, height))
         badge.addSublayer_(layer)
     return badge
+
+
+# --- the close button every card shares ------------------------------------------------------------
+
+CLOSE = 20                 # the × circle's diameter
+CLOSE_REST = 0.5           # how visible the × is while the pointer is not on its card
+
+
+class CloseButton(AppKit.NSButton):
+    """The small round × a card closes with (island scenes, the image card, the clipboard)."""
+
+    def acceptsFirstMouse_(self, event):
+        return True                          # one click, even on a panel that is not the key window
+
+    def setHot_(self, hot):
+        """Brighter while the pointer is on the × itself."""
+        hot = bool(hot)
+        if getattr(self, "_mint_hot", None) is hot:
+            return
+        self._mint_hot = hot
+        self.layer().setBackgroundColor_(cg((1.0, 1.0, 1.0), 0.26 if hot else 0.12))
+        self.setContentTintColor_(ns((1.0, 1.0, 1.0), 1.0 if hot else 0.72))
+
+
+def close_button(target, action: str, tip: str = "Close") -> CloseButton:
+    """A 20 pt round × (SF Symbol xmark) that calls `action` on `target`; place it with setFrameOrigin_."""
+    button = CloseButton.buttonWithImage_target_action_(symbol("xmark", 9, "bold"), target, action)
+    button.setBordered_(False)
+    button.setFrame_(AppKit.NSMakeRect(0, 0, CLOSE, CLOSE))
+    button.setToolTip_(tip)
+    button.setWantsLayer_(True)
+    button.layer().setCornerRadius_(CLOSE / 2)
+    button.setHot_(False)
+    button.setAlphaValue_(CLOSE_REST)
+    return button
+
+
+def track_close(button, on_card: bool, mouse) -> None:
+    """Every frame of a card: the × shows fully while the pointer is on the card (faint otherwise, with a
+    quick fade, as Apple's notifications do) and brightens while it is on the × itself. Polled rather
+    than a tracking area: the island's panel ignores the mouse outside its capsule. `mouse` is in
+    screen points."""
+    window = button.window()
+    if window is None:
+        return
+    want = 1.0 if on_card else CLOSE_REST
+    if getattr(button, "_mint_want", None) != want:
+        button._mint_want = want
+        AppKit.NSAnimationContext.beginGrouping()
+        AppKit.NSAnimationContext.currentContext().setDuration_(0.15)
+        button.animator().setAlphaValue_(want)
+        AppKit.NSAnimationContext.endGrouping()
+    local = button.convertPoint_fromView_(window.convertPointFromScreen_(mouse), None)
+    button.setHot_(on_card and AppKit.NSPointInRect(local, button.bounds()))
