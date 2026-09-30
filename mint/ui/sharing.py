@@ -53,9 +53,23 @@ def _desired():
 def apply() -> None:
     """Main thread: give every Mint window the sharing type it should have."""
     want = _desired()
+    chat = None
+    try:
+        from mint.screen import ground
+        chat = getattr(ground.OWN_CHAT, "window", None)
+    except Exception:
+        pass
     for window in AppKit.NSApplication.sharedApplication().windows():
         if str(window.className()).startswith("NSStatusBar"):
             continue              # the menu bar icon belongs to the menu bar, shared or not
+        # Mint's always-on panels (the orb, the notch, the island, overlays) never go with an app hide
+        # (⌘H, or a hide_ somewhere): hidden, Mint looked crashed. Titled windows and the chat still may.
+        try:
+            titled = window.styleMask() & AppKit.NSWindowStyleMaskTitled
+            if not titled and window is not chat and window.canHide():
+                window.setCanHide_(False)
+        except Exception:
+            pass
         try:
             if window.sharingType() != want:
                 window.setSharingType_(want)

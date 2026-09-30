@@ -10,6 +10,10 @@ Hey Mint's own code is GPL-3.0.
 automatic ones, and the language it is spoken in) follows `select_caption` in
 [claude-video](https://github.com/bradautomates/claude-video) (MIT).
 
+**Adapted design:** notch mode's look and motion - the notch shape, sizes, springs, the music, calendar,
+battery and shelf views - follow [boring.notch](https://github.com/TheBoredTeam/boring.notch) by TheBoredTeam
+(GPL-3.0, the same licence as Hey Mint), re-implemented in Python.
+
 **Ideas, not code**, from these open-source projects (all MIT or BSD):
 - **ChatGPT and Claude app control** (`mint/tools/agentapps.py`): driving the apps through native accessibility - the Stop button and Claude's "Running …" sidebar rows as the busy signal, "Show N more" paging, and checking the pasted prompt before sending - follows
   [m'kay](https://github.com/maxipesfix/mkay)'s `multi-agent-cli` (BSD-2).

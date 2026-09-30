@@ -53,7 +53,7 @@ _KIND = {
     "plan_task": "plan", "step_done": "plan", "task": "plan",
     "switch_to": "switch",
     "wait_until_done": "timer", "preview_site": "web",
-    "read_file": "file", "write_file": "file", "find_files": "file", "file_action": "file",
+    "read_file": "file", "write_file": "file", "find_files": "file", "file_action": "file", "hand_to_app": "file",
     "web_search": "search", "read_url": "search",
     "browser": "web", "scroll_to": "scroll", "menu": "menu", "wait_for_text": "timer",
     "run_applescript": "code",
@@ -308,6 +308,9 @@ def phrase(name: str, args: dict) -> str:
                     "now_playing": "Checking what's playing",
                     "volume": f"Music volume · {a.get('value', '')}".rstrip(" ·")}.get(
                 str(a.get("action") or "play"), "Music")
+        case "hand_to_app":
+            verb = "Dragging into" if str(a.get("how") or "") == "drag" else "Giving to"
+            return f"{verb} {_quote(a.get('app') or 'the app', 24)}"
         case "connector":
             return {"list": "Checking connectors", "status": f"Checking {_quote(a.get('name') or '', 24)}",
                     "connect": f"Connecting {_quote(a.get('name') or '', 24)}",

@@ -70,6 +70,10 @@ DEFAULTS: dict = {
     "notch_idle_face": True,    # notch mode: the little Mint beside the camera when idle (off: a plain notch)
     "notch_playful": True,      # notch mode: bouncy springs, hops, breathing with the voice
     "notch_music": True,        # notch mode: what's playing in the notch (artwork, bars, the player on hover)
+    "notch_shelf": True,        # notch mode: a file shelf (drag files to the notch; AirDrop, share)
+    "notch_calendar": True,     # notch mode: the week and today's events in the open notch
+    "notch_battery": True,      # notch mode: battery badge, and a peek when plugged in or unplugged
+    "notch_search": True,       # notch mode: Spotlight in the notch - files and apps, grids, drag out
     "word_animation": True,
     "voice": True,
     "mic": True,

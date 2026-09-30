@@ -208,6 +208,7 @@ class Mint:
         # gave plan_task x4 and open_app x4 with results out of order.
         self._tool_lock = asyncio.Lock()
         self._stop_epoch = 0             # bumped by "stop": queued batches must not run after it
+        self._halted = False             # "stop" said: tool calls still coming in that turn are refused
         self._restarting = False         # new_session() is closing the session on purpose
         self._recent_calls: dict = {}    # (name, args) -> (time, result), to catch repeats
         self._batch: list = []           # [(id, name)] of the running tool batch
@@ -738,6 +739,7 @@ class Mint:
         self._addr_candidate = False
         self._typed_turn = True               # typed on purpose: always answered
         self._filler_checked = True
+        self._halted = False                  # a new request: tools may run again
         self._print(f"[typed: {text[:120]}]")
         from mint.app import telegram
         telegram.on_event("request", {"text": text})    # its own request from the phone, or one typed here
@@ -909,6 +911,8 @@ class Mint:
             if server.input_transcription and server.input_transcription.text:
                 from mint.voice import hearing
                 chunk = server.input_transcription.text
+                if time.monotonic() - self._last_stop > 2.5:
+                    self._halted = False      # the user is talking again (not the "stop" itself): tools may run
                 if not self._turn_open:
                     self._heard = self._said = ""
                     self.ui.new_exchange()
@@ -954,6 +958,7 @@ class Mint:
                 self._flush_playback()
 
             if server.turn_complete:
+                self._halted = False
                 self._check_goodbye()
                 if self._farewell_bytes >= 0:
                     self._farewell_bytes = -1  # the goodbye line is done: quiet from here
@@ -991,7 +996,12 @@ class Mint:
                     self._last_voice = time.monotonic()
                     self._state(self._idle_state())
 
-        if response.tool_call is not None:
+        if response.tool_call is not None and self._halted:
+            # "stop" came between two tool calls: the model's turn goes on, but nothing more is done in it.
+            self._print(f"[stopped: refused {', '.join(f.name for f in response.tool_call.function_calls)}]")
+            asyncio.create_task(self._answer_all(response.tool_call, "STOPPED: the user said stop. Do nothing more, "
+                                                                     "don't retry: just say 'Stopped.' and wait."))
+        elif response.tool_call is not None:
             # In the background, so this loop keeps reading the server while a
             # tool runs: the user's words (and "stop") are heard mid-task.
             task = asyncio.create_task(self._run_tools(response.tool_call, self._stop_epoch))
@@ -1171,6 +1181,7 @@ class Mint:
             return
         self._last_stop = now
         self._stop_epoch += 1
+        self._halted = True
         self._unanswered = ""                 # a stopped request is not sent again after a reconnect
         from mint.app import autopilot
         from mint.app import control

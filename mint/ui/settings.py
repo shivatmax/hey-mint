@@ -690,6 +690,10 @@ class SettingsWindow:
         self._row_switch(page, "notch_idle_face", "Little Mint when idle", "Off: a plain notch until something happens.")
         self._row_switch(page, "notch_playful", "Playful motion", "Bouncy springs, a hop as it opens, breathing with the voice.")
         self._row_switch(page, "notch_music", "Music in the notch", "Artwork and dancing bars while something plays; the player when you point at it.")
+        self._row_switch(page, "notch_shelf", "File shelf", "Drag files to the notch to keep them handy; AirDrop, share or open them.")
+        self._row_switch(page, "notch_calendar", "Calendar", "The week and today's events in the open notch.")
+        self._row_switch(page, "notch_battery", "Battery", "The charge in the open notch, and a peek when you plug in or unplug.")
+        self._row_switch(page, "notch_search", "Search in the notch", "Find files and apps from the notch; what Mint finds shows there too.")
         page.end()
 
     def _page_shortcuts(self, page) -> None:

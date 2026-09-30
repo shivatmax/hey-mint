@@ -76,7 +76,10 @@ _SYNONYMS = {"add": ("add", "put", "new", "create", "make", "note", "jot"), "cre
              "show": ("show", "open", "reveal", "bring up"), "play": ("play", "put on", "start", "listen"),
              "pause": ("pause", "stop"), "set": ("set", "change", "make", "turn"), "move": ("move", "put", "file"),
              "complete": ("complete", "done", "finish", "tick", "check off", "mark"),
-             "mark": ("mark", "complete", "done", "tick", "flag"), "search": ("search", "find", "look")}
+             "mark": ("mark", "complete", "done", "tick", "flag"), "search": ("search", "find", "look"),
+             "compress": ("compress", "zip", "archive", "pack"), "zip": ("zip", "compress", "archive", "pack"),
+             "extract": ("extract", "unzip", "unpack", "decompress", "expand", "open"),
+             "unzip": ("unzip", "extract", "unpack", "decompress")}
 _CHANGES = re.compile(r"\b(make\s+new|delete|move|duplicate|save|close|quit|send|import|export|empty|add|play|"
                       r"pause|next\s+track|previous\s+track|open|activate|launch|print|mark|complete|reveal|"
                       r"set\s+(?:the\s+)?[\w ]+?\s+of\s+.+?\s+to)\b", re.I)
@@ -91,7 +94,9 @@ _VERBS = {"add", "put", "new", "create", "make", "open", "show", "reveal", "play
           "append", "write", "jot", "save", "export", "import", "print", "close", "quit", "archive", "flag", "pin",
           "star", "favorite", "favourite", "update", "edit", "replace", "insert", "bring", "go", "switch", "turn",
           "shuffle", "repeat", "like", "love", "rate", "copy", "duplicate", "schedule", "remind", "log", "record",
-          "send", "share", "reply", "forward", "post", "delete", "remove", "trash", "clear", "pay", "buy", "order"}
+          "send", "share", "reply", "forward", "post", "delete", "remove", "trash", "clear", "pay", "buy", "order",
+          "compress", "zip", "extract", "unzip", "pack", "unpack", "convert", "resize", "rotate", "crop", "encode",
+          "upload", "download", "sync", "encrypt", "decrypt", "mount", "eject", "render", "translate", "scan"}
 _YES = re.compile(r"^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|confirm|send it|go for it|right|"
                   r"correct|haan|han ji|ji)\b", re.I)
 _PARAM = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
@@ -255,7 +260,8 @@ def check_action(raw: dict, target: dict, compile_it: bool = True) -> dict:
     if not isinstance(raw, dict):
         raise PlanError("not an action")
     kind = str(raw.get("kind") or "applescript").lower().replace(" ", "")
-    kind = {"url": "url", "link": "url", "web": "web", "browser": "web"}.get(kind, "applescript")
+    kind = {"url": "url", "link": "url", "web": "web", "browser": "web", "files": "files", "file": "files",
+            "openwith": "files"}.get(kind, "applescript")
     title = " ".join(str(raw.get("title") or "").split())[:60]
     aid = re.sub(r"[^a-z0-9_]", "_", str(raw.get("id") or title).lower()).strip("_")[:40]
     template = str(raw.get("template") or "").strip()
@@ -276,7 +282,9 @@ def check_action(raw: dict, target: dict, compile_it: bool = True) -> dict:
     declared = [declared] if isinstance(declared, str) else declared
     code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', template) if kind == "applescript" else template   # not the words in quotes
     risk = sorted((set(_risks(title, code)) | {str(r) for r in declared}) & set(RISK_WORDS))
-    if kind == "applescript":
+    if kind == "files":                   # files handed to the app (Open With): it works on them
+        changes = True
+    elif kind == "applescript":
         changes = bool(raw.get("changes")) or bool(risk) or bool(_CHANGES.search(code))
     else:                                 # a link: opening it is harmless; one that makes or changes something isn't
         changes = bool(risk) or bool(_LINK_CHANGES.search(re.sub(r"^[a-z0-9+.-]+:/*[^/?#]*", "", template)))
@@ -306,6 +314,11 @@ def check_action(raw: dict, target: dict, compile_it: bool = True) -> dict:
             problem = _compile(fill(template, params, _sample(params)))
             if problem:
                 raise PlanError(f"'{title}' doesn't compile ({problem})")
+    elif kind == "files":
+        if len(params) != 1 or template.strip() != "{" + next(iter(params)) + "}":
+            raise PlanError(f"'{title}' should hand over one value, the files: template {{paths}}")
+        if not target.get("name"):
+            raise PlanError(f"'{title}' needs an app to hand the files to")
     elif kind == "url":
         scheme = template.split(":", 1)[0].lower()
         if "{" in scheme or scheme not in {s.lower() for s in target.get("schemes") or []}:
@@ -353,6 +366,7 @@ linefeed) - never return a raw object reference. Keep lists short (first 20 item
 - Placeholders: {{param}} stands for a value; use it bare, NEVER inside quotes: name:{{title}}, not "{{title}}". \
 Mint inserts each value as a quoted AppleScript string (or a number).
 - URLs: only this app's own schemes ({schemes}) or https pages on {domain}; {{param}} values are URL-encoded by Mint.
+- Jobs done ON files the user gives the app (compress or extract with an archiver, open in a viewer or editor, add to a library, convert, upload): kind "files", template "{{file_path}}" and one text param file_path (full paths, one per line). Mint hands them to the app like Finder's Open With and answers its save question - prefer this over AppleScript for such jobs (a sandboxed app's scripted commands on paths often do nothing).
 - "changes": true for anything that creates, edits, moves, plays, opens windows or otherwise changes state.
 - "risk": list "sends" (sends/posts/shares anything to other people), "deletes", "pays" when it does that. \
 Avoid such actions unless they are the app's whole point; never do more than the title says.
@@ -415,14 +429,11 @@ def plan(words: str) -> dict:
         target["schemes"] = schemes
         domain = next((d for k, (d, _) in WEB.items() if k == what.lower() or k == app["name"].lower()), "")
         target["domain"] = domain
-        if not sdef and not schemes and not domain:
-            return {"kind": "none", "name": app["name"],
-                    "error": (f"{app['name']} has no scripting dictionary and no links of its own, so there is "
-                              "nothing to build a connector from. Mint can still use it on screen (clicking and "
-                              "typing).")}
-        kinds = "|".join(k for k, on in (("applescript", sdef), ("url", schemes), ("web", domain)) if on)
+        kinds = "|".join(k for k, on in (("applescript", sdef), ("url", schemes), ("web", domain), ("files", True))
+                         if on)
         about = ((f"Its scripting dictionary:\n{summarize_sdef(sdef)}\n" if sdef else "It has no AppleScript "
-                  "dictionary: use URL actions only.\n")
+                  "dictionary: use " + ("URL and " if schemes else "") + "files actions only (files it is given); if "
+                  "it doesn't work on files either, answer only {\"refuse\": \"<why>\"}.\n")
                  + (f"Its URL schemes: {', '.join(schemes)}. Only use URL formats you are sure this app "
                     "supports.\n" if schemes else ""))
         prompt = _PLAN.format(target=f"the Mac app {app['name']} (bundle id {app['bundle_id']})", kinds=kinds,
@@ -504,6 +515,7 @@ def plan_text(result: dict) -> str:
         needs = ", ".join(p["name"] for p in a["params"])
         flag = ("sends" if "sends" in a["risk"] else "deletes" if "deletes" in a["risk"] else
                 "pays" if "pays" in a["risk"] else "changes things" if a["changes"] else
+                "gives it files" if a["kind"] == "files" else
                 "opens a link" if a["kind"] != "applescript" else "read-only")
         lines.append(f"{n}. {a['title']} ({flag}{'; needs ' + needs if needs else ''})")
     if result.get("test"):
@@ -541,6 +553,12 @@ def _execute(item: dict, action: dict, values: dict) -> tuple[bool, str]:
         return False, str(error)
     if action["kind"] == "applescript":
         return connectors.osascript(filled, timeout=30)
+    if action["kind"] == "files":
+        from mint.tools import handoff
+        name = action["params"][0]["name"]
+        said = handoff.hand_to_app({"paths": str(values.get(name) or ""), "app": item.get("app") or item["name"],
+                                    "how": "open", "job": action["title"]})
+        return not said.startswith(("FAILED", "NOT DONE")), said
     connectors.open_url(filled)
     return True, f"opened {filled[:120]}"
 
@@ -617,6 +635,8 @@ def _allowed(item: dict, action: dict, values: dict) -> str:
         # with a verb ("desktop" or "notes" in a request doesn't ask for a change).
         heads = [action["title"], action["id"].replace("_", " ")] + list(action.get("asks") or [])
         verbs = {h.split()[0].lower() for h in heads if h.split() and h.split()[0].lower() in _VERBS}
+        if not verbs:                               # a verb Mint has no list for: the title's own first word
+            verbs = {h.split()[0].lower() for h in heads[:2] if h.split() and h.split()[0].isalpha()}
         verbs |= {s for v in list(verbs) for s in _SYNONYMS.get(v, ())}
         ok = bool(request) and any(says(w) for w in verbs)
     if ok:
@@ -653,7 +673,24 @@ def run(cid: str, wanted: str, values: dict | None = None) -> str:
     ok, out = _execute(item, action, values)
     if not ok:
         return f"FAILED: {item['name']} · {action['title']}: {out}"
-    return f"DONE: {item['name']} · {action['title']}: {out[:3000] or 'done'}"
+    return f"DONE: {item['name']} · {action['title']}: {out[:3000] or 'done'}" + _after(item, action)
+
+
+def _after(item: dict, action: dict) -> str:
+    """An app often answers a scripted job with a question (Keka: where to save the .zip when it may not write
+    next to the file): answer it for the job asked, or say what it asks."""
+    if action.get("kind") != "applescript" or not action.get("changes") or not item.get("bundle_id"):
+        return ""
+    try:
+        from mint.tools import handoff
+        app = connectors.app_for(item["bundle_id"])
+        if app is None:
+            return ""
+        said, _pressed = handoff._answer(app, handoff._job(action.get("title", "") + " " + _request()), wait=4.0)
+        return f" {said}" if said else ""
+    except Exception:
+        log.debug("after the connector", exc_info=True)
+        return ""
 
 
 def _target(item: dict) -> dict:

@@ -255,6 +255,20 @@ def declarations() -> list[types.FunctionDeclaration]:
             "the orb', 'floating mode'. The change plays right away as an animation (the orb flies into "
             "the notch, or drops out of it): say one short playful sentence.",
             {"mode": {**STRING, "enum": ["orb", "notch"]}}, ["mode"]),
+        _fn("notch_files",
+            "Spotlight in the notch (notch mode): show files, folders or apps as tiles the user can open, drag "
+            "out, copy or Quick Look. action=show with `paths` (after you found files: 'show them in the notch'), "
+            "action=search with `query` (files and apps by name: 'find my invoice', 'find Photoshop'), "
+            "action=expand to grow it into a grid ('show more', 'bigger', 'as a 3 by 3 grid' with layout), "
+            "action=collapse to shrink it back. Opening an app still uses open_app. In notch mode, whatever "
+            "find_files or find_screenshot finds ALREADY appears in the notch by itself: then just say how many "
+            "and what in one short sentence - never read a long list aloud.",
+            {"action": {**STRING, "enum": ["show", "search", "expand", "collapse"]},
+             "paths": {**LIST, "description": "Absolute file, folder or .app paths to show (action=show)."},
+             "query": {**STRING, "description": "What to search for, or what the shown files are."},
+             "title": {**STRING, "description": "A short heading, e.g. '3 PDFs about the lease'."},
+             "layout": {**STRING, "enum": ["row", "3x1", "3x2", "3x3"]}},
+            ["action"]),
         _fn("express",
             "Play an expression on your orb body. ONLY when the user asks for one ('smile', "
             "'clap', 'dance', 'show me a heart', 'cry', 'wave'), or at a genuinely emotional moment "
@@ -471,6 +485,41 @@ def _screen_share_visibility(args: dict) -> str:
     return sharing.set_visible(bool(args.get("visible")))
 
 
+def _notch_files(args: dict) -> str:
+    from mint.ui import notch
+    try:
+        from mint.ui import notch_search
+    except ImportError:
+        return "Search in the notch isn't installed yet."
+    if not notch.active():
+        return "That shows in notch mode only (display_mode notch). Tell the user the results instead."
+    action = str(args.get("action", "show"))
+    query, title = str(args.get("query", "") or ""), str(args.get("title", "") or "")
+    layout = str(args.get("layout", "") or "")
+    if layout:
+        try:
+            from mint.core import prefs
+            prefs.set("notch_search_grid", layout)
+        except Exception:
+            pass
+    if action == "search":
+        notch_search.search(query, scope="all")
+        notch.notch.tab, notch.notch.search_until = "search", __import__("time").monotonic() + 15
+        return f"Searching for '{query}' in the notch; the user can scroll, open or drag the results."
+    if action == "expand":
+        notch_search.set_expanded(True)
+        notch.notch.tab, notch.notch.search_until = "search", __import__("time").monotonic() + 20
+        return "The notch opened bigger, as a grid" + (f" ({layout})" if layout else "") + "."
+    if action == "collapse":
+        notch_search.set_expanded(False)
+        return "Back to the one-row view."
+    paths = [str(p) for p in (args.get("paths") or []) if str(p).strip()]
+    if not paths:
+        return "No paths given to show."
+    notch_search.show(paths=paths[:120], query=query, title=title)
+    return f"Showing {len(paths)} item(s) in the notch: the user can open, drag out, copy or Quick Look them."
+
+
 def _display_mode(args: dict) -> str:
     from mint.ui import notch
     return notch.set_mode(str(args.get("mode", "")))
@@ -479,6 +528,7 @@ def _display_mode(args: dict) -> str:
 HANDLERS = {
     "screen_share_visibility": _screen_share_visibility,
     "display_mode": _display_mode,
+    "notch_files": _notch_files,
     "move_orb": _move_orb,
     "show_on_screen": _show_on_screen,
     "mark_area": _mark_area,
@@ -537,6 +587,7 @@ def prompt_text() -> str:
     from mint.tools import apple_apps
     from mint.tools import calc
     from mint.tools import connector_maker
+    from mint.tools import handoff
     from mint.tools import imagegen
     from mint.tools import merge
     from mint.tools import music
@@ -561,7 +612,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, music.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

@@ -690,8 +690,9 @@ def _power_modules():
     from mint.app import updater
     from mint.tools import video_edit
     from mint.tools import agentapps
+    from mint.tools import handoff
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music, handoff)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -711,7 +712,7 @@ def _power(name: str):
 _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "edit_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
-                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "connector", "music", "notes", "reminders_manage", "contacts", "calendar_manage", "maps", "safari", "photos", "iwork", "agent_app",
+                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "connector", "music", "notes", "reminders_manage", "contacts", "calendar_manage", "maps", "safari", "photos", "iwork", "agent_app", "hand_to_app",
                                                   "dictation", "edit_video", "video_info", "ocr_copy",
                                                   "data_to_sheet", "convert_document")})
 
@@ -815,6 +816,59 @@ _SYNC["harness_probe_strip"] = lambda a: _harness_handlers()["probe_strip"](a)
 _SYNC["harness_probe_menu"] = lambda a: _harness_handlers()["probe_menu"](a)
 _SYNC["harness_probe_ocr"] = lambda a: _harness_handlers()["probe_ocr"](a)
 _SCREEN_ACTIONS.update({"browser", "scroll_to", "menu", "wait_for_text", "screenshot", "pointer"})
+
+
+# --- Files Mint finds for you show up in the notch as tiles (notch_search.py) -------------------
+
+def _show_found(last) -> bool:
+    """(paths, query, title) from a finding tool: the notch's search pane, when Mint lives in the notch.
+    Only the voice session's calls come through here; agents' own searches never pop the notch."""
+    if not last or not last[0]:
+        return False
+    try:
+        from mint.ui import notch
+        if not notch.active():
+            return False
+        from mint.ui import notch_search
+        show = getattr(notch_search, "show", None)
+        if show is not None:
+            paths, query, title = last
+            show(paths=paths[:120], query=query, title=title)
+            return True
+    except Exception:
+        log.debug("could not show the found files in the notch", exc_info=True)
+    return False
+
+
+# The files are already on screen: a card on top would hide the notch's tiles.
+_IN_NOTCH = ("\n(These are shown in the notch now, as tiles the user can open, drag or preview. Don't call "
+             "show_card for them and don't read the list out: say how many and what in one short sentence.)")
+
+
+def _found_in_notch(name: str, last) -> None:
+    plain = _SYNC[name]
+
+    def run(args):
+        result = plain(args)
+        if _show_found(last()) and isinstance(result, str):
+            result += _IN_NOTCH
+        return result
+    _SYNC[name] = run
+
+
+def _last_screenshots():
+    from mint.tools import screenshots
+    last, screenshots.found.last = getattr(screenshots.found, "last", None), None
+    return last
+
+
+def _last_files():
+    from mint.tools import harness as harness_tools
+    return harness_tools.last_found()
+
+
+_found_in_notch("find_files", _last_files)
+_found_in_notch("find_screenshot", _last_screenshots)
 
 
 # --- Hearing: words Mint mishears, taught by the user (hearing.py) ------------------

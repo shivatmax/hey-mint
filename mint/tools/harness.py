@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -1154,7 +1155,22 @@ def _bytes(path: Path) -> int:
         return 0
 
 
+_found = threading.local()
+
+
+def _remember(paths, query: str, title: str) -> None:
+    """What the last find_files on this thread found: the voice session shows it in the notch."""
+    _found.last = ([str(p) for p in paths], query, title)
+
+
+def last_found() -> tuple | None:
+    """(paths, query, title) from this thread's last find_files, once (None if it found nothing)."""
+    last, _found.last = getattr(_found, "last", None), None
+    return last
+
+
 def find_files(args: dict) -> str:
+    _found.last = None
     query = str(args.get("query") or "").strip()
     kind = str(args.get("kind") or "any").lower()
     limit = max(1, min(int(args.get("limit") or 20), 60))
@@ -1191,6 +1207,7 @@ def find_files(args: dict) -> str:
                      and not _blocked(p) and _kind_ok(p, kind) and p not in made
                      and (_place_score(p) > 0 or p.suffix.lower() in _DOCS)]
             found.sort(key=lambda p: (_place_score(p) > 0, _mtime(p)), reverse=True)
+            _remember((made + found)[:limit], "", "Recent documents")
             parts = []
             if made:
                 parts.append("Made by Mint recently (with how they start):\n" + _listing(made, 8, preview=True))
@@ -1203,6 +1220,7 @@ def find_files(args: dict) -> str:
             return f"FAILED: could not list {_short(folder)}: {error.strerror or error}"
         chosen = [p for p in entries if _kind_ok(p, kind)]
         chosen.sort(key=_mtime, reverse=True)
+        _remember(chosen, "", folder.name or _short(folder))
         more = f"\n({len(chosen) - limit} more not shown)" if len(chosen) > limit else ""
         if chosen:
             return f"{_short(folder)}: {len(chosen)} items, newest first:\n" + _listing(chosen, limit) + more
@@ -1216,6 +1234,7 @@ def find_files(args: dict) -> str:
     if not found:
         return f"Nothing found for '{query}'" + (f" in {_short(folder)}" if folder else "") + \
             ". Try a shorter part of the name, or another folder."
+    _remember(found, query, f"{len(found)} {'file' if len(found) == 1 else 'files'} for “{query}”")
     return f"{len(found)} found for '{query}' (name matches first, newest first):\n" + _listing(found, limit)
 
 
@@ -1266,6 +1285,7 @@ def _find_filtered(args: dict, query: str, kind: str, limit: int, folder: Path |
     if not found:
         return (f"Nothing in {what} is {dated}" if dated else f"Nothing found in {what}") + \
             (f" ({total} other item(s) are outside that range)." if total else ".")
+    _remember(found, query, f"“{query}”" if query else what[:1].upper() + what[1:])
     more = f"\n({len(found) - limit} more not shown)" if len(found) > limit else ""
     left_out = f"; {total - len(found)} other item(s) left out by the date filter" if dated and total > len(found) else ""
     return (f"{what}: {len(found)} item(s){' ' + dated if dated else ''}{left_out}, {ordered}:\n"

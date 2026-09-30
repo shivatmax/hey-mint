@@ -310,6 +310,7 @@ class Emotes:
         token = self._token
         seconds = EMOTES[key][0]
         self.last_played = time.monotonic()
+        self._last_key = key
         orb = self.orb
         d = orb.d
         s = d / 44.0
@@ -401,6 +402,9 @@ class Emotes:
             layer.setBackgroundColor_(gfx.cg(rgb))
             x = bx + random.uniform(-spread, spread)
             y = by + orb.d * 0.35
+            if getattr(orb, "in_notch", False):
+                # In the notch there is no room above (the screen's edge): float down, under the face.
+                y, rise = by - orb.d * 0.35, -abs(rise)
             layer.setPosition_(Quartz.CGPointMake(x, y))
             layer.setOpacity_(0.0)
             self._add(layer, orb.body)

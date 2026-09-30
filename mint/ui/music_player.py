@@ -118,6 +118,14 @@ def _image(path: str):
 
 # --- small views -------------------------------------------------------------------------------------
 
+
+def _notch_active() -> bool:
+    try:
+        from mint.ui import notch
+        return bool(notch.active()) if hasattr(notch, "active") else bool(notch.enabled())
+    except Exception:
+        return False
+
 class _MusicPlayerPanel(AppKit.NSPanel):
     def canBecomeKeyWindow(self):
         return False
@@ -684,6 +692,15 @@ class MusicPlayer:
         AppHelper.callLater(0.26, done)
 
     def show(self, reason: str = "asked") -> None:
+        if _notch_active():
+            # Notch mode: the notch itself is the player - peek it open instead of showing a separate card.
+            try:
+                from mint.ui import notch
+                if hasattr(notch.notch, "peek_music"):
+                    notch.notch.peek_music(8.0 if reason == "auto" else 12.0)
+            except Exception:
+                pass
+            return
         if self.panel is None:
             self._build()
         self._ensure_timer()
@@ -722,6 +739,9 @@ class MusicPlayer:
     # every tenth of a second
     def tick(self) -> None:
         if not self.opened or self.panel is None:
+            return
+        if _notch_active():
+            self.hide()
             return
         info = _music().cached()
         blocked = self._blocked()

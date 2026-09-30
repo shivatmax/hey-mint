@@ -43,6 +43,11 @@ class Recording:
         self.name, self.seconds = name, seconds
 
     def __enter__(self):
+        if PEEK:
+            self.stop = threading.Event()
+            self.thread = threading.Thread(target=_peek_shots, args=(self.name, self.stop), daemon=True)
+            self.thread.start()
+            return self
         path = RAW / f"{self.name}.mov"
         path.unlink(missing_ok=True)
         self.proc = subprocess.Popen(["screencapture", "-x", "-v", "-V", str(int(self.seconds + 0.99)), str(path)])
@@ -50,9 +55,34 @@ class Recording:
         return self
 
     def __exit__(self, *exc):
+        if PEEK:
+            self.stop.set()
+            self.thread.join()
+            print(f"  [peek] {self.name}", flush=True)
+            return
         self.proc.wait()
         time.sleep(0.5)
         print(f"  [scene] {self.name}", flush=True)
+
+
+PEEK = bool(os.environ.get("PEEK"))      # testing: window-only stills of this process's notch, no recording
+
+
+def _peek_shots(name, stop):
+    """Every second, a still of this process's own notch window only (nothing else on screen)."""
+    import Quartz
+    out = RAW / "peek"
+    out.mkdir(exist_ok=True)
+    for old in out.glob(f"{name}-*.png"):
+        old.unlink()
+    i = 0
+    while not stop.wait(1.0):
+        for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, 0):
+            if w.get("kCGWindowOwnerPID") == os.getpid() and w.get("kCGWindowLayer") == 27:
+                subprocess.run(["screencapture", "-x", "-o", "-l", str(w["kCGWindowNumber"]),
+                                str(out / f"{name}-{i:02d}.png")])
+                break
+        i += 1
 
 
 class Chunks:
@@ -871,6 +901,181 @@ def notch_hover(p):
     NOTCH_PREFS["mic"] = True; p.set_state("awake"); time.sleep(1.6)
 
 
+@scene("notch-home", 17)
+def notch_home(p):
+    """Hover: the open notch (Mint + this week's calendar); then files land on the shelf."""
+    from mint.ui import notch
+    from mint.ui import notch_shelf
+    time.sleep(1.2)
+    F["mouse"] = (notch.notch.cx - 40, notch.notch.top - 12)
+    time.sleep(5.2)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(1.6)
+    notch_shelf.add_paths([str(path) for path in _shelf_files()])
+
+    def dropped():
+        notch.notch.tab, notch.notch.drag_until = "shelf", time.monotonic() + 3.0
+    AppHelper.callAfter(dropped)
+    time.sleep(1.5)
+    F["mouse"] = (notch.notch.cx + 60, notch.notch.top - 60)      # stays open while the pointer is on it
+    time.sleep(4.4)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(1.6)
+
+
+@scene("notch-music", 17)
+def notch_music(p):
+    """The charger goes in (the battery peeks from the wings), then a song starts: the notch is the player."""
+    from mint.ui import notch
+    time.sleep(1.2)
+    F["battery"] = dict(F["battery"], plugged=True, charging=True, source="AC Power", time_to_full=65,
+                        time_to_empty=None)
+    time.sleep(5.0)                               # noticed within 2 s, shown for 3 s
+    F["music"] = dict(F["song"], state="playing", position=48.0)
+    from mint.tools import music
+    music._refresh()                              # the watcher would only notice on its next pass
+    AppHelper.callAfter(notch.notch.peek_music, 4.5)
+    time.sleep(5.2)
+    F["mouse"] = (notch.notch.cx - 40, notch.notch.top - 12)
+    time.sleep(4.2)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(1.4)
+
+
+def _shelf_files():
+    """A few everyday files for the shelf (made once, in /tmp: the real shelf is never touched)."""
+    from PIL import Image, ImageDraw
+    root = Path("/tmp/Launch")                   # a short path for the hover line
+    root.mkdir(exist_ok=True)
+    photo = root / "Sunset.jpg"
+    if not photo.exists():
+        img = Image.new("RGB", (640, 420))
+        draw = ImageDraw.Draw(img)
+        for y in range(420):
+            t = y / 419
+            draw.line([(0, y), (640, y)], fill=(int(250 - 90 * t), int(150 - 80 * t), int(90 + 60 * t)))
+        draw.ellipse((250, 230, 390, 370), fill=(255, 214, 140))
+        draw.rectangle((0, 330, 640, 420), fill=(40, 34, 70))
+        img.save(photo, quality=90)
+    plan = root / "Launch plan.pdf"
+    if not plan.exists():
+        page = Image.new("RGB", (620, 800), "white")
+        draw = ImageDraw.Draw(page)
+        draw.rectangle((50, 60, 420, 90), fill=(30, 30, 30))
+        for i in range(14):
+            draw.rectangle((50, 130 + i * 34, 570 - (i % 4) * 60, 144 + i * 34), fill=(190, 190, 190))
+        page.save(plan)
+    folder = root / "Brand assets"
+    folder.mkdir(exist_ok=True)
+    notes = root / "Interview notes.txt"
+    if not notes.exists():
+        notes.write_text("Interview notes\n\n- Ask about the on-call rota\n- Demo the notch shelf\n")
+    return [photo, plan, folder, notes]
+
+
+def _song_art() -> str:
+    from PIL import Image, ImageDraw
+    path = Path("/tmp/mint-guide-shelf/cover.png")
+    if not path.exists():
+        path.parent.mkdir(exist_ok=True)
+        img = Image.new("RGB", (300, 300))
+        draw = ImageDraw.Draw(img)
+        for y in range(300):
+            draw.line([(0, y), (300, y)], fill=(int(200 - 150 * y / 299), int(30 + 20 * y / 299), int(60 + 140 * y / 299)))
+        draw.ellipse((70, 70, 230, 230), outline=(255, 235, 245), width=10)
+        img.save(path)
+    return str(path)
+
+
+def _notch_fakes():
+    """The open notch's panes, scripted: a made-up week in the calendar, a battery that can be
+    plugged in, a song that can start, and a shelf kept in /tmp (the real ones are never read or written)."""
+    import datetime as dt
+    from mint.tools import music
+    from mint.ui import music_player
+    from mint.ui import notch_battery
+    from mint.ui import notch_calendar
+    from mint.ui import notch_shelf  # noqa: F401 (the notch reads the player)
+    notch_shelf.STORE = Path("/tmp/mint-guide-shelf/shelf.json")
+    notch_shelf.STORE.unlink(missing_ok=True)
+    today, now = dt.date.today(), dt.datetime.now().replace(second=0, microsecond=0)
+    at = lambda day, h, m=0: dt.datetime.combine(day, dt.time(h, m))
+    ev = lambda i, title, start, end, rgb, place="", all_day=False: {
+        "id": f"demo-{i}", "title": title, "start": start, "end": end, "all_day": all_day, "place": place,
+        "rgb": rgb, "recurring": False}
+    blue, orange, green, red = (0.04, 0.52, 1.0), (1.0, 0.58, 0.0), (0.2, 0.78, 0.35), (1, 0.23, 0.19)
+    base = now.replace(minute=0)
+    week = {today: [ev(1, "Design review", base - dt.timedelta(minutes=15), base + dt.timedelta(minutes=45), blue, "Room 4"),
+                    ev(2, "Lunch with Priya", base + dt.timedelta(hours=2), base + dt.timedelta(hours=3), orange),
+                    ev(3, "Ship the beta build", base + dt.timedelta(hours=4), base + dt.timedelta(hours=5), green, "Zoom")],
+            today + dt.timedelta(days=1): [ev(4, "Dentist", at(today + dt.timedelta(days=1), 9, 30),
+                                              at(today + dt.timedelta(days=1), 10, 15), red, "12 High St")]}
+    notch_calendar._source = lambda first, days: {first + dt.timedelta(days=i): list(week.get(first + dt.timedelta(days=i), []))
+                                                  for i in range(days)}
+    notch_calendar.available = lambda: True
+    F["battery"] = dict(notch_battery.read(), present=True, percent=64, plugged=False, charging=False, charged=False,
+                        low_power=False, source="Battery Power", time_to_full=None, time_to_empty=182, calculating=False)
+    notch_battery.read = lambda: dict(F["battery"])
+    F["song"] = {"app": "Spotify", "state": "stopped", "title": "Midnight City", "artist": "M83",
+                 "album": "Hurry Up, We're Dreaming", "position": 0.0, "duration": 243.0, "artwork": _song_art(),
+                 "artwork_url": "", "uri": "", "volume": 60, "shuffle": False, "repeat": False, "running": True}
+    F["music"] = dict(F["song"], title="")
+
+    def refresh():
+        with music._lock:
+            music._now = dict(F["music"])
+            music._stamp = time.monotonic()
+        return dict(music._now)
+    music._refresh = refresh
+    music._observe_notifications = lambda: None
+
+
+@scene("notch-words", 16)
+def notch_words(p):
+    """A song in the wings; "Hey Mint" brings the little Mint back; hovering while it talks opens it all."""
+    from mint.tools import music
+    from mint.ui import notch
+    F["music"] = dict(F["song"], state="playing", position=30.0)
+    music._refresh()
+    p.set_state("sleeping")
+    time.sleep(2.2)                               # the artwork and bars in the wings
+    p.set_state("awake")
+    time.sleep(2.0)                               # listening: the little Mint is back
+    say(p, "user_said", "what's the weather like this evening?", gap=0.1)
+    p.set_state("speaking")
+    F["mouse"] = (notch.notch.cx - 40, notch.notch.top - 12)     # hovering while it talks: its words inside
+    say(p, "assistant_said", "Clear and 24 degrees this evening, dropping to 19 by midnight. No rain.", gap=0.12)
+    time.sleep(2.6)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    p.set_state("sleeping")
+    time.sleep(3.0)
+
+
+@scene("notch-search", 14)
+def notch_search_scene(p):
+    """Files Mint found open the notch as tiles; hovering one says where it is."""
+    from mint.ui import notch_search
+    time.sleep(1.2)
+    files = [str(path) for path in _shelf_files()]
+    say(p, "user_said", "find my launch files", gap=0.1)
+    p.set_state("thinking")
+    time.sleep(0.6)
+    notch_search.show(paths=files, query="launch", title="4 files for “launch”")
+    p.set_state("speaking")
+    say(p, "assistant_said", "Four files for the launch. They're in the notch.", gap=0.1)
+    time.sleep(2.2)
+
+    def hover(on):
+        for view in list(notch_search._views):
+            if view.order and view._visible():
+                view.hover(view.tiles[view.order[1]], on)
+    AppHelper.callAfter(hover, True)
+    time.sleep(3.2)
+    AppHelper.callAfter(hover, False)
+    p.set_state("sleeping")
+    time.sleep(4.0)
+
+
 @scene("notch-switch", 11)
 def notch_switch(p):
     """Live switching: out of the notch as the orb (drop, bounce home), then back in (the flight)."""
@@ -891,6 +1096,7 @@ def _notch_demo():
     prefs.get = lambda key: NOTCH_PREFS[key] if key in NOTCH_PREFS else real_get(key)
     prefs.set = lambda key, value: None if key in NOTCH_PREFS else real_set(key, value)
     notch._watching[0] = True
+    _notch_fakes()
     # The recording makes Mint visible to capture; the eye button shows what a user sees (hidden).
     import AppKit
     from mint.ui import sharing
@@ -903,6 +1109,10 @@ def _notch_demo():
         def mouseLocation():
             import AppKit as _AK
             return _AK.NSMakePoint(*F["mouse"])
+
+        @staticmethod
+        def pressedMouseButtons():
+            return 0
 
     class _AppKitProxy:
         NSEvent = _Event
@@ -950,7 +1160,8 @@ def tour(p):
         time.sleep(1.8)
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
-        steps = (notch_talk, notch_hover, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+        steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
+                 notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
@@ -982,8 +1193,8 @@ def main():
     presence.on("quit", lambda: os._exit(0))
 
     def build():
-        back = ms.backdrop()
-        if NOTCH:
+        back = ms.backdrop() if not PEEK else None
+        if NOTCH and back is not None:
             back.contentView().subviews()[0].setHidden_(True)      # no document card under the notch
             _menu_bar_cover()
         presence.build()

@@ -1947,6 +1947,10 @@ class Island:
             return
         self.scene, self.shown = scene, True
         self.hud.island_active = True
+        try:
+            self.hud._hide_bubble()              # the caption bubble would peek out above the capsule
+        except Exception:
+            pass
         width, height = self._size(scene)
         rect, face = self._layout(width, height)
         cx, cy = self.anchor

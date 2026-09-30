@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Files into apps** (`mint/tools/handoff.py`): "compress it with Keka", "open these in Preview", "extract this".
+  Mint hands files over like Finder's Open With (sandboxed apps included), answers the app's save-location
+  question for the job asked, and names the file it made. "Drag it into Keka" really drags: the file is shown in
+  the notch, the pointer carries it onto the app's window, then goes back. Misheard app names are matched.
+- **A richer notch** (`mint/ui/notch*.py`, with ideas from boring.notch): hover opens a home with Mint or the
+  player, this week's calendar and the battery; a Shelf for files (drop on the notch, drag out, AirDrop, share);
+  search in the notch (files, folders and apps as tiles, 3 × 1 to 3 × 3 grids, path on hover); a charging peek.
+  Found files and a new song open the notch at once, even while Mint talks; "Hey Mint" always shows the little
+  Mint, also over a song; hovering while Mint talks shows its words.
+- **Connectors for file jobs:** a connector action can hand files to its app (Keka's scripted "compress" does
+  nothing from a script); "compress", "zip", "extract" and other verbs count as asking for the action.
+- **Fixed:** closing the chat could hide every Mint window, so Mint looked crashed; "stop" now also refuses
+  tool calls the model sends after it in the same turn; notch search and shelf tiles start a drag from their
+  picture too.
 - **Music: Spotify and Apple Music** (`mint/tools/music.py`, `mint/ui/music_player.py`): "play Blinding Lights",
   "play some lo-fi", "next", "pause", "what's playing", volume, shuffle, repeat, seek. Spotify links are found
   without a Spotify login or developer account; genres use Spotify's own playlists. A mini player (cover, progress,

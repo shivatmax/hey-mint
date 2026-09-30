@@ -560,9 +560,14 @@ class ChatPanel:
         self._status.setStringValue_(text)
         self._status.setToolTip_(text)
         self._stop.setHidden_(not busy)
-        # The status gets all the room left of the header buttons (the Stop button only while busy),
-        # rather than a fixed 80 pt that cut "Mic off" and task names short.
-        leftmost = W - PAD - 26 - (210 if busy else 180)
+        # While working, Stop takes the place of Sleep, More and the eye (not needed mid-task), so the
+        # task's name has room; the status gets all the space left of the buttons either way.
+        x = W - PAD - 26
+        for button in (self._sleep, self._more, self._eye):
+            button.setHidden_(busy)
+        top = self._stop.frame().origin.y
+        self._stop.setFrameOrigin_(AppKit.NSMakePoint(x - (120 if busy else 210), top))
+        leftmost = x - (120 if busy else 180)
         frame = self._status.frame()
         self._status.setFrame_(AppKit.NSMakeRect(frame.origin.x, frame.origin.y,
                                                  max(60, leftmost - frame.origin.x - 6), frame.size.height))
@@ -666,7 +671,9 @@ class ChatPanel:
         if previous is not None and not previous.isTerminated():
             previous.activateWithOptions_(0)
         else:
-            AppKit.NSApplication.sharedApplication().hide_(None)
+            # Step back without hiding: hide_ hid EVERY Mint window, the orb and the notch included,
+            # and Mint looked crashed until something unhid it.
+            AppKit.NSApplication.sharedApplication().deactivate()
         self.window.orderFrontRegardless()
 
     def reclaim(self) -> None:
@@ -695,7 +702,7 @@ class ChatPanel:
         if previous is not None and not previous.isTerminated():
             previous.activateWithOptions_(0)
         else:
-            AppKit.NSApplication.sharedApplication().hide_(None)
+            AppKit.NSApplication.sharedApplication().deactivate()      # not hide_: see release_keyboard
 
     def submit(self) -> None:
         text = str(self._field.stringValue() or "").strip()

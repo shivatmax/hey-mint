@@ -507,6 +507,7 @@ class HUD:
     def open_console(self) -> None:
         if not self._built:
             return
+        AppKit.NSApplication.sharedApplication().unhideWithoutActivation()    # if anything hid Mint
         self._hide_bubble()
         self.chat.open(self._chat_frame())
         self._update_chat_status()
@@ -542,7 +543,10 @@ class HUD:
 
     def _status_line(self, now: float) -> str:
         if self._activity:
-            return self._activity["text"] + "." * (1 + int(now * 3) % 3)
+            text = self._activity["text"]
+            if text.endswith("…"):                  # already shortened: no dots after its ellipsis
+                return text
+            return text + "." * (1 + int(now * 3) % 3)
         if self._status:
             return self._status
         if self._state in ("thinking", "working"):
@@ -582,7 +586,7 @@ class HUD:
                 bold = AppKit.NSFont.systemFontOfSize_weight_(13, AppKit.NSFontWeightSemibold)
                 for target in (shown, full):
                     put(target, prefix, look.ink(accent, self._bubble), 0.95, bold)
-            tail = words.tail(120)
+            tail = words.tail(180)
             if len(tail) < len(words.words):
                 for target in (shown, full):
                     put(target, "… ", fg, 0.5)

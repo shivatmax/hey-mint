@@ -53,6 +53,11 @@ CUTS = {
     "notch":           ("notch", 440, 0, 560, 140, 0, None),
     "notch-hover":     ("notch-hover", 440, 0, 560, 140, 0, None),
     "notch-switch":    ("notch-switch", 440, 0, 1000, 932, 0, None),
+    # The open notch (640 wide) with its shadow.
+    "notch-home":      ("notch-home", 370, 0, 700, 230, 0, None),
+    "notch-music":     ("notch-music", 370, 0, 700, 230, 0, None),
+    "notch-words":     ("notch-words", 370, 0, 700, 230, 0, None),
+    "notch-search":    ("notch-search", 370, 0, 700, 230, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -103,7 +108,9 @@ def stitch_agent():
 
 PROBES = [(40, 60), (1400, 60), (40, 840), (1000, 120), (1180, 300), (140, 400)]   # never under Mint's UI
 # Scenes whose own Mint UI covers a probe (the image card is tall: its top edge reaches (1180, 300)).
-SKIP_PROBES = {"image-card": {(1180, 300)}}
+SKIP_PROBES = {"image-card": {(1180, 300)},
+               # the open notch (640 wide, ~200 tall) covers (1000, 120)
+               **{name: {(1000, 120)} for name in ("notch-home", "notch-music", "notch-words", "notch-search")}}
 
 
 def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:

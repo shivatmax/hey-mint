@@ -121,7 +121,11 @@ def _score(query: str, path: str, text: str) -> float:
     return sum(1.0 + (0.5 if re.search(rf"\b{re.escape(w)}\b", hay) else 0) for w in words if w in hay) / max(1, len(words))
 
 
+found = threading.local()          # this thread's last hits, for the notch (tools.py)
+
+
 def search(query: str, open_it: bool = False) -> str:
+    found.last = None
     index, waiting = update()
     if not index:
         return "There are no screenshots on this Mac (Spotlight finds none)."
@@ -140,6 +144,7 @@ def search(query: str, open_it: bool = False) -> str:
     tail = f" ({waiting} newer screenshots are still being read; ask again in a minute for those.)" if waiting else ""
     if not hits:
         return f"No screenshot matches '{query}' among {len(index)}.{tail}"
+    found.last = (list(hits), query, f"Screenshots: “{query}”")
     lines = []
     for p in hits:
         when = dt.datetime.fromtimestamp(index[p]["mtime"]).strftime("%a %d %b %H:%M")

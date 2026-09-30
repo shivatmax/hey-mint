@@ -50,7 +50,11 @@ MAX_W = 380            # the widest the dropped-down shape gets for words
 PAD_X = 16             # text inset from the shape's sides
 BTN, STEP = 26, 32     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
-WIN_W, WIN_H = 760, 820    # room for the notch to wrap a card or the chat hanging under it
+PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
+HOME_W, BODY_H = 640, 150          # the open notch on hover (boring.notch's size): header row + body
+BIG_W, BIG_H = 760, 430            # the notch grown for search results ("show more", 3x3 / 3x2 / 3x1)
+SIDE_W = HOME_W - 32 - PLAYER_W - 12   # the right-hand pane: the week calendar or the battery
+WIN_W, WIN_H = 900, 860    # room for the notch to wrap cards (two side by side) or the chat under it
 # Over the menu bar, as notch apps do (main menu + 3).
 LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 3
 
@@ -105,7 +109,8 @@ def island_path(W, H, w, h, ear=EAR, r=10.0):
 
 class MintNotchPanel(AppKit.NSPanel):
     def canBecomeKeyWindow(self):
-        return False
+        # Only while the Search tab is up: its field takes typing (a non-activating panel, like Spotlight).
+        return bool(getattr(notch, "allow_key", False))
 
     def canBecomeMainWindow(self):
         return False
@@ -127,6 +132,24 @@ class MintNotchView(AppKit.NSView):
     def rightMouseDown_(self, event):
         if self.owner is not None:
             self.owner.right_clicked(event, self)
+
+    # Files dropped on the notch go on the shelf (notch_shelf).
+    def draggingEntered_(self, sender):
+        ok = self.owner is not None and self.owner.dragged_in(sender.draggingPasteboard())
+        return AppKit.NSDragOperationCopy if ok else AppKit.NSDragOperationNone
+
+    def draggingUpdated_(self, sender):
+        return self.draggingEntered_(sender)
+
+    def draggingExited_(self, sender):
+        if self.owner is not None:
+            self.owner.dragged_out()
+
+    def prepareForDragOperation_(self, sender):
+        return True
+
+    def performDragOperation_(self, sender):
+        return bool(self.owner is not None and self.owner.dropped(sender.draggingPasteboard()))
 
 
 class MintNotchButton(AppKit.NSButton):
@@ -181,8 +204,20 @@ class Notch:
         self._ind = ""
         self._styled: dict = {}             # guest windows dressed as part of the notch -> how they were
         self._backs: dict = {}              # the black backing views added under a dressed chat
+        self._faces: list = []              # guest cards' own little faces, hidden while in the notch
         self.phase = "off"                  # off / entering / on / leaving
         self.music_peek_until = 0.0          # the player shows in the notch until then (music just started)
+        self.tab = "home"                    # the open notch's tab: home / shelf
+        self.home = None                     # the open notch's pieces, built the first time it opens
+        self.battery_peek_until = 0.0        # plugged in / unplugged: the wings show it for a moment
+        self.battery_event = ""
+        self.drag_until = 0.0                # a file is being dragged near the notch: open on the shelf
+        self.search_until = 0.0              # Mint just showed files/apps: the notch stays open on Search
+        self._paused_since = 0.0             # when the song in the wings was paused
+        self._mint_words = ""                # what Mint is saying (the open notch's Mint pane shows it)
+        self.allow_key = False
+        self._search_hooked = False
+        self._drag_count = -1
 
     # --- building -------------------------------------------------------------------------------
 
@@ -202,6 +237,7 @@ class Notch:
         panel.setFloatingPanel_(True)
         panel.setLevel_(LEVEL)           # after setFloatingPanel, which resets the level to 3
         panel.setMovable_(False)
+        panel.setAllowsToolTipsWhenApplicationIsInactive_(True)     # a result's full path on hover
         panel.setCollectionBehavior_(
             AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces | AppKit.NSWindowCollectionBehaviorStationary
             | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary | AppKit.NSWindowCollectionBehaviorIgnoresCycle)
@@ -222,7 +258,7 @@ class Notch:
         self.shape.setFillColor_(AppKit.NSColor.blackColor().CGColor())
         self.shape.setShadowColor_(AppKit.NSColor.blackColor().CGColor())
         self.shape.setShadowOpacity_(0.0)
-        self.shape.setShadowRadius_(12)
+        self.shape.setShadowRadius_(6)
         self.shape.setShadowOffset_(Quartz.CGSizeMake(0, -3))
         root.layer().addSublayer_(self.shape)
         box = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, WIN_W, WIN_H))
@@ -241,9 +277,10 @@ class Notch:
         self.face_host = host
         from mint.ui.orb import Orb
         self.orb = Orb(host, self.face_center, FACE)
-        for layer in (self.orb.ring, self.orb.spinner):          # no outer rings in a tight spot
+        for layer in (self.orb.ring, self.orb.spinner, self.orb.progress_ring):   # no outer rings in a tight spot
             layer.removeAllAnimations()
             layer.setHidden_(True)
+        self.orb.in_notch = True                # expressions float their extras downwards, inside the notch
 
         # Right of the camera: what is going on.
         self.ind_center = (WIN_W / 2 + self.nw / 2 + WING / 2 - 3, WIN_H - self.nh / 2)
@@ -288,6 +325,15 @@ class Notch:
             1 / 30, self.ticker, "tick:", None, True)
         AppKit.NSRunLoop.currentRunLoop().addTimer_forMode_(timer, AppKit.NSRunLoopCommonModes)
         center = AppKit.NSNotificationCenter.defaultCenter()
+        self._menus = 0
+
+        def menu(delta):
+            self._menus = max(0, self._menus + delta)
+        self._menu_obs = [
+            center.addObserverForName_object_queue_usingBlock_(AppKit.NSMenuDidBeginTrackingNotification, None, None,
+                                                               lambda note: menu(1)),
+            center.addObserverForName_object_queue_usingBlock_(AppKit.NSMenuDidEndTrackingNotification, None, None,
+                                                               lambda note: menu(-1))]
         self._screens = center.addObserverForName_object_queue_usingBlock_(
             AppKit.NSApplicationDidChangeScreenParametersNotification, None, None, lambda note: self._moved())
 
@@ -359,7 +405,8 @@ class Notch:
 
     def _rect_screen(self):
         w, h = self.size
-        return (self.cx - w / 2 - EAR, self.top - h, w + 2 * EAR, h)
+        ear = getattr(self, "ear", EAR)
+        return (self.cx - w / 2 - ear, self.top - h, w + 2 * ear, h)
 
     def _inside(self, point) -> bool:
         x, y, w, h = self._rect_screen()
@@ -369,8 +416,12 @@ class Notch:
         w, h = round(w), round(h)
         if (w, h) == self.size:
             return
-        radius = 10.0 if h <= self.nh + 2 else (26.0 if h > 180 else 20.0)
-        path = island_path(WIN_W, WIN_H, w, h, r=radius)
+        # boring.notch's radii, growing with the shape on the same spring: closed ears 6 and bottom
+        # 14 (like the hardware notch), open 19 and 24.
+        opened = h > self.nh + 2
+        ear, radius = (19.0, 24.0) if opened else (6.0, 14.0)
+        self.ear = ear
+        path = island_path(WIN_W, WIN_H, w, h, ear=ear, r=radius)
         for layer in (self.shape, self.mask):
             old = (layer.presentationLayer() or layer).path() if animate else None
             Quartz.CATransaction.begin()
@@ -384,14 +435,14 @@ class Notch:
                 # An unhurried drop and rise, settling without overshoot (critically damped): nothing
                 # swings out past where the shape is going. Wrapping a card, the shape leads (faster),
                 # so the card never shows outside it while both grow.
-                stiffness = 300.0 if lead else 110.0
+                stiffness = 300.0 if lead else 150.0          # response about 0.5 s (boring.notch's close spring)
                 spring.setStiffness_(stiffness)
-                spring.setDamping_(2.0 * math.sqrt(stiffness) * (0.96 if prefs.get("notch_playful") is not False else 1.0))
+                spring.setDamping_(2.0 * math.sqrt(stiffness))
                 spring.setMass_(1.0)
                 spring.setDuration_(spring.settlingDuration())
                 layer.addAnimation_forKey_(spring, "path")
-        opened = h > self.nh + 2
-        self.shape.setShadowOpacity_(0.45 if opened else 0.0)
+        self.shape.setShadowOpacity_(0.7 if opened else 0.0)     # black 0.7, radius 6, only when open
+        self.shape.setShadowRadius_(6)
         self.size = (w, h)
 
     # --- the HUD's hooks ------------------------------------------------------------------------
@@ -417,9 +468,9 @@ class Notch:
             self.left_at = now
             if not self.hover_since:
                 self.hover_since = now
-        elif now - self.left_at > 0.35:
+        elif now - self.left_at > 0.1:                  # closes a beat after the pointer leaves
             self.hover_since = 0.0
-        hovering = bool(self.hover_since) and now - self.hover_since > 0.18
+        hovering = bool(self.hover_since) and now - self.hover_since > 0.3     # opens after a 0.3 s rest
         chat_open = getattr(getattr(hud, "chat", None), "is_open", False)
         state = getattr(hud, "_state", "")
         activity = getattr(hud, "_activity", None)
@@ -432,53 +483,107 @@ class Notch:
 
         guests = self._guests(chat_open)
         shown_island = island is not None and island.shown and island.rect is not None
+        if not self._search_hooked:
+            self._hook_search()                 # Mint's file/app results open the notch on Search
         music = self._music()                 # something playing: the notch becomes the player
         self._no_music_card(music)
         controls = prefs.get("notch_controls") is not False
+        # What Mint just brought up (found files, a song starting) opens at once, even while it's still
+        # talking: the notch grows into it for a few seconds, then folds back (hover brings it all back).
+        pushed = now < self.search_until and self.tab == "search" and not chat_open
         if shown_island or guests:
             mode = "wrap"
             width, height = self._wrap(island.rect if shown_island else None, guests, compact_w)
+        elif pushed and self._search_big():
+            mode = "home"
+            width, height = BIG_W, self.nh + 8 + BIG_H + 10
+        elif pushed:
+            mode = "home"
+            width, height = HOME_W, self.nh + 8 + BODY_H + 10
+        elif music and now < self.music_peek_until and not hovering and not chat_open:
+            mode = "music"
+            width = max(compact_w, PLAYER_W + 20)
+            height = self.nh + 4 + PLAYER_H + 10
         elif (caption or self.progress) and not chat_open:
-            # Words and tasks come first: they take the player's place for a moment, then it returns.
+            # Words and tasks come before the idle states: they take the player's place for a moment, then it returns.
             text_w, text_h = self._text_size(caption)
             if hovering and controls:
-                mode = "hover"
-                width = max(compact_w, len(self.buttons) * STEP + 20, text_w + 2 * PAD_X)
-                height = self.nh + (text_h + 10 if caption else 4) + BTN + 14
+                mode = "home"                   # hover opens it all, Mint's words in its pane
+                width, height = HOME_W, self.nh + 8 + BODY_H + 10
             else:
                 mode = "open"
                 width = max(compact_w, text_w + 2 * PAD_X)
                 height = self.nh + text_h + 18 + (8 if self.progress else 0)
-        elif music and (hovering or now < self.music_peek_until) and not chat_open:
-            mode = "music"
-            show_row = controls and hovering
-            width = max(compact_w, PLAYER_W + 20, len(self.buttons) * STEP + 20 if show_row else 0)
-            height = self.nh + 4 + PLAYER_H + (BTN + 20 if show_row else 10)
-        elif hovering and controls and not chat_open:
-            mode = "hover"
-            width = max(compact_w, len(self.buttons) * STEP + 20)
-            height = self.nh + 4 + BTN + 14
+                # Don't shrink for a few points ("Working." -> "Working..." made it wobble).
+                if self.mode == "open" and self.size[1] == round(height) and 0 < self.size[0] - width < 24:
+                    width = self.size[0]
+        elif self._search_big() and not chat_open:
+            mode = "home"                       # grown for search results: the grid
+            width, height = BIG_W, self.nh + 8 + BIG_H + 10
+        elif (hovering or now < self.drag_until or now < self.search_until or self._typing()) and controls \
+                and not chat_open:
+            mode = "home"                       # boring.notch's open notch: tabs, player or Mint, calendar, shelf
+            width, height = HOME_W, self.nh + 8 + BODY_H + 10
+        elif now < self.battery_peek_until and not chat_open:
+            mode = "battery"                    # plugged in / unplugged: said in the wings for a moment
+            width, height = self.nw + 2 * 92, self.nh
+        elif self._emoting(now):
+            mode = "emote"                      # an expression: room under the little Mint for its extras
+            width, height = compact_w + 48, self.nh + 46
         elif prefs.get("notch_idle_face") is False and state in ("sleeping", "awake") and not activity:
             mode = "plain"                      # just the notch until something happens
-            width, height = self.nw, self.nh
+            width, height = self.nw + 8, self.nh    # a hair wider, so the black covers the hardware edge
         else:
             mode = "compact"
             width, height = compact_w, self.nh
-        if playful and mode in ("open", "hover", "wrap", "music") and self.mode in ("compact", "plain"):
+        self._watch_drag(mouse)
+        if playful and mode in ("open", "hover", "wrap", "music", "home") and self.mode in ("compact", "plain"):
             self.orb.hop()                      # the little Mint hops as the shape opens
         self._resize(width, height, lead=(mode == "wrap"))
         self._breathe(state, mode, playful)
+        self._mint_words = caption[1] if caption else ""
         self._layout_content(mode, caption, width, height)
-        wings = bool(music) and mode in ("compact", "plain", "music")
+        # The artwork and bars take the wings only while the song is what matters: Mint listening,
+        # thinking or talking shows the little Mint again, and a paused song gives way after a while.
+        busy = state in ("awake", "thinking", "working", "speaking") or bool(activity or said or you)
+        if music and not music.get("playing"):
+            self._paused_since = self._paused_since or now
+        else:
+            self._paused_since = 0.0
+        stale = bool(self._paused_since) and now - self._paused_since > PAUSED_WINGS
+        wings = bool(music) and mode in ("compact", "plain", "music") and (mode == "music" or not (busy or stale))
         self._music_wings(music if wings else None)
-        self._music_player(mode == "music", height)
+        self._home(mode, music)
+        self._battery_wings(mode == "battery")
+        self._music_player(mode == "music" or (mode == "home" and self.tab == "home" and bool(music)
+                                               and not self._mint_words), height,
+                           home=(mode == "home"))
+        if mode == "battery":
+            wings = True                        # the battery owns both wings for the moment
         if not wings:
             self._indicator(state, activity, now)
         showing_face = mode != "plain" and not wings
-        self.face_host.setOpacity_(1.0 if showing_face else 0.0)
+        if (self.face_host.opacity() > 0.5) != showing_face:
+            Quartz.CATransaction.begin()
+            # Gone at once when something else takes the wing (the battery's words were drawn under a
+            # face still fading out); back with a short fade.
+            Quartz.CATransaction.setDisableActions_(not showing_face)
+            Quartz.CATransaction.setAnimationDuration_(0.2)
+            self.face_host.setOpacity_(1.0 if showing_face else 0.0)
+            Quartz.CATransaction.commit()
         # Clicks only on the shape itself; everywhere else the window is air.
         self.panel.setIgnoresMouseEvents_(not inside)
         self.mode = mode
+
+    def _emoting(self, now) -> bool:
+        try:
+            from mint.ui.emotes import EMOTES, emotes
+            last = getattr(emotes, "last_played", 0.0)
+            key = getattr(emotes, "_last_key", "")
+            length = EMOTES.get(key, (2.6,))[0] if key else 2.6
+            return emotes.orb is self.orb and now - last < min(length, 4.0)
+        except Exception:
+            return False
 
     def _island(self):
         try:
@@ -504,6 +609,11 @@ class Notch:
                 found.append((module, panel))
         for key, window in found:
             self._dress(key, window)
+            owner = getattr(sys.modules.get(key), "window" if key.endswith("clipboard_window") else "card", None)
+            host = getattr(owner, "face_host", None)
+            if host is not None and not host.isHidden():
+                host.setHidden_(True)            # the notch has its own little Mint: one face, not two
+                self._faces.append(host)
         return [window for _, window in found]
 
     def _dress(self, key, window) -> None:
@@ -525,6 +635,7 @@ class Notch:
                 content = window.contentView()
                 back = Quartz.CALayer.layer()
                 back.setFrame_(content.bounds())
+                back.setAutoresizingMask_(Quartz.kCALayerWidthSizable | Quartz.kCALayerHeightSizable)
                 back.setBackgroundColor_(AppKit.NSColor.blackColor().CGColor())
                 back.setCornerRadius_(20)
                 dot = getattr(self.hud.chat, "_dot", None)
@@ -557,6 +668,9 @@ class Notch:
         for back in self._backs.values():
             back.removeFromSuperlayer()
         self._backs.clear()
+        for host in self._faces:
+            host.setHidden_(False)
+        self._faces.clear()
         self._styled.clear()
         self.panel.setIgnoresMouseEvents_(True)
 
@@ -564,17 +678,29 @@ class Notch:
         """Stack the island's scene and the guests under the notch (never on top of each other)
         and return the shape's size that wraps them all."""
         rects = []
-        below = self.top - self.nh - 6
+        floor = self.screen.visibleFrame().origin.y + 8
+        top_row = self.top - self.nh - 6
+        below = top_row
         if island_rect is not None:
             rects.append(island_rect)
             below = island_rect[1] - 8
+        placed = []
         for window in sorted(guests, key=lambda w: -w.frame().origin.y):
             f = window.frame()
-            if f.origin.y + f.size.height > below + 1:          # would overlap what is above: move down
-                window.setFrameOrigin_(AppKit.NSMakePoint(f.origin.x, below - f.size.height))
-                f = window.frame()
-            rects.append((f.origin.x, f.origin.y, f.size.width, f.size.height))
-            below = f.origin.y - 8
+            x, y, w, h = f.origin.x, f.origin.y, f.size.width, f.size.height
+            overlaps = any(x < px + pw and px < x + w and y < py + ph and py < y + h for px, py, pw, ph in placed)
+            if y + h > below + 1 or overlaps:
+                if below - h >= floor and not placed:
+                    y = below - h                    # room below what is above: hang under it
+                else:
+                    # No room below: beside the previous card, top-aligned, never off the screen.
+                    px, py, pw, ph = placed[-1] if placed else (self.cx - w / 2, below - h, w, h)
+                    x = px + pw + 12 if px + pw + 12 + w <= self.cx + WIN_W / 2 - EAR - 20 else px - 12 - w
+                    y = max(floor, (py + ph) - h)
+                window.setFrameOrigin_(AppKit.NSMakePoint(x, y))
+            placed.append((x, y, w, h))
+            rects.append((x, y, w, h))
+            below = min(below, y - 8)
         reach = max(max(abs(x - self.cx), abs(x + w - self.cx)) for x, y, w, h in rects)
         width = max(compact_w, 2 * reach + 16)
         height = self.top - min(y for x, y, w, h in rects) + 8
@@ -594,6 +720,394 @@ class Notch:
             log.debug("music info failed", exc_info=True)
             return None
         return info if info.get("show") else None
+
+    # --- the open notch: tabs, Mint or the player, the calendar, the shelf ---------------------
+
+    def _mod(self, name):
+        try:
+            import importlib
+            return importlib.import_module("mint." + name)
+        except Exception:
+            log.debug("no %s", name, exc_info=True)
+            return None
+
+    def _build_home(self) -> None:
+        """Once, the first time the notch opens: the tab row, the header's battery and gear, the Mint
+        pane, the calendar (or battery) pane and the shelf. Each module's view is built once and kept."""
+        h = {"acts": []}
+        top_y = WIN_H - self.nh / 2
+        left = WIN_W / 2 - HOME_W / 2 + 16
+        right = WIN_W / 2 + HOME_W / 2 - 16
+
+        def button(symbol, tip, fn, x, y, size=24):
+            act = MintNotchAct.alloc().initWithFn_(fn)
+            h["acts"].append(act)
+            b = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 11), act, "fire:")
+            b.setBordered_(False)
+            b.setToolTip_(tip)
+            b.setContentTintColor_(_white(0.8))
+            b.setWantsLayer_(True)
+            b.layer().setCornerRadius_(size / 2 - 2)
+            b.setFrame_(AppKit.NSMakeRect(x, y - size / 2, size + 8, size))
+            b.setHidden_(True)
+            self.box.addSubview_(b)
+            return b
+        h["tabs"] = {"home": button("house.fill", "Home", lambda: self._set_tab("home"), left, top_y),
+                     "search": button("magnifyingglass", "Search files and apps", lambda: self._set_tab("search"),
+                                      left + 36, top_y),
+                     "shelf": button("tray.full.fill", "Shelf: files to AirDrop or share", lambda: self._set_tab("shelf"),
+                                     left + 72, top_y)}
+        h["gear"] = button("gearshape.fill", "Settings", self._menu_from_button, right - 32, top_y)
+        battery = self._mod("notch_battery") if prefs.get("notch_battery") is not False else None
+        h["badge"] = None
+        if battery is not None and battery.available():
+            try:
+                badge = battery.compact_badge(20)
+                badge.setHidden_(True)
+                self.box.addSubview_(badge)
+                h["badge"] = badge
+                battery.charging_changed(self.peek_battery)
+            except Exception:
+                log.debug("battery badge failed", exc_info=True)
+        # The Mint pane (no music): what Mint is doing and how to reach it; the controls go under it.
+        h["title"] = self._label(15, _white(0.95), AppKit.NSFontWeightSemibold)
+        h["hint"] = self._label(11.5, _white(0.55), AppKit.NSFontWeightMedium, lines=2)
+        # The right pane: the week calendar if Mint may read calendars, else the battery.
+        h["side"] = None
+        calendar = self._mod("notch_calendar") if prefs.get("notch_calendar") is not False else None
+        try:
+            if calendar is not None and calendar.available():
+                h["side"], h["side_update"] = calendar.view(SIDE_W, BODY_H - 16)
+            elif battery is not None and battery.available():
+                h["side"], h["side_update"] = battery.view(SIDE_W, BODY_H - 16)
+        except Exception:
+            log.debug("side pane failed", exc_info=True)
+        if h["side"] is not None:
+            h["side"].setHidden_(True)
+            self.box.addSubview_(h["side"])
+        # The shelf.
+        h["shelf"] = None
+        shelf = self._mod("notch_shelf") if prefs.get("notch_shelf") is not False else None
+        if shelf is not None:
+            try:
+                h["shelf"], h["shelf_update"] = shelf.view(HOME_W - 24, BODY_H)
+                h["shelf"].setHidden_(True)
+                self.box.addSubview_(h["shelf"])
+                shelf.on_change(lambda: setattr(self, "_shelf_dirty", True))
+            except Exception:
+                log.debug("shelf failed", exc_info=True)
+        self.home = h
+        self.root.registerForDraggedTypes_([AppKit.NSPasteboardTypeFileURL])
+
+    def _repaint_soon(self, update) -> None:
+        """The modules paint only while visible: ask again just after the view is shown."""
+        if update is None:
+            return
+
+        def paint():
+            try:
+                update()
+            except Exception:
+                log.debug("notch pane repaint failed", exc_info=True)
+        AppHelper.callLater(0.05, paint)
+        AppHelper.callLater(0.4, paint)
+
+    def _set_tab(self, tab: str) -> None:
+        self.tab = tab
+        if tab == "search":
+            self._focus_search()
+
+    # --- Spotlight in the notch (notch_search) -----------------------------------------------------
+
+    def _search_mod(self):
+        if prefs.get("notch_search") is False:
+            return None
+        return self._mod("notch_search")
+
+    def _search_ok(self) -> bool:
+        mod = self._search_mod()
+        try:
+            return mod is not None and mod.available()
+        except Exception:
+            return False
+
+    def _search_big(self) -> bool:
+        mod = self._search_mod()
+        try:
+            return self.tab == "search" and mod is not None and mod.want_expanded() and \
+                (self.hover_since or self._typing() or time.monotonic() < self.search_until)
+        except Exception:
+            return False
+
+    def _typing(self) -> bool:
+        return self.tab == "search" and (self.panel.isKeyWindow() or self._holding())
+
+    def _search_dragging(self) -> bool:
+        mod = self._mod("notch_search") if "mint.ui.notch_search" in __import__("sys").modules else None
+        try:
+            return bool(mod is not None and mod.dragging())
+        except Exception:
+            return False
+
+    def _holding(self) -> bool:
+        """Something opened from the notch is up (Quick Look, a menu, a share sheet): don't close under it."""
+        if getattr(self, "_menus", 0) > 0 or self._search_dragging():
+            return True
+        try:
+            import Quartz as _q  # noqa: F401
+            from Quartz import QLPreviewPanel
+            if QLPreviewPanel.sharedPreviewPanelExists() and QLPreviewPanel.sharedPreviewPanel().isVisible():
+                return True
+        except Exception:
+            pass
+        for window in AppKit.NSApplication.sharedApplication().windows():
+            if window.isSheet() and window.isVisible():
+                return True
+        return False
+
+    def _hook_search(self) -> None:
+        mod = self._search_mod()
+        if mod is None or self._search_hooked:
+            return
+        self._search_hooked = True
+
+        def changed(*_):
+            # Mint showed files or apps: open on the Search tab for a while (the pointer or typing keeps it).
+            try:
+                if mod.has_results():
+                    self.tab = "search"
+                    self.search_until = time.monotonic() + 15.0
+            except Exception:
+                pass
+        try:
+            mod.on_change(changed)
+        except Exception:
+            log.debug("search hook failed", exc_info=True)
+
+    def _search_pane(self, on: bool, body_top: float) -> None:
+        """One search view, resized in place between the row (616x150) and the grid (736x430), so what
+        is typed, the selection and the focus survive "Show more"."""
+        mod = self._search_mod()
+        if mod is None:
+            return
+        self._hook_search()
+        h = self.home
+        view = h.get("search")
+        if on and view is None:
+            try:
+                view, update = mod.view(HOME_W - 24, BODY_H)
+                view.setHidden_(True)
+                self.box.addSubview_(view)
+                h["search"], h["search_update"], h["search_size"] = view, update, (HOME_W - 24, BODY_H)
+            except Exception:
+                log.debug("search view failed", exc_info=True)
+                return
+        if view is not None:
+            if on:
+                size = (BIG_W - 24, BIG_H) if self._search_big() else (HOME_W - 24, BODY_H)
+                if size != h.get("search_size"):
+                    try:
+                        mod.resize(view, *size)
+                    except Exception:
+                        log.debug("search resize failed", exc_info=True)
+                    h["search_size"] = size
+                    self._repaint_soon(h.get("search_update"))
+                if view.isHidden():
+                    self._repaint_soon(h.get("search_update"))
+                self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - size[0] / 2, body_top - size[1], *size))
+            elif not view.isHidden():
+                view.setHidden_(True)
+                view.setAlphaValue_(0.0)
+        self.allow_key = on
+        if not on and self.panel.isKeyWindow():
+            self.panel.resignKeyWindow()
+
+    def _focus_search(self) -> None:
+        mod = self._search_mod()
+        if mod is None:
+            return
+        self.allow_key = True
+
+        def focus():
+            h = self.home or {}
+            view = h.get("search")
+            if view is None:
+                return
+            self.panel.makeKeyWindow()
+            if not self.panel.isKeyWindow():             # a background app can be refused: ask to come forward
+                AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                self.panel.makeKeyWindow()
+            try:
+                mod.focus_field(view)
+            except Exception:
+                log.debug("search focus failed", exc_info=True)
+        AppHelper.callLater(0.08, focus)
+
+    def _shelf_ok(self) -> bool:
+        shelf = self._mod("notch_shelf") if prefs.get("notch_shelf") is not False else None
+        try:
+            return shelf is not None and (shelf.available() or time.monotonic() < self.drag_until)
+        except Exception:
+            return False
+
+    def _home(self, mode, music) -> None:
+        on = mode == "home"
+        if on and self.home is None:
+            self._build_home()
+        h = self.home
+        if h is None:
+            return
+        shelf_ok = self._shelf_ok()
+        if (self.tab == "shelf" and not shelf_ok) or (self.tab == "search" and not self._search_ok()):
+            self.tab = "home"
+        now = time.monotonic()
+        if on and not self.mode == "home" and now >= self.drag_until and now >= self.search_until \
+                and not self._typing():
+            self.tab = "home"                   # a fresh open starts at home (a drag, or results, pick the tab)
+        body_top = WIN_H - self.nh - 8
+        body_bottom = body_top - BODY_H
+        left = WIN_W / 2 - HOME_W / 2 + 16
+        right = WIN_W / 2 + HOME_W / 2 - 16
+        top_y = WIN_H - self.nh / 2
+        # header
+        search_ok = self._search_ok()
+        for name, b in h["tabs"].items():
+            show = on and {"home": shelf_ok or search_ok, "shelf": shelf_ok, "search": search_ok}[name]
+            b.setHidden_(not show)
+            if show:
+                b.layer().setBackgroundColor_(_white(0.16 if self.tab == name else 0.0).CGColor())
+                b.setContentTintColor_(_white(0.95 if self.tab == name else 0.55))
+        h["gear"].setHidden_(not on)
+        badge = h["badge"]
+        if badge is not None:
+            size = badge.frame().size
+            badge.setFrameOrigin_(AppKit.NSMakePoint(right - 40 - size.width, top_y - size.height / 2))
+            badge.setHidden_(not on)
+        # body: home tab
+        home = on and self.tab == "home"
+        words = getattr(self, "_mint_words", "")
+        mint_pane = home and (not music or bool(words))       # Mint talking beats the player
+        if mint_pane:
+            from mint.ui.hud import TITLES
+            state = getattr(self.hud, "_state", "")
+            title = "Mic off" if not prefs.get("mic") else (TITLES.get(state, "") or "Listening")
+            h["title"].setStringValue_(title)
+            h["hint"].setMaximumNumberOfLines_(3 if words else 2)
+            h["hint"].setTextColor_(_white(0.85 if words else 0.55))
+            h["hint"].setStringValue_(words or ("Say “Hey Mint”, or click me to chat." if prefs.get("mic")
+                                                else "Click me to chat, or turn the mic on below."))
+            self._reveal(h["title"], AppKit.NSMakeRect(left, body_top - 34, PLAYER_W, 22))
+            self._reveal(h["hint"], AppKit.NSMakeRect(left, body_top - 84, PLAYER_W, 46) if words
+                         else AppKit.NSMakeRect(left, body_top - 70, PLAYER_W, 32))
+        else:
+            for key in ("title", "hint"):
+                self._fade(h[key], False)
+        side = h["side"]
+        if side is not None:
+            if home:
+                if side.isHidden():
+                    self._repaint_soon(h.get("side_update"))
+                self._reveal(side, AppKit.NSMakeRect(right - SIDE_W, body_bottom + 8, SIDE_W, BODY_H - 16))
+            elif not side.isHidden():
+                side.setHidden_(True)
+                side.setAlphaValue_(0.0)
+        self._search_pane(on and self.tab == "search", body_top)
+        # body: shelf tab
+        shelf = h["shelf"]
+        if shelf is not None:
+            if on and self.tab == "shelf":
+                if getattr(self, "_shelf_dirty", False) or shelf.isHidden():
+                    self._shelf_dirty = False
+                    self._repaint_soon(h.get("shelf_update"))
+                self._reveal(shelf, AppKit.NSMakeRect(WIN_W / 2 - (HOME_W - 24) / 2, body_bottom, HOME_W - 24, BODY_H))
+            elif not shelf.isHidden():
+                shelf.setHidden_(True)
+                shelf.setAlphaValue_(0.0)
+
+    # --- files dragged to the notch go on the shelf ---------------------------------------------
+
+    def _watch_drag(self, mouse) -> None:
+        """A file drag coming near the notch opens it on the shelf, as boring.notch does."""
+        if prefs.get("notch_shelf") is False or self._search_dragging():
+            return                               # (a search result being dragged OUT is not for the shelf)
+        board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
+        pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+        count = board.changeCount()
+        if not pressed:
+            self._drag_count = count
+            return
+        if count == self._drag_count:
+            return                               # the button is down, but no drag started
+        near = abs(mouse.x - self.cx) < HOME_W / 2 + 40 and mouse.y > self.top - self.nh - 160
+        shelf = self._mod("notch_shelf")
+        if near and shelf is not None and shelf.accepts_drag(board):
+            if time.monotonic() >= self.drag_until:
+                shelf.set_drag_over(True)
+            self.drag_until = time.monotonic() + 0.6
+            self.tab = "shelf"
+            self.panel.setIgnoresMouseEvents_(False)
+
+    def dragged_in(self, pasteboard) -> bool:
+        if self._search_dragging():
+            return False
+        shelf = self._mod("notch_shelf")
+        if shelf is None or not shelf.accepts_drag(pasteboard):
+            return False
+        shelf.set_drag_over(True)
+        self.tab = "shelf"
+        self.drag_until = time.monotonic() + 0.6
+        return True
+
+    def dragged_out(self) -> None:
+        shelf = self._mod("notch_shelf")
+        if shelf is not None:
+            shelf.set_drag_over(False)
+
+    def dropped(self, pasteboard) -> bool:
+        shelf = self._mod("notch_shelf")
+        if shelf is None:
+            return False
+        added = shelf.add_paths(shelf.paths_from(pasteboard))
+        shelf.set_drag_over(False)
+        self.tab, self.drag_until = "shelf", time.monotonic() + 2.5       # stay open to show it landed
+        print(f"  [notch shelf: {added} file(s) added]", flush=True)
+        return added > 0
+
+    # --- plugged in / unplugged ----------------------------------------------------------------
+
+    def peek_battery(self, info) -> None:
+        self.battery_event = str((info or {}).get("event") or "")
+        self.battery_peek_until = time.monotonic() + 3.0
+
+    def _battery_wings(self, on: bool) -> None:
+        """For a moment: what happened on the left ("Plugged In"), the badge on the right."""
+        label = getattr(self, "_battery_label", None)
+        if on and label is None:
+            label = self._label(11, _white(0.9), AppKit.NSFontWeightSemibold)
+            label.setAlignment_(AppKit.NSTextAlignmentRight)
+            self._battery_label = label
+        badge = self.home.get("badge") if self.home else None
+        if on and badge is None:
+            if self.home is None:
+                self._build_home()
+            badge = self.home.get("badge")
+        if label is not None:
+            if on:
+                short = {"Charging battery": "Charging", "Not charging": "Not charging", "Low Power: On": "Low Power",
+                         "Low Power: Off": "Low Power off"}   # the wing holds about 12 letters
+                label.setStringValue_(short.get(self.battery_event, self.battery_event) or "Battery")
+                label.setFrame_(AppKit.NSMakeRect(WIN_W / 2 - self.nw / 2 - 90, WIN_H - self.nh / 2 - 8, 82, 16))
+                label.setAlphaValue_(1.0)
+            else:
+                label.setAlphaValue_(0.0)
+        if on and badge is not None:
+            size = badge.frame().size
+            badge.setFrameOrigin_(AppKit.NSMakePoint(WIN_W / 2 + self.nw / 2 + 10, WIN_H - self.nh / 2 - size.height / 2))
+            badge.setHidden_(False)
+        if on:
+            for layer in list(self.bars) + [self.ring, self.glyph]:
+                layer.setHidden_(True)
+            self._ind = ""
 
     def peek_music(self, seconds: float = 6.0) -> None:
         """Music just started (music_player calls this instead of showing its card in notch mode):
@@ -638,7 +1152,7 @@ class Notch:
                 layer.setHidden_(True)
             self._ind = ""                          # repaint the indicator when the music stops
 
-    def _music_player(self, on: bool, height: float) -> None:
+    def _music_player(self, on: bool, height: float, home: bool = False) -> None:
         """Hovering while music plays: the notch opens into the full player."""
         if on and getattr(self, "player", None) is None:
             try:
@@ -653,16 +1167,21 @@ class Notch:
         if not player:
             return
         if on:
-            player.setFrameOrigin_(AppKit.NSMakePoint(WIN_W / 2 - PLAYER_W / 2, WIN_H - self.nh - 4 - PLAYER_H))
             if player.isHidden():
-                player.setHidden_(False)
                 try:
                     from mint.tools import music
                     self.player_update(music.cached())          # paint at once
                 except Exception:
                     pass
+            if home:                            # the home tab: on the left, beside the calendar
+                x = WIN_W / 2 - HOME_W / 2 + 16
+                y = WIN_H - self.nh - 8 - BODY_H + (BODY_H - PLAYER_H) / 2
+            else:
+                x, y = WIN_W / 2 - PLAYER_W / 2, WIN_H - self.nh - 4 - PLAYER_H
+            self._reveal(player, AppKit.NSMakeRect(x, y, PLAYER_W, PLAYER_H))
         elif not player.isHidden():
             player.setHidden_(True)
+            player.setAlphaValue_(0.0)
 
     # --- sizes ---------------------------------------------------------------------------------
 
@@ -701,14 +1220,16 @@ class Notch:
             if shown is not getattr(self, "_shown", None):
                 self._shown = shown
                 self.words.setAttributedStringValue_(shown)
-            self.words.setFrame_(AppKit.NSMakeRect(left - 2, y - th, inner + 4, th))
+            self._reveal(self.words, AppKit.NSMakeRect(left - 2, y - th, inner + 4, th))
             y -= th + 4
         self._fade(self.status, False)
-        self._fade(self.words, show_text and bool(caption))
+        if not (show_text and caption):
+            self._fade(self.words, False)
         visible = show_text and bool(self.progress)
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
-        self.track.setFrame_(Quartz.CGRectMake(left, y - 5, inner, 3))
+        if visible:
+            self.track.setFrame_(Quartz.CGRectMake(left, y - 5, inner, 3))
         self.fill.setPosition_(Quartz.CGPointMake(left, y - 3.5))
         self.fill.setBounds_(Quartz.CGRectMake(0, 0, inner * float(self.progress or 0), 3))
         self.fill.setBackgroundColor_(gfx.cg(gfx.accent()))
@@ -716,20 +1237,42 @@ class Notch:
         self.track.setOpacity_(1.0 if visible else 0.0)
         self.fill.setOpacity_(1.0 if visible else 0.0)
         # Controls: one row along the bottom, popping in one after another.
-        hover = mode == "hover" or (mode == "music" and prefs.get("notch_controls") is not False
-                                    and bool(self.hover_since))
-        entering = hover and self.mode not in ("hover", "music")
+        hover = mode == "hover" or (mode == "home" and self.tab == "home"
+                                    and (not self._music() or bool(getattr(self, "_mint_words", ""))))
+        entering = hover and self.mode not in ("hover", "home")
         start = WIN_W / 2 - (len(self.buttons) - 1) * STEP / 2
         row_y = WIN_H - height + 9
+        if mode == "home":                      # in the Mint pane, under its status
+            start = WIN_W / 2 - HOME_W / 2 + 16 + BTN / 2
+            row_y = WIN_H - self.nh - 8 - BODY_H + 20
         for i, (symbol, button) in enumerate(self.buttons):
-            button.setFrame_(AppKit.NSMakeRect(start + i * STEP - BTN / 2, row_y, BTN, BTN))
+            if hover:                                   # leaving: they fade where they are, not in the notch row
+                button.setFrame_(AppKit.NSMakeRect(start + i * STEP - BTN / 2, row_y, BTN, BTN))
             if entering:
                 button.setHidden_(False)
                 button.setAlphaValue_(0.0)
-                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode in ("hover", "music") and self._pop(b))
+                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode in ("hover", "home") and self._pop(b))
             elif not hover:
                 self._fade(button, False)
         self._paint_buttons()
+
+    def _reveal(self, view, frame) -> None:
+        """Content arriving as the notch opens: it settles down a few points and fades in (0.35 s),
+        as boring.notch's content does. Already showing: it just takes its new frame."""
+        if view.isHidden() or view.alphaValue() < 0.05:
+            view.setHidden_(False)
+            view.setFrame_(AppKit.NSOffsetRect(frame, 0, 8))
+            view.setAlphaValue_(0.0)
+            AppKit.NSAnimationContext.beginGrouping()
+            context = AppKit.NSAnimationContext.currentContext()
+            context.setDuration_(0.35)
+            context.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
+                Quartz.kCAMediaTimingFunctionEaseOut))
+            view.animator().setFrame_(frame)
+            view.animator().setAlphaValue_(1.0)
+            AppKit.NSAnimationContext.endGrouping()
+        elif not AppKit.NSEqualRects(view.frame(), frame):
+            view.setFrame_(frame)
 
     def _pop(self, button) -> None:
         AppKit.NSAnimationContext.beginGrouping()
@@ -895,7 +1438,15 @@ def _hook(hud) -> None:
         if hud.chat.is_open:
             notch.show_words(None, None)
             hud._bubble_dirty = False
+            hud._notch_chat_seen = True
             return
+        if getattr(hud, "_notch_chat_seen", False):
+            # The chat just closed: what it showed is read already; don't reopen the notch with it.
+            hud._notch_chat_seen = False
+            hud._you.clear()
+            hud._said.clear()
+            if hud._activity is None:
+                hud._status = ""
         shown, full, moving = hud._bubble_text(now, bool(prefs.get("word_animation")))
         hud._bubble_moving = moving
         hud._bubble_dirty = moving
@@ -1145,6 +1696,12 @@ def _hang_island_scenes() -> None:
     except Exception:
         pass
     row = getattr(island_module, "ROW", 40)
+    # In the notch, files dragged to it go on the shelf (notch_shelf): the island's own drop target
+    # steps aside so the two don't compete. It comes back with the orb.
+    drop = getattr(isl, "drop", None)
+    if drop is not None and "providers" not in _island_saved:
+        _island_saved["providers"] = list(isl.providers)
+        isl.providers = [p for p in isl.providers if getattr(p, "__self__", None) is not drop]
     spring = type(isl)._spring
 
     def gentle(layer, key, old, new, damping=20.0, stiffness=190.0):
@@ -1154,6 +1711,8 @@ def _hang_island_scenes() -> None:
 
     def layout(width, height):
         x = notch.cx - width / 2
+        if not getattr(isl.scene, "card", False):
+            x -= 17        # a compact capsule keeps its (hidden) face slot on the left: centre what shows
         y = notch.top - notch.nh - 6 - height
         isl.face_right, isl.face_top = False, True
         return (x, y, width, height), (x + row / 2, y + height - row / 2)
@@ -1169,6 +1728,8 @@ def _unhang_island_scenes() -> None:
     isl = island_module.island
     for name in ("_layout", "_upper", "_spring"):    # back to the class's own placement and spring
         isl.__dict__.pop(name, None)
+    if "providers" in _island_saved:
+        isl.providers = _island_saved.pop("providers")
     if _island_saved and getattr(isl, "panel", None) is not None:
         isl.panel.setLevel_(_island_saved["level"])
         isl.blob.setBackgroundColor_(_island_saved["bg"])
