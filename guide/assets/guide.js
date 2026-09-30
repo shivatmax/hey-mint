@@ -332,7 +332,7 @@
   const vio = new IntersectionObserver(entries => {
     for (const e of entries) { const v = e.target; if (e.isIntersecting && !reduce) { v.preload = 'auto'; v.play().catch(() => {}); } else v.pause(); }
   }, {threshold: .25});
-  // The 1-minute film: poster + play button; plays muted with native controls, back to the poster at the end.
+  // The launch film: poster + play button; plays muted with native controls, back to the poster at the end.
   const film = $('[data-film]');
   if (film) {
     const fv = $('video', film);
@@ -342,7 +342,7 @@
       fv.pause(); fv.remove();
       const f = document.createElement('iframe');
       f.src = 'https://www.youtube-nocookie.com/embed/' + film.dataset.youtube + '?autoplay=1&mute=1&rel=0&playsinline=1';
-      f.title = 'Hey Mint, the 1-minute launch film'; f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; f.allowFullscreen = true;
+      f.title = 'Meet Mint v0.3.0, the launch film'; f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; f.allowFullscreen = true;
       film.appendChild(f);
     };
     const go = () => {
