@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (2026-09-30)
+
+- **Signed releases:** the app is signed with the Hey Mint Release certificate, so from now on updates install themselves and keep Microphone, Accessibility and Screen Recording. Coming from 0.3.0 (unsigned), install this version by hand once.
+
 ## 0.3.0 (2026-09-30)
 
 - **Telegram: files and quick share.** Send Mint a PDF, document, photo, video or audio file from your phone:
