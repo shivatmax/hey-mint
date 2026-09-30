@@ -43,7 +43,7 @@ SURFACE = (0.035, 0.035, 0.045)
 INK = (1.0, 1.0, 1.0)
 DIM = (0.62, 0.63, 0.68)
 SOURCES = {"you": ("You", (0.62, 0.66, 0.74)), "mint": ("Mint", None), "screenshot": ("Screenshot", (0.35, 0.62, 1.0)),
-           "pinned": ("Pinned", (1.0, 0.62, 0.1))}
+           "pinned": ("Pinned", (1.0, 0.62, 0.1)), "phone": ("Phone", (0.45, 0.8, 0.5))}
 
 
 def _cg(rgb, alpha=1.0):

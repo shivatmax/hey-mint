@@ -24,9 +24,20 @@ Pause: Mint cannot freeze a step halfway, so ⏸ stops the step it is on (its pl
 paused task, and the autopilot is held) and holds the phone's messages; ▶️ asks Mint to carry on
 from where it stopped.
 
+Files both ways. A document, photo (the largest size), video or audio file sent from the phone
+(forwarded ones too) is fetched with getFile - the Bot API gives bots files up to 20 MB - and saved
+under its own name, never overwriting, in the "From phone" folder of Mint's storage. With a caption
+("summarise this") the caption runs as a request that names the saved path; without one the file
+comes back as a card with buttons that fit it (Summarise, Translate, Copy text…). Album items
+(media_group_id) are gathered into one request. The other way: /clip sends the Mac's clipboard
+(never a concealed item or anything that looks like a secret), /last the last screenshot, /files
+what Mint made lately, /send a file under home (not hidden, Library or secret files; up to 50 MB,
+a folder zipped only when asked), and /paste puts text on the Mac's clipboard, as from the phone.
+
 The session tells this module what is happening through on_event(kind, data); gate(name, args)
 lets it refuse sends, deletes and purchases while a phone request runs in read-only mode.
-Every remote request, command, button and refusal goes to ~/Library/Application Support/Mint/remote.log.
+Every remote request, command, button, file and refusal goes to ~/Library/Application Support/Mint/remote.log
+(file names and sizes, never their contents).
 """
 
 from __future__ import annotations
@@ -37,6 +48,7 @@ import html as _html
 import itertools
 import json
 import logging
+import mimetypes
 import os
 import queue
 import re
@@ -46,6 +58,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
+import zipfile
 from pathlib import Path
 
 log = logging.getLogger("mint.app.telegram")
@@ -67,8 +81,11 @@ STALE = 600                 # a message older than this (the Mac was asleep) is 
 QUIET_END = 90              # after Mint's reply, this long with nothing more ends the request
 SILENT_END = 240            # no event at all for this long: give up mirroring
 LONGEST = 30 * 60           # a request mirrored for this long is closed
-MAX_FILE = 20 * 1024 * 1024
+MAX_FILE = 20 * 1024 * 1024    # the most a bot may download (getFile)
+MAX_UPLOAD = 50 * 1024 * 1024  # the most a bot may send (sendDocument)
 MAX_FILES = 5
+ALBUM_WAIT = 1.2            # an album's items come as separate messages: gather them for this long
+INBOX = "From phone"        # the folder in Mint's storage that files from the phone go to
 MAX_TEXT = 4000             # Telegram's limit is 4096 characters
 MAX_CAPTION = 1000          # and 1024 for a caption
 MAX_TRIES = 5               # wrong codes per person before they are ignored
@@ -83,7 +100,10 @@ SPINNER = "◐◓◑◒"
 COMMANDS = [("status", "What Mint is doing now"), ("screenshot", "A picture of the screen"),
             ("stop", "Stop whatever Mint is doing"), ("pause", "Pause Mint's work and hold my messages"),
             ("resume", "Carry on after a pause"), ("briefing", "Brief me: my day"),
-            ("missed", "What did I miss? (notifications)"), ("clipboard", "My last copies"),
+            ("missed", "What did I miss? (notifications)"), ("clip", "Send me the Mac's clipboard"),
+            ("last", "The last screenshot"), ("files", "Files Mint made lately"),
+            ("send", "Send me a file from the Mac: /send name or path"),
+            ("paste", "Put text on the Mac's clipboard: /paste text"), ("clipboard", "My last copies"),
             ("trackers", "What Mint is watching for me"), ("undo", "What Mint can undo"),
             ("chatgpt", "Is the ChatGPT app busy or done?"), ("claude", "Claude Code sessions"),
             ("keyboard", "Show or hide the quick buttons"), ("help", "Everything I can do")]
@@ -91,9 +111,10 @@ STRANGER_COMMANDS = [("start", "Pair this chat with Mint on your Mac")]
 
 # The quick-reply keyboard: each button sends its words, which mean this command.
 KEYS = {"📋 What did I miss?": "missed", "🗓 My day": "briefing", "📸 Screen": "screenshot", "⏹ Stop": "stop",
-        "🧠 Status": "status"}
+        "🧠 Status": "status", "📋 Clipboard": "clip", "🖼 Last screenshot": "last"}
 KEYBOARD = {"keyboard": [[{"text": "📋 What did I miss?"}, {"text": "🗓 My day"}],
-                         [{"text": "📸 Screen"}, {"text": "⏹ Stop"}, {"text": "🧠 Status"}]],
+                         [{"text": "📸 Screen"}, {"text": "⏹ Stop"}, {"text": "🧠 Status"}],
+                         [{"text": "📋 Clipboard"}, {"text": "🖼 Last screenshot"}]],
             "is_persistent": True, "resize_keyboard": True, "input_field_placeholder": "Ask Mint anything…"}
 
 BRIEF = "Brief me on my day."
@@ -118,6 +139,14 @@ HELP = ("🌿 <b>Mint on your phone</b>\n"
         "/trackers · what Mint is watching for me\n"
         "/undo · what Mint can undo\n"
         "/chatgpt · /claude · is the ChatGPT app or Claude Code busy or done\n\n"
+        "<b>Files</b>\n"
+        "📎 Send a file or photo: with a caption (<i>summarise this</i>) I do it; without one I save it in "
+        "<i>From phone</i> and offer what fits (up to 20 MB)\n"
+        "/clip · send me what's on the Mac's clipboard\n"
+        "/last · the last screenshot (/last 3 for three)\n"
+        "/files · files Mint made lately, to send here\n"
+        "/send <i>name or path</i> · a file from the Mac (up to 50 MB; <i>as zip</i> for a folder)\n"
+        "/paste <i>text</i> · put text on the Mac's clipboard\n\n"
         "<b>This chat</b>\n"
         "/keyboard · show or hide the quick buttons\n"
         "/unpair · disconnect this chat from Mint\n"
@@ -158,6 +187,26 @@ _RO_TOOLS = {"forget", "delete_skill"}
 
 _EXTS = ("png|jpe?g|gif|heic|webp|pdf|docx?|xlsx?|csv|pptx?|key|pages|numbers|txt|md|html?|rtf|json|"
          "mp4|mov|m4v|m4a|mp3|wav|aiff?|zip")
+
+# A file from the phone without a caption: buttons that fit it, each a request to Mint ({what} = its path).
+# Worded so the words Mint's send and risk checks look for ("send", "text …", "delete"…) never appear.
+_FILE_ASKS = {
+    "sum": ("📄 Summarise", "Summarise {what}."),
+    "watch": ("📄 Summarise", "Watch {what} and tell me what it's about."),
+    "data": ("📄 Summarise", "Summarise the data in {what}."),
+    "tr": ("🌐 Translate", "Translate {what} into Hindi, as a Word doc."),
+    "trpic": ("🌐 Translate", "Translate the words in the picture {what} into Hindi."),
+    "sheet": ("📊 To spreadsheet", "Make a spreadsheet of the tables in {what}."),
+    "copy": ("🔤 Copy text", "Copy all the words in {what} to my clipboard."),
+    "ocr": ("🔤 Copy text (OCR)", "Read the words in {what} with OCR and copy them to my clipboard."),
+    "cap": ("🎬 Captions", "Add captions to {what}."),
+    "tx": ("🗒 Transcribe", "Transcribe {what}."),
+    "what": ("📄 What's in it?", "What's in {what}?"),
+}
+_FILE_BUTTONS = {"document": ("sum", "tr", "sheet", "copy"), "image": ("ocr", "trpic", "sheet"),
+                 "video": ("watch", "cap", "tx"), "audio": ("tx", "sum"), "sheet": ("data",),
+                 "other": ("what",), "many": ("sum", "sheet")}
+_ARCHIVES = (".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".dmg", ".pkg")
 
 
 # --- the Bot API ----------------------------------------------------------------------------------
@@ -241,8 +290,12 @@ class SessionHost:
     def _run(self, coroutine, wait: float = 20.0):
         return asyncio.run_coroutine_threadsafe(coroutine, self.mint.loop).result(wait)
 
-    def inject(self, text: str) -> None:
-        self._run(self.mint.inject_text(text))
+    def inject(self, text: str, asked: str | None = None) -> None:
+        """`asked` is only the user's own words: they, not a file name in `text`, decide what counts as asked."""
+        try:
+            self._run(self.mint.inject_text(text, asked=asked))
+        except TypeError:                            # an older session without `asked`
+            self._run(self.mint.inject_text(text))
 
     def stop(self, source: str = "telegram") -> None:
         """Mint's own stop: cuts the running tool, holds the autopilot and keeps a task plan as paused."""
@@ -276,6 +329,8 @@ class Request:
         self.text, self.kind, self.message_id, self.locked = text, kind, message_id, locked
         self.asked = asked or text          # the user's own words ("Carry on…" is sent after a pause)
         self.rid = ""                       # its "Run again" button
+        self.share = ""                     # its "📤 Share" button: files it named but didn't make
+        self.share_n = 0
         self.wall = time.time()
         self.started = self.last_event = time.monotonic()
         self.last_reply = 0.0
@@ -376,7 +431,9 @@ class Request:
         if self.finished == "paused":
             return keys([("▶️ Resume", "resume"), ("⏹ Stop", "stop"), ("📸 Screen", "shot")])
         if self.finished in ("done", "quiet"):
-            return keys(again + [("↩️ Undo", "undo"), ("📸 Screen", "shot")])
+            share = [("📤 Share" if self.share_n == 1 else f"📤 Share {self.share_n}", f"share:{self.share}")] \
+                if self.share else []
+            return keys(again + share + [("↩️ Undo", "undo"), ("📸 Screen", "shot")])
         if self.finished in ("stopped", "failed"):
             return keys(again + [("📸 Screen", "shot")])
         return {"inline_keyboard": []}
@@ -388,8 +445,10 @@ class Bridge:
     """The poller, the mirror and the pairing state. One per app (`bridge` below); tests make their own."""
 
     def __init__(self, host=None, api: str = API, state_path: Path = STATE, audit_path: Path = AUDIT,
-                 setting=None, token=None, poll_wait: float = POLL_WAIT, edit_every: float = EDIT_EVERY):
+                 setting=None, token=None, poll_wait: float = POLL_WAIT, edit_every: float = EDIT_EVERY,
+                 inbox: Path | None = None):
         self.host = host
+        self.inbox = Path(inbox) if inbox else None     # where files from the phone go (tests); else storage
         self.api, self.state_path, self.audit_path = api, Path(state_path), Path(audit_path)
         self._setting = setting
         self._token = token or (lambda: os.environ.get(TOKEN_ENV, "").strip())
@@ -412,6 +471,10 @@ class Bridge:
         self.again: dict[str, str] = {}     # "Run again" buttons: id -> the words
         self.alerts: dict[str, dict] = {}   # alert buttons: id -> the tracker that finished
         self.status_ids: list[int] = []     # /status messages (their buttons refresh them)
+        self.received: dict[str, list] = {} # files from the phone: id -> their saved paths (for the buttons)
+        self.shares: dict[str, list] = {}   # "📤" buttons: id -> paths to send here
+        self.albums: dict[str, dict] = {}   # media_group_id -> the items gathered so far
+        self.pasteboard = None              # the pasteboard /clip reads (tests: a private one)
         self._ids = itertools.count(1)
         self._threads: list[threading.Thread] = []
         self._state = self._load()
@@ -650,9 +713,15 @@ class Bridge:
             self._stranger(sender["id"])
             return
         text = str(message.get("text") or message.get("caption") or "").strip()
+        age = time.time() - float(message.get("date") or time.time())
+        attached = _attachment(message)
+        if attached:
+            # A file (or photo, video, audio file; forwarded too): saved even while paused or when it is old,
+            # but its caption only runs as a request when neither.
+            self._receive(message, attached, text, age)
+            return
         if text in KEYS:
             text = "/" + KEYS[text]             # a quick-reply button: its command
-        age = time.time() - float(message.get("date") or time.time())
         if text.startswith("/"):
             self._command(text, message, age)
             return
@@ -665,13 +734,13 @@ class Bridge:
                        "Send it again if you still want it.")
             self.audit("stale", text, f"not run ({int(age)} s old)")
             return
-        media = message.get("voice") or message.get("audio")
+        media = message.get("voice")
         if media:
             threading.Thread(target=self._voice, args=(message, media), name="telegram-voice", daemon=True).start()
         elif text:
             self.run(text, message, "text")
         else:
-            self.reply("I can take text messages and voice notes.")
+            self.reply("I can take text messages, voice notes, files and photos.")
 
     def _pairing(self, message: dict, sender: dict) -> None:
         text = str(message.get("text") or "").strip()
@@ -730,8 +799,10 @@ class Bridge:
                                 "& keys ▸ Telegram." if unpaired else "Sorry, this is a private bot.")
 
     def _command(self, text: str, message: dict, age: float) -> None:
-        word = text.split()[0].lower().split("@")[0]
-        self.audit("command", word)
+        parts = text.split(None, 1)             # the rest keeps its own lines (/paste)
+        word = parts[0].lower().split("@")[0]
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        self.audit("command", word)             # never the rest: /paste carries the user's text
         info = {"/clipboard": "clipboard", "/trackers": "trackers", "/undo": "undo", "/chatgpt": "chatgpt",
                 "/claude": "claude"}
         if word == "/start":
@@ -750,8 +821,18 @@ class Bridge:
             self.keyboard(not self._state.get("keyboard"))
         elif word in info:
             _later(self.show_info, info[word])     # reads the Mac (AX, files): off the poller
+        elif word == "/files":
+            _later(self.show_files)
         elif age > STALE:
             self.reply(f"{word} came while the Mac was asleep or offline ({_took(age)} ago), so I didn't do it.")
+        elif word == "/clip":
+            _later(self.send_clipboard)
+        elif word == "/last":
+            _later(self.send_last, rest)
+        elif word == "/send":
+            _later(self.send_named, rest)
+        elif word == "/paste":
+            _later(self.paste, rest)
         elif word == "/stop":
             self.stop()
         elif word in ("/screenshot", "/briefing", "/missed") and self.paused():
@@ -849,6 +930,32 @@ class Bridge:
             return "↩️ Asking Mint to undo it…", lambda: self.run(words, {}, "button"), "✓ Asked Mint to undo"
         if name == "clip":
             return "📋 Putting it back on the Mac's clipboard…", lambda: self._put_back(arg), "✓ On the Mac"
+        if name == "fa":                        # a button under a file from the phone
+            fid, _, act = arg.partition(":")
+            paths = self.received.get(fid)
+            if not paths:
+                return "That button has expired - send the file again.", None, ""
+            if act == "show":
+                return "📂 Showing it in Finder…", lambda: self._reveal(paths), "✓ Shown on the Mac"
+            if act not in _FILE_ASKS:
+                return "That button no longer works.", None, ""
+            if paused:
+                return wait, None, ""
+            label, words = _FILE_ASKS[act]
+            words = words.format(what=_what(paths))
+            return f"{label}…", lambda: self.run(words, {}, "button"), f"✓ {label.split(' ', 1)[-1]}"
+        if name in ("share", "file"):           # 📤 files named by a request, or one from /files or /send
+            paths = self.shares.get(arg)
+            if not paths:
+                return "That button has expired.", None, ""
+            return "📤 Sending it…", lambda: _later(self._share, paths), "✓ Sent"
+        if name == "zip":
+            paths = self.shares.get(arg)
+            if not paths:
+                return "That button has expired.", None, ""
+            return "🗜 Zipping it…", lambda: _later(self._send_zipped, Path(paths[0])), "✓ Zipped"
+        if name == "last":
+            return "🖼 Getting it…", lambda: _later(self.send_last, arg), ""
         if name in ("send", "open"):
             item = self.alerts.get(arg)
             if not item:
@@ -895,15 +1002,18 @@ class Bridge:
                 "• <i>what's on my calendar today?</i>\n"
                 "• <i>find my tax pdf and send it to me</i>\n"
                 "• <i>let me know when the download finishes</i>\n"
-                "• a voice note 🎙\n\n"
+                "• a voice note 🎙\n"
+                "• a file or photo 📎 with what to do: <i>summarise this</i>\n\n"
                 "<b>While Mint works</b> you see each step here, with ⏸ ⏹ 📸 buttons under it. Screenshots and "
                 "files it makes come back to this chat.\n\n"
+                "<b>Quick share</b>: /clip the Mac's clipboard · /last the last screenshot · /files what Mint made · "
+                "/send <i>a file</i> · /paste <i>text</i> onto the Mac\n\n"
                 "Tap ☰ Menu for every command, or /help."
                 + ("\n\n<i>🔒 Read-only is on: nothing is sent, deleted or bought from here.</i>"
                    if self.setting("telegram_read_only") else ""))
         self.html(text, markup=keys([("🧠 Status", "status"), ("📸 Screen", "shot")],
                                     [("🗓 My day", "brief"), ("📋 What did I miss?", "missed")],
-                                    [("❓ Help", "help")]))
+                                    [("🖼 Last screenshot", "last"), ("❓ Help", "help")]))
 
     def help(self) -> None:
         extra = ("\n\n<i>🔒 Read-only is on: nothing is sent, deleted or bought from here, and ↩️ Undo is off.</i>"
@@ -1213,7 +1323,7 @@ class Bridge:
             aid = self._keep(self.alerts, item)
             target = Path(str(item["open"])).expanduser() if item.get("open") else None
             if target is not None and target.is_file() and self._may_send(target, None):
-                row.append(("📎 Send it here", f"send:{aid}"))
+                row.append(("📤 Share", f"send:{aid}"))
             if target is not None and target.exists():
                 row.append(("📂 Open on Mac", f"open:{aid}"))
             elif item.get("app") or item.get("kind") in ("claude", "claude_app", "chatgpt"):
@@ -1236,6 +1346,433 @@ class Bridge:
         self.audit("open", target or app)
         if command:
             subprocess.run(command, capture_output=True, timeout=15)
+
+    # files from the phone -------------------------------------------------------------------
+
+    def _receive(self, message: dict, attached: dict, caption: str, age: float) -> None:
+        """A file came (on the poller): fetch it off the poller; an album's items are gathered first."""
+        item = {"file": attached, "caption": caption, "age": age, "message_id": message.get("message_id")}
+        group = str(message.get("media_group_id") or "")
+        if not group:
+            _later(self._take, [item])
+            return
+        with self.lock:
+            album = self.albums.setdefault(group, {"items": []})
+            album["items"].append(item)
+            if album.get("timer") is not None:
+                album["timer"].cancel()
+            timer = threading.Timer(ALBUM_WAIT, self._album_done, args=(group,))
+            timer.daemon = True
+            album["timer"] = timer
+        timer.start()
+
+    def _album_done(self, group: str) -> None:
+        with self.lock:
+            album = self.albums.pop(group, None)
+        if album and album["items"]:
+            self._take(album["items"])
+
+    def _take(self, items: list[dict]) -> None:
+        """Save the files; then their caption runs as one request naming them, or they get buttons."""
+        self._action("typing")
+        saved: list[Path] = []
+        for item in items:
+            path, why = self._download(item["file"])
+            if path is not None:
+                saved.append(path)
+            elif why == "big":
+                f = item["file"]
+                self.html(f"📎 <b>{esc(f['name'])}</b>" + (f" is {_size(f['size'])}" if f.get("size") else " is too big")
+                          + ": Telegram bots can't fetch files over 20 MB.\nUse AirDrop or iCloud Drive to get it onto "
+                            "the Mac.")
+            else:
+                self.reply(f"📎 Could not get {item['file']['name']}: {why[:160]}")
+        if not saved:
+            return
+        caption = next((i["caption"] for i in items if i["caption"]), "")
+        age = max(i["age"] for i in items)
+        note = ""
+        if caption and age > STALE:
+            note = (f"<i>This came while the Mac was asleep or offline ({_took(age)} ago), so I didn't run "
+                    f"“{esc(_short(caption, 120))}”. Tap a button, or send the request again.</i>")
+            self.audit("stale", caption, f"file kept, request not run ({int(age)} s old)")
+        elif caption and self.paused():
+            note = f"<i>{esc(PAUSED_NOTE)} (Your file is kept.)</i>"
+            self.audit("paused", caption, "file kept, request not run")
+        elif caption:
+            self.html(_saved_line(saved))
+            self.run(_file_prompt(saved, caption), {"message_id": items[0]["message_id"]}, "file", asked=caption)
+            return
+        self._saved_card(saved, note)
+
+    def _download(self, attached: dict) -> tuple[Path | None, str]:
+        """(the saved file, '') or (None, 'big' | why). Telegram hands bots files up to 20 MB."""
+        name, size = attached["name"], int(attached.get("size") or 0)
+        if size > MAX_FILE:
+            self.audit("file in", name, f"refused: {_size(size)}, over 20 MB")
+            return None, "big"
+        try:
+            info = self._call("getFile", file_id=attached["id"]) or {}
+            if int(info.get("file_size") or 0) > MAX_FILE:
+                raise ApiError("file is too big")
+            bot = self.bot
+            if bot is None:
+                raise ApiError("not connected")
+            data = bot.download(str(info.get("file_path") or ""))
+            if len(data) > MAX_FILE:
+                raise ApiError("file is too big")
+            path = _save_new(self._inbox_dir(), _safe_name(name, attached.get("mime", "")), data)
+        except (ApiError, OSError) as error:
+            if "too big" in str(error).lower():
+                self.audit("file in", name, "refused: over 20 MB")
+                return None, "big"
+            log.info("telegram file: %s", error)
+            self.audit("file in", name, f"failed: {str(error)[:120]}")
+            return None, str(error)
+        self.audit("file in", path.name, f"saved {_size(len(data))} in {_home(path.parent)}")
+        return path, ""
+
+    def _inbox_dir(self) -> Path:
+        if self.inbox is not None:
+            self.inbox.mkdir(parents=True, exist_ok=True)
+            return self.inbox
+        from mint.core import config
+        return config.storage(INBOX)
+
+    def _saved_card(self, paths: list[Path], note: str = "") -> None:
+        """Saved without a caption: where it went, and buttons that fit it."""
+        kind = _file_kind(paths)
+        fid = self._keep(self.received, [str(p) for p in paths])
+        many = len(paths) > 1
+        lines = [f"📥 <b>Saved {len(paths)} files from your phone</b>" if many else "📥 <b>Saved from your phone</b>"]
+        for path in paths[:10]:
+            lines.append(f"{_icon(path)} {esc(path.name)} · {_size(_bytes(path))}")
+        if len(paths) > 10:
+            lines.append(f"<i>… and {len(paths) - 10} more</i>")
+        lines += [f"<i>{esc(_home(paths[0].parent))}</i>", "",
+                  note or ("What should I do with them?" if many else "What should I do with it?")]
+        acts = _FILE_BUTTONS[kind]
+        if kind == "many" and all(_file_kind([p]) == "image" for p in paths):
+            acts = ("ocr", "sheet")
+        buttons = [(_FILE_ASKS[a][0], f"fa:{fid}:{a}") for a in acts] + [("📂 Show on Mac", f"fa:{fid}:show")]
+        self.html("\n".join(lines), markup=keys(*[buttons[i:i + 2] for i in range(0, len(buttons), 2)]))
+
+    def _reveal(self, paths: list[str]) -> None:
+        there = [p for p in paths if Path(p).exists()][:10]
+        if not there:
+            self.reply("That file isn't there any more.")
+            return
+        self.audit("open", "; ".join(_home(Path(p)) for p in there), "shown in Finder")
+        subprocess.run(["open", "-R", *there], capture_output=True, timeout=15)
+
+    # quick share: Mac -> phone ----------------------------------------------------------------
+
+    def _share(self, paths: list[str]) -> None:
+        for raw in paths[:MAX_FILES]:
+            path = Path(raw)
+            checked, why = self._check_send(path)
+            if checked is None or not checked.is_file() or checked.stat().st_size > MAX_UPLOAD:
+                self.reply(f"I can't send {path.name}: {why or 'it is gone, a folder, or over 50 MB'}.")
+                self.audit("send file", _home(path), f"refused: {why or 'gone or too big'}")
+                continue
+            self.audit("send file", _home(checked))
+            self.send_file(checked, caption=_file_caption(checked))
+
+    def show_files(self) -> None:
+        """/files: what Mint made lately (made_files.json), newest first, each with a 📤 button."""
+        try:
+            from mint.tools import harness as harness_tools
+            made = [p for p in harness_tools._made() if p.is_file() and self._may_send(p, None, size=False)][:8]
+        except Exception:
+            made = []
+        if not made:
+            self.html("🗂 <b>Files Mint made</b>\nNothing yet. Ask me for a document, a spreadsheet or a picture, "
+                      "or /send <i>a file</i> from the Mac.")
+            self.audit("files", "", "none")
+            return
+        lines, buttons = ["🗂 <b>Files Mint made</b> · newest first · tap 📤 n to get one here", ""], []
+        for n, path in enumerate(made, 1):
+            size = _bytes(path)
+            ago = _ago(time.time() - path.stat().st_mtime)
+            lines.append(f"{n}. <b>{esc(path.name)}</b> · {_size(size)} · <i>{ago}</i>\n"
+                         f"      <i>{esc(_home(path.parent))}</i>")
+            if size <= MAX_UPLOAD:
+                buttons.append((f"📤 {n}", f"file:{self._keep(self.shares, [str(path)])}"))
+        self.audit("files", f"{len(made)} listed")
+        self.html("\n".join(lines), markup=keys(*[buttons[i:i + 4] for i in range(0, len(buttons), 4)]))
+
+    def send_clipboard(self) -> None:
+        """/clip: what is on the Mac's clipboard now. Never a concealed item (password managers) or a secret."""
+        self._action("typing")
+        try:
+            now = self._clipboard_now()
+        except Exception as error:
+            log.info("telegram clip: %s", error)
+            self.reply(f"Couldn't read the Mac's clipboard: {str(error)[:120]}")
+            return
+        kind = now["kind"]
+        history = keys([("📋 History", "info:clipboard")])
+        if kind == "secret":
+            self.html("🔒 What's on the Mac's clipboard is a password or another hidden item, so I won't send it.")
+            self.audit("clip", "hidden or secret item", "refused")
+        elif kind == "empty":
+            self.reply("📋 The Mac's clipboard is empty.")
+            self.audit("clip", "empty")
+        elif kind == "text":
+            words = now["text"]
+            tag = "pre" if "\n" in words.strip() else "code"
+            body = (f"📋 <b>Mac clipboard</b> · {len(words)} characters · tap to copy\n"
+                    f"<{tag}>{esc(words.strip())}</{tag}>")
+            if len(body) <= MAX_TEXT:
+                self.html(body, markup=history)
+            else:
+                self._send_bytes(words.encode(), "Clipboard.txt", caption=f"📋 <b>Mac clipboard</b> · {len(words)} "
+                                 "characters (too long for a message)", markup=history)
+            self.audit("clip", f"text, {len(words)} characters", "sent")
+        elif kind == "image":
+            png = now["png"]
+            self._send_bytes(png, "Clipboard.png", photo=True, caption="📋 <b>Mac clipboard</b> · a picture",
+                             markup=history)
+            self.audit("clip", f"picture, {_size(len(png))}", "sent")
+        elif kind == "files":
+            sent, refused = 0, []
+            for raw in now["files"][:MAX_FILES]:
+                path, why = self._check_send(Path(raw))
+                if path is None or not path.is_file() or path.stat().st_size > MAX_UPLOAD:
+                    refused.append(f"{Path(raw).name} ({why or ('a folder' if Path(raw).is_dir() else 'over 50 MB')})")
+                    continue
+                self.send_file(path, caption=_file_caption(path))
+                sent += 1
+            if refused:
+                self.reply("📋 Not sent: " + "; ".join(refused))
+            if len(now["files"]) > MAX_FILES:
+                self.reply(f"📋 The first {MAX_FILES} of {len(now['files'])} copied files.")
+            self.audit("clip", f"{len(now['files'])} file(s)", f"{sent} sent, {len(refused)} refused")
+        else:
+            self.reply("📋 The clipboard holds something I can't send here.")
+            self.audit("clip", "other", "not sent")
+
+    def _clipboard_now(self) -> dict:
+        """{kind: empty | secret | files | text | image | other, ...}, read as the clipboard history reads it."""
+        from mint.tools import clipboard as clip_tools
+        from mint.tools.everyday import BOARD_LOCK
+        board = (self.pasteboard or clip_tools._board)()
+        locked = BOARD_LOCK.acquire(timeout=3)
+        try:
+            kinds = set(clip_tools._types(board))
+            if not kinds:
+                return {"kind": "empty"}
+            if kinds & clip_tools._CONCEALED:
+                return {"kind": "secret"}
+            files = clip_tools._files(board)
+            if files:
+                return {"kind": "files", "files": files}
+            text = board.stringForType_("public.utf8-plain-text")
+            if text is not None and str(text).strip():
+                return {"kind": "secret"} if _secret(str(text)) else {"kind": "text", "text": str(text)}
+            png = board.dataForType_("public.png")
+            if png is None and board.dataForType_("public.tiff") is not None:
+                image = clip_tools._image(board)
+                rep = clip_tools._bitmap(image) if image is not None else None
+                png = rep.representationUsingType_properties_(4, None) if rep is not None else None   # 4 = PNG
+            if png is not None:
+                return {"kind": "image", "png": bytes(png)}
+            return {"kind": "other"}
+        finally:
+            if locked:
+                BOARD_LOCK.release()
+
+    def send_last(self, arg: str = "") -> None:
+        """/last (or /last 3): the newest screenshots, from the clipboard history (numbered there), else the
+        screenshot folder."""
+        count = max(1, min(int(arg), 5)) if str(arg).strip().isdigit() else 1
+        found: list[tuple[Path, str, float]] = []
+        try:
+            from mint.tools import clipboard as clip_tools
+            clip_tools._load()
+            for h in clip_tools.HISTORY:
+                if h.get("source") != "screenshot" or h.get("kind") != "image":
+                    continue
+                file = Path(str(h["file"])) if h.get("file") else None
+                picture = Path(str(h.get("image") or ""))
+                if file is not None and file.is_file() and self._may_send(file, None):
+                    found.append((file, str(h.get("label") or ""), float(h.get("at") or 0)))
+                elif h.get("image") and picture.is_file():       # Mint's own copy, in its clipboard store
+                    found.append((picture, str(h.get("label") or ""), float(h.get("at") or 0)))
+                if len(found) >= count:
+                    break
+            if not found:
+                folder = clip_tools._save_folder()
+                shots = sorted((p for p in folder.glob("Screen*") if p.suffix.lower() in (".png", ".jpg", ".jpeg")),
+                               key=lambda p: p.stat().st_mtime, reverse=True)
+                found = [(p, p.stem, p.stat().st_mtime) for p in shots[:count] if self._may_send(p, None)]
+        except Exception as error:
+            log.info("telegram last: %s", error)
+        if not found:
+            self.reply("🖼 No screenshots yet. Take one with ⇧⌘3 or ⇧⌘4, or send /screenshot for the screen now.")
+            self.audit("last", "", "none")
+            return
+        self._action("upload_photo")
+        for n, (path, label, at) in enumerate(reversed(found)):     # oldest first: the newest ends at the bottom
+            title = (label.split(" · ")[0] or "Screenshot").capitalize()
+            where = f"\n<i>{esc(_home(path))}</i>" if Path.home() in path.parents and "/Library/" not in str(path) \
+                else ""
+            markup = keys([("📸 Screen now", "shot"), ("📋 Clipboard", "info:clipboard")]) \
+                if n == len(found) - 1 else None
+            self.send_file(path, photo=True, caption=f"🖼 <b>{esc(title)}</b> · {_ago(time.time() - at)}{where}",
+                           markup=markup)
+        self.audit("last", f"{len(found)} screenshot(s)", "sent")
+
+    def send_named(self, arg: str) -> None:
+        """/send <name or path> [as zip]: one file under home (not hidden, Library or secret), up to 50 MB."""
+        arg = arg.strip().strip("\"'“”")
+        if not arg:
+            self.html("📤 <b>/send</b> <i>name or path</i> sends a file from the Mac, e.g. <i>/send tax 2025.pdf</i> "
+                      "or <i>/send ~/Desktop/report.docx</i>. For a folder add <i>as zip</i>.")
+            return
+        zipped = re.search(r"\s+(?:as (?:a )?zip|zipped|zip)$", arg, re.I)
+        if zipped:
+            arg = arg[:zipped.start()].strip()
+        if arg.startswith(("~", "/")):
+            found = [Path(os.path.expanduser(arg))]
+        else:
+            self._action("typing")
+            try:
+                found = _find_named(arg)
+            except Exception as error:
+                log.info("telegram find: %s", error)
+                found = []
+            exact = [p for p in found if p.name.lower() == arg.lower()]
+            found = exact[:1] if len(exact) == 1 else found
+        if not found:
+            self.html(f"📤 I couldn't find “{esc(arg)}” on the Mac. Try part of the name, or a path like "
+                      "<i>~/Desktop/report.pdf</i>.")
+            self.audit("send", arg, "not found")
+            return
+        if len(found) == 1:
+            self._send_checked(found[0], bool(zipped))
+            return
+        lines, buttons = [f"📤 <b>{len(found)} found</b> for “{esc(arg)}” · tap one to get it", ""], []
+        for n, path in enumerate(found[:8], 1):
+            lines.append(f"{n}. <b>{esc(path.name)}</b>{'/' if path.is_dir() else ''} · <i>{esc(_home(path.parent))}</i>")
+            buttons.append((f"{'🗜' if path.is_dir() else '📤'} {n}",
+                            f"{'zip' if path.is_dir() else 'file'}:{self._keep(self.shares, [str(path)])}"))
+        self.audit("send", arg, f"{len(found)} found, asked which")
+        self.html("\n".join(lines), markup=keys(*[buttons[i:i + 4] for i in range(0, len(buttons), 4)]))
+
+    def _send_checked(self, raw: Path, zipped: bool = False) -> None:
+        path, why = self._check_send(raw)
+        if path is None:
+            self.html(f"🔒 I can't send <b>{esc(raw.name or str(raw))}</b>: {esc(why)}.")
+            self.audit("send", _home(raw), f"refused: {why}")
+            return
+        if path.is_dir():
+            if zipped:
+                self._send_zipped(path)
+                return
+            sid = self._keep(self.shares, [str(path)])
+            self.html(f"📁 <b>{esc(path.name)}</b> is a folder. I send a folder only as a zip: tap 🗜, or send "
+                      f"<i>/send … as zip</i>.", markup=keys([("🗜 Zip and send", f"zip:{sid}")]))
+            self.audit("send", _home(path), "a folder: offered a zip")
+            return
+        size = _bytes(path)
+        if size > MAX_UPLOAD:
+            self.html(f"📎 <b>{esc(path.name)}</b> is {_size(size)}: Telegram bots can send files up to 50 MB. Use "
+                      "AirDrop or iCloud Drive for this one.")
+            self.audit("send", _home(path), f"refused: {_size(size)}, over 50 MB")
+            return
+        self.audit("send file", _home(path))
+        self.send_file(path, caption=_file_caption(path))
+
+    def _check_send(self, raw: Path) -> tuple[Path | None, str]:
+        """(the real path, '') if it may go to the phone, else (None, why): only under home, and never a
+        secret, Library or hidden file (the same check as Mint's own writes, plus hidden names)."""
+        try:
+            real = Path(os.path.expanduser(str(raw))).resolve()
+        except (OSError, RuntimeError):
+            return None, "that path can't be read"
+        home = Path.home()
+        if home not in real.parents:
+            return None, "it's outside your home folder" if real != home else "that's your whole home folder"
+        try:
+            from mint.tools.harness import _blocked
+            why = _blocked(real, write=True)
+        except Exception:
+            why = "it could not be checked"
+        if why:
+            if "outside" in why:
+                return None, "it's outside your home folder"
+            if "system or hidden" in why:
+                return None, "it's in Library or a hidden folder"
+            return None, "it holds keys, passwords or app data"
+        if any(part.startswith(".") for part in real.relative_to(home).parts):
+            return None, "it's a hidden file"
+        if not real.exists():
+            return None, "there's no such file"
+        return real, ""
+
+    def _send_zipped(self, folder: Path) -> None:
+        """A folder, zipped (only when asked), without hidden, secret or linked files; up to 50 MB."""
+        path, why = self._check_send(folder)
+        if path is None or not path.is_dir():
+            self.reply(f"I can't zip {folder.name}: {why or 'it is not a folder'}.")
+            return
+        from mint.tools.harness import _blocked
+        self._action("upload_document")
+        work = Path(tempfile.mkdtemp(prefix="mint-tg-zip-"))
+        target = work / f"{_safe_name(path.name)}.zip"
+        left_out, total = 0, 0
+        try:
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as out:
+                for root, dirs, files in os.walk(path):
+                    dirs[:] = [d for d in dirs if not d.startswith(".") and not os.path.islink(os.path.join(root, d))]
+                    for name in sorted(files):
+                        full = Path(root) / name
+                        if name.startswith(".") or full.is_symlink() or _blocked(full, write=True):
+                            left_out += 1
+                            continue
+                        total += _bytes(full)
+                        if total > 4 * MAX_UPLOAD:
+                            break
+                        out.write(full, str(full.relative_to(path.parent)))
+            size = _bytes(target)
+            if total > 4 * MAX_UPLOAD or size > MAX_UPLOAD:
+                self.html(f"🗜 <b>{esc(path.name)}</b> is too big to send zipped (bots can send up to 50 MB). Use "
+                          "AirDrop or iCloud Drive.")
+                self.audit("send zip", _home(path), "refused: over 50 MB")
+                return
+            self.audit("send zip", _home(path), f"{_size(size)}, {left_out} hidden or private files left out")
+            self.send_file(target, caption=f"🗜 <b>{esc(target.name)}</b> · {_size(size)}\n<i>{esc(_home(path))}</i>"
+                           + (f"\n<i>{left_out} hidden or private files left out.</i>" if left_out else ""))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def paste(self, text: str) -> None:
+        """/paste <text>: onto the Mac's clipboard, in the clipboard history as from the phone."""
+        if not text:
+            self.html("📋 <b>/paste</b> <i>text</i> puts that text on the Mac's clipboard, ready to paste.")
+            return
+        try:
+            from mint.tools import clipboard as clip_tools
+            from mint.tools.everyday import BOARD_LOCK
+            clip_tools._load()
+            with BOARD_LOCK:
+                clip_tools._pending_label.update(source="phone")
+                try:
+                    clip_tools._put_text(text)
+                    # The history's watcher would see this change as a new copy of "you": it is the phone's.
+                    clip_tools._own_counts.add(int(clip_tools._board().changeCount()))
+                finally:
+                    if clip_tools._pending_label.get("source") == "phone":
+                        clip_tools._pending_label.pop("source", None)
+        except Exception as error:
+            log.info("telegram paste: %s", error)
+            self.reply(f"Couldn't put that on the Mac's clipboard: {str(error)[:120]}")
+            self.audit("paste", f"{len(text)} characters", "failed")
+            return
+        self.audit("paste", f"{len(text)} characters", "on the Mac's clipboard")      # never the words
+        self.html(f"📋 On the Mac's clipboard: {len(text)} characters, ready to paste.",
+                  markup=keys([("📋 History", "info:clipboard")]))
 
     # running a request ---------------------------------------------------------------------
 
@@ -1265,7 +1802,7 @@ class Bridge:
         self._post("_begin", None, request)
         self.audit(kind, text, "sent to Mint" + (" (screen locked)" if request.locked else ""))
         try:
-            host.inject(text)
+            host.inject(text, asked=request.asked or text)
         except Exception as error:
             log.info("telegram inject: %s", error)
             self._post("_end", "failed", request)
@@ -1437,10 +1974,15 @@ class Bridge:
                 self.request = None
         request.finished = how
         self._scan_cards(request)
-        self._edit(request, force=True)
+        made = self._made_files(request) if how in ("done", "quiet") else []
+        request.sent.update(str(path) for path in made)
         if how in ("done", "quiet"):
-            for path in self._made_files(request):
-                self.send_file(path, caption=_file_caption(path))
+            named = self._named_files(request)
+            if named:
+                request.share, request.share_n = self._keep(self.shares, [str(p) for p in named]), len(named)
+        self._edit(request, force=True)
+        for path in made:
+            self.send_file(path, caption=_file_caption(path))
 
     def _scan_cards(self, request: Request) -> None:
         """Cards a tool put on the island during this request (the schedule, notifications, clips...) go to
@@ -1499,13 +2041,23 @@ class Bridge:
                 continue
             if not self._may_send(path, request, size=False):
                 continue
-            if path.stat().st_size > MAX_FILE:
+            if path.stat().st_size > MAX_UPLOAD:
                 too_big.append(path)
                 continue
             chosen.append(path)
         if too_big:
-            self.send("📎 Too big to send here (over 20 MB): " + ", ".join(_home(p) for p in too_big[:3]))
+            self.send("📎 Too big to send here (over 50 MB): " + ", ".join(_home(p) for p in too_big[:3]))
         return chosen[:MAX_FILES]
+
+    def _named_files(self, request: Request) -> list[Path]:
+        """Files the request's tools named (found, opened, converted…) that were not sent: a 📤 Share button offers
+        them. Only a few: a search that listed twenty files is not something to share."""
+        found: list[Path] = []
+        for result in request.results:
+            for path in _paths(result):
+                if str(path) not in request.sent and path not in found and self._may_send(path, request):
+                    found.append(path)
+        return found if len(found) <= 3 else []
 
     def _may_send(self, path: Path, request: Request | None, size: bool = True) -> bool:
         """Only the user's own files under home, never secrets or app data, and within Telegram's limit."""
@@ -1516,7 +2068,7 @@ class Bridge:
             from mint.tools.harness import _blocked
             if _blocked(real, write=True):      # also Library and hidden folders: backups, Mint's own files
                 return False
-            return not size or real.stat().st_size <= MAX_FILE
+            return not size or real.stat().st_size <= MAX_UPLOAD
         except Exception:
             return False
 
@@ -2020,6 +2572,117 @@ def _paths(result: str) -> list[Path]:
         if path.is_file():
             found.append(path)
     return found
+
+
+def _attachment(message: dict) -> dict | None:
+    """The file in a message, as {id, name, size, mime}: a document, the largest photo, a video, an audio file or
+    a round video note (forwarded ones look the same). Voice notes are requests, not files: not here."""
+    stamp = time.strftime("%Y-%m-%d at %H.%M.%S", time.localtime(float(message.get("date") or time.time())))
+
+    def pick(media: dict, name: str, mime: str) -> dict:
+        return {"id": str(media["file_id"]), "name": name, "size": int(media.get("file_size") or 0),
+                "mime": str(media.get("mime_type") or mime)}
+
+    document = message.get("document")         # an animation (GIF) comes with its document too
+    if isinstance(document, dict) and document.get("file_id"):
+        return pick(document, str(document.get("file_name") or f"File {stamp}"), "")
+    photos = [p for p in (message.get("photo") or []) if isinstance(p, dict) and p.get("file_id")]
+    if photos:
+        best = max(photos, key=lambda p: (int(p.get("width") or 0) * int(p.get("height") or 0),
+                                          int(p.get("file_size") or 0)))
+        return pick(best, f"Photo {stamp}.jpg", "image/jpeg")
+    for key, label, mime in (("video", "Video", "video/mp4"), ("audio", "Audio", "audio/mpeg"),
+                             ("video_note", "Video note", "video/mp4")):
+        media = message.get(key)
+        if isinstance(media, dict) and media.get("file_id"):
+            name = media.get("file_name") or " - ".join(str(x) for x in (media.get("performer"), media.get("title"))
+                                                        if x) or f"{label} {stamp}"
+            return pick(media, str(name), mime)
+    return None
+
+
+def _safe_name(name: str, mime: str = "") -> str:
+    """The sender's file name, made safe to save: no folders, no control characters or colons, not hidden, a
+    sane length; an extension from the type when it has none."""
+    name = unicodedata.normalize("NFC", str(name or "")).replace("\\", "/").rsplit("/", 1)[-1]
+    name = " ".join(re.sub(r"[\x00-\x1f\x7f:]", " ", name).split()).strip(". ")
+    stem, ext = os.path.splitext(name)
+    if not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", ext or ""):
+        stem, ext = name, ""
+    if not ext and mime:
+        ext = mimetypes.guess_extension(mime.split(";")[0].strip()) or ""
+    stem = stem.strip(". ") or "File"
+    while len(stem.encode()) > 180:
+        stem = stem[:-1]
+    return stem.rstrip(". ") + ext
+
+
+def _save_new(folder: Path, name: str, data: bytes) -> Path:
+    """Write `data` as folder/name - never over another file: 'report 2.pdf', 'report 3.pdf'…"""
+    folder.mkdir(parents=True, exist_ok=True)
+    stem, ext = os.path.splitext(name)
+    for n in range(1, 1000):
+        path = folder / (name if n == 1 else f"{stem} {n}{ext}")
+        if path.resolve().parent != folder.resolve():
+            raise OSError("not a safe file name")
+        try:
+            with open(path, "xb") as out:          # x: fails if it exists (no race with an album's twin)
+                out.write(data)
+            return path
+        except FileExistsError:
+            continue
+    raise OSError("too many files with that name")
+
+
+def _bytes(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _icon(path: Path) -> str:
+    return {"image": "🖼", "video": "🎬", "audio": "🎵", "sheet": "📊", "other": "📦"}.get(_file_kind([path]), "📄")
+
+
+def _file_kind(paths: list[Path]) -> str:
+    """Which buttons fit: the island's drop kinds (document, image, video, audio, sheet), 'other' or 'many'."""
+    if len(paths) > 1:
+        return "many"
+    if not paths or paths[0].suffix.lower() in _ARCHIVES:
+        return "other"
+    try:
+        from mint.ui.island import drop_kind
+        kind = drop_kind([str(paths[0])], "")
+    except Exception:
+        kind = "document"
+    return kind if kind in _FILE_BUTTONS else "other"
+
+
+def _what(paths: list) -> str:
+    """The saved files as a request names them."""
+    shown = [_home(Path(p)) for p in paths]
+    return shown[0] if len(shown) == 1 else "these files: " + "; ".join(shown)
+
+
+def _file_prompt(paths: list[Path], caption: str) -> str:
+    """The request for a file with a caption: where it was saved, then the user's own words, unchanged (the risk
+    and send checks judge what the user said). Worded so it adds no word those checks look for."""
+    if len(paths) == 1:
+        return f"The user sent a file from their phone: {_home(paths[0])}. Their request: {caption}"
+    return (f"The user sent {len(paths)} files from their phone: {'; '.join(_home(p) for p in paths)}. "
+            f"Their request: {caption}")
+
+
+def _saved_line(paths: list[Path]) -> str:
+    names = ", ".join(f"{esc(p.name)} ({_size(_bytes(p))})" for p in paths[:5]) + (" …" if len(paths) > 5 else "")
+    return f"📥 Saved {names} in <i>{esc(_home(paths[0].parent))}</i>"
+
+
+def _find_named(query: str) -> list[Path]:
+    """/send by name: Spotlight by file name under home (find_files' search), hidden and secret files left out."""
+    from mint.tools.harness import _search_paths
+    return _search_paths(query, None, "any", 8, content=False)
 
 
 def _frontmost() -> str:

@@ -15,6 +15,8 @@
 //       {"event":"warning","message":..} {"event":"stopped","seconds":..,"file":..} {"event":"error","message":..}
 //       Stops (and finishes the file) on a line "stop" on stdin, stdin closing, SIGINT/SIGTERM/SIGHUP
 //       or --seconds.
+//   MintScreen shot --out <file.png|.jpg> --window-id WID [--window-id WID]... [--shadow] [--scale S]
+//                          a picture of one window, even covered or on another Space (see Shot.swift)
 //   MintScreen windows     JSON list of on-screen windows, front first: id, pid, app, title, frame
 //   MintScreen displays    JSON list of displays, main first: id, frame (points), scale
 //   MintScreen check [--request]
@@ -46,6 +48,7 @@ func usage() -> Never {
     usage: MintScreen record --out <file.mp4> [--display N] [--window-pid PID | --window-id WID]
                              [--rect x,y,w,h] [--audio [--own-audio]] [--mic] [--no-cursor] [--fps 30] [--seconds N]
                              [--exclude-pid PID]... [--hevc] [--scale S]
+           MintScreen shot --out <file.png> --window-id WID [--window-id WID]... [--shadow] [--scale S]
            MintScreen windows | displays | check [--request]
 
     """.data(using: .utf8)!)
@@ -190,6 +193,9 @@ func record() {
 switch args.first {
 case "record":
     record()
+case "shot":
+    Task { await shoot() }
+    dispatchMain()
 case "windows":
     Task { await listWindows() }
     dispatchMain()

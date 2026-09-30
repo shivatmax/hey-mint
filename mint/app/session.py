@@ -693,7 +693,7 @@ class Mint:
             except Exception:
                 log.debug("send failed; the session is probably reconnecting")
 
-    async def inject_text(self, text: str) -> None:
+    async def inject_text(self, text: str, asked: str | None = None) -> None:
         """Send a typed request, as if spoken. Used by the terminal, `mint --say`, and timers."""
         if not text.strip():
             return
@@ -723,7 +723,7 @@ class Mint:
         memory.add("user", text)
         try:
             from mint.app import live
-            live.typed(text)
+            live.typed(asked or text)       # the user's own words decide what they asked (not a file name)
         except ImportError:
             pass
         self._turn_open = True

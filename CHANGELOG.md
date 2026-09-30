@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Telegram: files and quick share.** Send Mint a PDF, document, photo, video or audio file from your phone:
+  with a caption it is saved in the Mint folder's "From phone" and done ("summarise this"); without one you get
+  buttons (Summarise, Translate, To spreadsheet, Copy text, Show on Mac). Albums arrive as one request. From the
+  Mac: /clip (the clipboard), /last (the last screenshots), /files (what Mint made), /send <file or folder>,
+  /paste <text> (onto the Mac's clipboard). The user's own words, not a file's name, decide what they asked.
+- **Telegram looks like an app:** a command menu, buttons on every step (Pause, Stop, Screen, Run again, Undo),
+  a quick keyboard, a live plan with a spinner and timings, Mint's cards as pictures, a welcome card.
+- **Screenshots of any window:** "screenshot my Claude Code window / the Chrome window" now works when the window
+  is covered, on another Space, or a full-screen app (live, not stale), saves exactly where asked
+  (`~/Folder/name.png`), and is sent to your phone when the request came from Telegram.
+- **Never sends by accident:** in a messaging app, Mint refuses Return, Send buttons and blind clicks unless you
+  asked to send, reply or message someone.
+- **Keys survive reinstalls:** install.sh merges .env instead of overwriting it; ⌘C/⌘V/⌘X/⌘A/⌘Z work in Mint's
+  text fields (a hidden Edit menu).
 - **Pictures with Image Playground** (`mint/tools/imagegen.py`, `mint/ui/image_card.py`): "make an illustration of…"
   draws on your Mac in seconds through two small shortcuts Mint installs ("Mint Draw", "Mint Redraw"; one Add
   Shortcut click each). A card by the orb shows the picture with "Describe a change…" (redraws, every version kept),

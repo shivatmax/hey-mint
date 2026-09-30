@@ -1,6 +1,7 @@
 """Screenshots and the clipboard.
 
-* screenshot - the whole screen, the front window (even if covered), "this image"
+* screenshot - the whole screen, the front window or a named one (covered, in another Space or
+  full screen: see "a named window" below), "this image"
   or any element named (found in the accessibility tree, e.g. the biggest
   picture on the page), an exact region or size, or a box the user drags.
   Saved where macOS saves screenshots (the Desktop unless changed), optionally
@@ -59,7 +60,10 @@ def declarations() -> list[types.FunctionDeclaration]:
     return [
         _fn("screenshot",
             "Take a screenshot and save it as a file (and copy it to the clipboard). what: screen (the whole "
-            "display), window (the front window, or the app named in target; works even if covered), element "
+            "display), window (one app window: target = the app, e.g. 'Google Chrome', 'Claude', 'iTerm', "
+            "'Terminal', and/or title = words from that window's or browser tab's title; no target = the front "
+            "window. Works even when the window is covered, in another Space/desktop or a full-screen app - "
+            "never switch to it first), element "
             "('this image', 'the chart', 'the sidebar' - target describes it; with no target, the biggest "
             "picture in the front window), region (target = 'x,y,width,height' in screen points, or just "
             "`size` for a box of that size in the middle of the front window), or select (the user drags a box "
@@ -68,10 +72,14 @@ def declarations() -> list[types.FunctionDeclaration]:
             "screenshot.",
             {"what": _enum(("screen", "window", "element", "region", "select"), "what to capture"),
              "target": STRING,
+             "title": {**STRING, "description": "for window: words from the window or tab title ('Slack', 'invoice')"},
              "size": {**STRING, "description": "optional output size: 'WIDTHxHEIGHT' or 'WIDTH'"},
              "copy": {**BOOLEAN, "description": "also put the image on the clipboard (default true)"},
              "save": {**BOOLEAN, "description": "save a file (default true)"},
              "name": {**STRING, "description": "optional file name"},
+             "path": {**STRING, "description": "where to save when the user says: a folder ('~/Documents/shots') "
+                                               "or a file path ending in .png/.jpg ('~/MintBench/x.png'); default: "
+                                               "where macOS saves screenshots"},
              "format": _enum(("png", "jpg"), "default png")},
             ["what"]),
         _fn("clipboard",
@@ -113,6 +121,10 @@ PROMPT = """
 - "Take a screenshot" = screenshot (never look, which only shows YOU the screen). "Screenshot this image" / "that
   chart" = what=element with target. "Of this window" = window. "1280 by 720" = size. "Let me pick" = select.
   Say where it was saved, and that it is on the clipboard.
+- "Screenshot of my Claude Code window" / "of the Chrome window" / "of iTerm" = what=window target=<the app>
+  (Claude Code = Claude); "of the Slack tab in Chrome" / "the window with the invoice" = add title=<words from the
+  title>. It works when that window is in another Space or full screen: do not open, switch to or look at it first.
+  If the result says AMBIGUOUS, ask which window and call again. "Save it to ~/X/y.png" / "in Documents" = path.
 - "Copy X" = clipboard copy; "copy the path / link of this" = copy_path (no path: Finder selection, browser page,
   or the open document); "copy this file" = copy_file; "copy what I selected" = copy_selection; "paste it
   (here)" = paste; "what did I copy before" / "show my clipboard" = history, then restore. Numbers count from the
@@ -1068,6 +1080,494 @@ def _titled_window(windows: list[dict], title: str, front_pid):
     return best["id"], best["box"], best["app"]
 
 
+# --- a named window, on any Space ---------------------------------------------------------------
+#
+# Measured on macOS 27 (Sept 2026):
+# * `screencapture -l` fails ("could not create image from window") for any window that is not on
+#   the Space showing now.
+# * ScreenCaptureKit (MintScreen shot) captures a window on another ordinary Space, live, but
+#   fails (-3811) for a window in a full-screen Space that is not showing.
+# * The window server's own image (CGWindowListCreateImage) works for both, live: a clock in a
+#   test window read the right time in a hidden full-screen Space and on another desktop, and so
+#   did a Chrome page. It is deprecated, so MintScreen, screencapture and - for a window the
+#   user named - briefly switching to it and back are the fallbacks.
+# * A full-screen Chrome draws its tab strip and toolbar as separate windows above the page:
+#   full-width windows of the same app, in the same Space, just above it are captured with it.
+
+_SKIP_WORDS = {"window", "windows", "the", "my", "a", "an", "of", "app", "application", "tab", "tabs", "page",
+               "screen", "with", "showing", "shows", "that", "this", "in", "on", "for", "which", "is", "open",
+               "opened", "called", "named", "titled", "title", "says", "screenshot", "current", "one", "full",
+               "fullscreen", "browser", "from", "at", "and", "to", "its", "me", "please", "whole", "entire", "where"}
+_APP_ALIASES = (("claude code", "claude"), ("visual studio code", "code"), ("vs code", "code"), ("vscode", "code"),
+                ("iterm 2", "iterm2"), ("iterm", "iterm2"), ("chrome", "google chrome"),
+                ("quicktime", "quicktime player"), ("mail app", "mail"), ("apple music", "music"))
+_BROWSERS = ("Google Chrome", "Brave Browser", "Microsoft Edge", "Chromium", "Vivaldi", "Safari")
+_cgs_calls: list = []
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def _cgs():
+    """(connection, CGSCopySpacesForWindows) - private, through ctypes - or None."""
+    if not _cgs_calls:
+        try:
+            import ctypes
+            cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg.CGSMainConnectionID.restype = ctypes.c_int
+            cg.CGSCopySpacesForWindows.restype = ctypes.c_void_p
+            cg.CGSCopySpacesForWindows.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+            _cgs_calls.append((cg.CGSMainConnectionID(), cg.CGSCopySpacesForWindows))
+        except Exception as error:
+            log.info("CGS spaces: %s", error)
+            _cgs_calls.append(None)
+    return _cgs_calls[0]
+
+
+def _cf_release(ref) -> None:
+    import ctypes
+    cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    cf.CFRelease.argtypes = [ctypes.c_void_p]
+    cf.CFRelease(ref)
+
+
+def _spaces_of(window_id: int) -> tuple:
+    """The Spaces a window is in (empty: closed, hidden or minimized), or None if unknown."""
+    calls = _cgs()
+    if calls is None:
+        return None
+    try:
+        import objc
+        from Foundation import NSArray
+        connection, copy = calls
+        ref = copy(connection, 7, objc.pyobjc_id(NSArray.arrayWithArray_([window_id])))
+        if not ref:
+            return ()
+        spaces = objc.objc_object(c_void_p=ref)        # retains it
+        _cf_release(ref)
+        return tuple(int(s) for s in spaces)
+    except Exception as error:
+        log.debug("spaces of %s: %s", window_id, error)
+        return None
+
+
+def _all_windows() -> list[dict]:
+    """Every ordinary window on any Space, in the window server's front-to-back order: id, pid, app,
+    title, box, on_screen, alpha, spaces. Windows in no Space (closed, hidden, minimized) are left out."""
+    import Quartz
+    listed = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionAll
+                                               | Quartz.kCGWindowListExcludeDesktopElements, Quartz.kCGNullWindowID)
+    raw = {int(w["kCGWindowNumber"]): w for w in listed or []}
+    out = []
+    for w in _windows(listed):
+        info = raw.get(w["id"], {})
+        w["on_screen"] = bool(info.get("kCGWindowIsOnscreen"))
+        w["alpha"] = float(info.get("kCGWindowAlpha", 1) or 0)
+        w["spaces"] = _spaces_of(w["id"])
+        if w["on_screen"] or w["spaces"] or w["spaces"] is None:
+            out.append(w)
+    return out
+
+
+def _window_label(w: dict) -> str:
+    return f"{w['app']} '{w['title'][:70]}'" if w["title"] else w["app"]
+
+
+def _app_matches(query: str, apps: set[str]) -> tuple[set[str], str]:
+    """(apps named in `query`, the query without their names). 'chrome' -> Google Chrome, 'claude code' -> Claude."""
+    plain = f" {_norm(query)} "
+    aliased = plain
+    for alias, name in _APP_ALIASES:
+        aliased = aliased.replace(f" {alias} ", f" {name} ")
+    best, hits = 0, set()
+    for app in apps:
+        name = _norm(app)
+        score = 0
+        for q in (aliased, plain):
+            if name and f" {name} " in q:
+                score = max(score, len(name))
+            # one distinctive word of the app's name: "chrome", "quicktime", "iterm"
+            score = max([score] + [len(p) for p in name.split() if len(p) >= 4 and f" {p} " in q])
+        if score > best:
+            best, hits = score, {app}
+        elif score and score == best:
+            hits.add(app)
+    rest = aliased
+    for app in hits:
+        for part in [_norm(app)] + _norm(app).split():
+            rest = rest.replace(f" {part} ", " ")
+    names = {_norm(app) for app in hits}
+    for alias, name in _APP_ALIASES:    # "iterm" when the app calls itself iTerm (not iTerm2)
+        if any(name.startswith(n) or n.startswith(name) for n in names):
+            rest = rest.replace(f" {alias} ", " ")
+    return hits, rest.strip()
+
+
+def _title_score(words: list[str], title: str) -> float:
+    have = _norm(title)
+    if not words or not have:
+        return 0.0
+    phrase = " ".join(words)
+    found = sum(1 for word in words if word in have)
+    return found / len(words) + (0.5 if phrase in have else 0.0)
+
+
+def _group(main: dict, windows: list[dict]) -> list[dict]:
+    """`main` and the full-width windows of the same app in the same Space just above it (a full-screen
+    Chrome's tab strip and toolbar), front first after `main`."""
+    x, y, w, _ = main["box"]
+    return [main] + [o for o in windows
+            if o["id"] != main["id"] and o["pid"] == main["pid"] and o["spaces"] == main["spaces"]
+            and o["alpha"] > 0.01 and abs(o["box"][0] - x) <= 2 and abs(o["box"][2] - w) <= 2
+            and o["box"][1] < y and o["box"][1] >= y - 300]
+
+
+def _browser_tabs(app: str) -> list[tuple[int, int, int, str, str]]:
+    """(window index, tab index, active tab index, title, url) of every tab of a running browser."""
+    if app == "Safari":
+        script = ('set sep to character id 9\ntell application "Safari"\nset out to ""\nrepeat with wi from 1 to count windows\n'
+                  'set w to window wi\ntry\nset active to index of current tab of w\n'
+                  'repeat with ti from 1 to count tabs of w\nset t to tab ti of w\n'
+                  'set out to out & wi & sep & ti & sep & active & sep & (name of t) & sep & (URL of t) & linefeed\n'
+                  'end repeat\nend try\nend repeat\nreturn out\nend tell')
+    else:
+        script = (f'set sep to character id 9\ntell application "{app}"\nset out to ""\nrepeat with wi from 1 to count windows\n'
+                  'set w to window wi\ntry\nset active to active tab index of w\n'
+                  'repeat with ti from 1 to count tabs of w\nset t to tab ti of w\n'
+                  'set out to out & wi & sep & ti & sep & active & sep & (title of t) & sep & (URL of t) & linefeed\n'
+                  'end repeat\nend try\nend repeat\nreturn out\nend tell')
+    try:
+        done = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=6, check=False)
+    except Exception:
+        return []
+    rows = []
+    for line in done.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 5 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
+            rows.append((int(parts[0]), int(parts[1]), int(parts[2]), parts[3], parts[4]))
+    return rows
+
+
+def _set_tab(app: str, window: int, tab: int) -> None:
+    if app == "Safari":
+        script = f'tell application "Safari" to set current tab of window {window} to tab {tab} of window {window}'
+    else:
+        script = f'tell application "{app}" to set active tab index of window {window} to {tab}'
+    subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=6, check=False)
+
+
+def _find_tab(words: list[str], browsers: list[str]):
+    """The best browser tab for `words` (title, then address): (app, window, tab, active, title) or None."""
+    best, found = 0.0, None
+    for app in browsers:
+        for window, tab, active, title, url in _browser_tabs(app):
+            score = max(_title_score(words, title), 0.9 * _title_score(words, url.replace("/", " ")))
+            if score > best:
+                best, found = score, (app, window, tab, active, title)
+    return found if best >= 0.5 else None
+
+
+def _pick_window(target: str, title: str = "") -> dict:
+    """The window meant by `target` (an app, words from a title, or both) and `title`:
+    {"window", "group", "note"} or {"choices": [...]} or {"error": ...}; "tab" when a browser tab
+    must be brought forward first (then put back)."""
+    windows = [w for w in _all_windows() if w["alpha"] > 0.01]
+    apps = {w["app"] for w in windows}
+    named, rest = _app_matches(target, apps)
+    if not named and target:
+        # An app the finder knows by another name ("iterm" -> iTerm2 is covered above; "code" -> Code).
+        try:
+            from mint.tools.appfinder import resolve
+            resolved, how = resolve(target)
+            if resolved and not how.startswith("closest") and resolved in apps:
+                named, rest = {resolved}, ""
+        except Exception:
+            pass
+    words = [w for w in (_norm(title) or rest).split() if w not in _SKIP_WORDS and (len(w) > 1 or w.isdigit())]
+    pool = [w for w in windows if w["app"] in named] if named else windows
+    running_browsers = [b for b in _BROWSERS if b in apps]
+    note = ""
+
+    def front_of(app_windows: list[dict]) -> dict:
+        """The app's own idea of its main window (its focused one), else the front-most, biggest."""
+        try:
+            import ApplicationServices as AX
+            from mint.screen.axkit import attr
+            element = AX.AXUIElementCreateApplication(app_windows[0]["pid"])
+            focused = attr(element, "AXFocusedWindow") or attr(element, "AXMainWindow")
+            ax_title = str(attr(focused, "AXTitle") or "") if focused is not None else ""
+        except Exception:
+            ax_title = ""
+        titled = [w for w in app_windows if w["title"]]
+        if ax_title:
+            same = [w for w in titled if ax_title.startswith(w["title"]) or w["title"].startswith(ax_title)]
+            if same:
+                return same[0]
+        on_screen = [w for w in titled if w["on_screen"]]
+        return (on_screen or titled or app_windows)[0]
+
+    if words:
+        scored = sorted(((_title_score(words, w["title"]), i, w) for i, w in enumerate(pool)),
+                        key=lambda s: (-s[0], s[1]))
+        top = [s for s in scored if s[0] >= 0.5 and s[0] == scored[0][0]] if scored else []
+        if not top:
+            browsers = [b for b in running_browsers if not named or b in named]
+            tab = _find_tab(words, browsers) if browsers else None
+            if tab:
+                return {"tab": tab}
+            if not named:
+                listed = "; ".join(_window_label(w) for w in windows[:12] if w["title"])
+                try:
+                    from mint.tools.appfinder import resolve
+                    resolved, how = resolve(target) if target else (None, "")
+                except Exception:
+                    resolved, how = None, ""
+                if resolved and not how.startswith("closest") and not title:
+                    return {"error": f"{resolved} has no open window (is it running?). Windows open: {listed}"}
+                return {"error": f"no window or tab matches '{target or title}'. Windows open: {listed}"}
+            if title:
+                listed = "; ".join(_window_label(w) for w in pool[:12] if w["title"])
+                return {"error": f"no {'/'.join(sorted(named))} window or tab has '{title}' in its title. Its "
+                                 f"windows: {listed or 'none with a title'}"}
+            note = f" (no {'/'.join(sorted(named))} window has '{' '.join(words)}' in its title - took its main one)"
+            words = []
+        else:
+            distinct = {w["title"] for _, _, w in top}
+            if len(distinct) > 1:
+                return {"choices": [w for _, _, w in top]}
+            chosen = top[0][2]
+    if not words:
+        if not pool:
+            return {"error": "no window of the front app" if not target else
+                    f"no window of {'/'.join(sorted(named)) or target} is open"}
+        if len(named) > 1:
+            return {"choices": [front_of([w for w in pool if w["app"] == app]) for app in sorted(named)]}
+        if not named:
+            front = _front_app()
+            mine = [w for w in pool if front is not None and w["pid"] == front.processIdentifier()]
+            if not mine:
+                return {"error": "no window of the front app"}
+            pool = mine
+        chosen = front_of(pool)
+        others = [w for w in pool if w["title"] and w["title"] != chosen["title"]
+                  and w["box"][2] >= 200 and w["box"][3] >= 150]
+        if others:
+            note += (f" ({chosen['app']} has {len(others) + 1} windows; the others: "
+                     + "; ".join(f"'{w['title'][:50]}'" for w in others[:5]) + ")")
+    return {"window": chosen, "group": _group(chosen, windows), "note": note}
+
+
+def _blank(image) -> bool:
+    """A picture of nothing: fully transparent, black, or one flat colour (a page a hidden window never
+    painted comes out as its bare background)."""
+    small = image.convert("RGBA").resize((96, 96))
+    if small.getchannel("A").getextrema()[1] < 8:
+        return True
+    rgb = small.convert("RGB")
+    if max(hi for _, hi in rgb.getextrema()) < 10:
+        return True
+    from PIL import ImageStat
+    return max(ImageStat.Stat(rgb).stddev) < 1.5
+
+
+def _write_cgimage(image, path: Path, fmt: str) -> bool:
+    import AppKit
+    rep = AppKit.NSBitmapImageRep.alloc().initWithCGImage_(image)
+    kind = AppKit.NSBitmapImageFileTypeJPEG if fmt == "jpg" else AppKit.NSBitmapImageFileTypePNG
+    props = {AppKit.NSImageCompressionFactor: 0.9} if fmt == "jpg" else {}
+    data = rep.representationUsingType_properties_(kind, props)
+    return bool(data) and bool(data.writeToFile_atomically_(str(path), True))
+
+
+def _cg_window_image(ids: list[int], path: Path, fmt: str) -> str:
+    """The window server's picture of the windows `ids` (front first), composited: '' or why not."""
+    try:
+        import Quartz
+        make = getattr(Quartz, "CGWindowListCreateImageFromArray", None)
+        if make is None:
+            return "CGWindowListCreateImageFromArray is gone"
+        image = make(Quartz.CGRectNull, ids, Quartz.kCGWindowImageBoundsIgnoreFraming
+                     | Quartz.kCGWindowImageBestResolution)
+        if image is None or Quartz.CGImageGetWidth(image) < 2:
+            return "the window server gave no image"
+        return "" if _write_cgimage(image, path, fmt) else "could not write the file"
+    except Exception as error:
+        return f"window server: {error}"
+
+
+def _helper_shot(ids: list[int], path: Path) -> str:
+    """ScreenCaptureKit through MintScreen shot: '' or why not."""
+    try:
+        from mint.tools.screenrec import helper_path
+        binary = helper_path()
+    except Exception:
+        binary = None
+    if binary is None:
+        return "MintScreen is not installed"
+    command = [str(binary), "shot", "--out", str(path)]
+    for window_id in ids:
+        command += ["--window-id", str(window_id)]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
+                              check=False)
+    except subprocess.TimeoutExpired:
+        return "MintScreen timed out"
+    if done.returncode == 0 and path.exists() and path.stat().st_size:
+        return ""
+    lines = (done.stdout or "").strip().splitlines()
+    return lines[-1][:200] if lines else (done.stderr or "MintScreen failed").strip()[:200]
+
+
+def _main_part_blank(path: Path, group: list[dict]) -> bool:
+    """Whether the main window's part of the picture (the first of `group`, composited at the windows'
+    screen positions) shows nothing - the toolbar strips above it do not count."""
+    from PIL import Image
+    try:
+        with Image.open(path) as image:
+            image.load()
+            boxes = [w["box"] for w in group]
+            left, top = min(b[0] for b in boxes), min(b[1] for b in boxes)
+            right = max(b[0] + b[2] for b in boxes)
+            k = image.width / max(1.0, right - left)
+            x, y, w, h = group[0]["box"]
+            part = image.crop((round((x - left) * k), round((y - top) * k),
+                               round((x - left + w) * k), round((y - top + h) * k)))
+            return _blank(part)
+    except Exception:
+        return True
+
+
+def _capture_windows(group: list[dict], path: Path, fmt: str) -> tuple[bool, str, bool]:
+    """Capture group[0] (with the rest composited): (saved, how or what failed, the main part is blank).
+    A blank picture is kept only if no route gives a better one."""
+    ids = [w["id"] for w in group]
+    tried, blank_copy = [], path.with_name(path.name + ".blank")
+    for how in ("window server", "ScreenCaptureKit", "screencapture"):
+        path.unlink(missing_ok=True)
+        if how == "window server":
+            why = _cg_window_image(ids, path, fmt)
+        elif how == "ScreenCaptureKit":
+            why = _helper_shot(ids, path)
+        else:
+            if len(ids) > 1 and not blank_copy.exists():
+                continue            # a lone page without its toolbar only as a last resort
+            done = subprocess.run(["screencapture", "-x", "-o", "-t", fmt, "-l", str(ids[0]), str(path)],
+                                  capture_output=True, text=True, timeout=20, check=False)
+            why = "" if path.exists() and path.stat().st_size else (done.stderr or "failed").strip()[:120]
+        if not why and _main_part_blank(path, group if how != "screencapture" else group[:1]):
+            if not blank_copy.exists():
+                path.replace(blank_copy)
+            why = "the window came out empty (not drawn)"
+        if not why:
+            blank_copy.unlink(missing_ok=True)
+            return True, how, False
+        tried.append(f"{how}: {why}")
+        log.info("window shot %s: %s", how, why)
+    path.unlink(missing_ok=True)
+    if blank_copy.exists():
+        blank_copy.replace(path)
+        return True, "; ".join(tried), True
+    return False, "; ".join(tried), False
+
+
+def _visit_and_capture(window: dict, path: Path, fmt: str) -> tuple[bool, str, bool]:
+    """For a window the user named that came out empty or not at all: bring it forward (switching to
+    its Space), capture it, and go back to the app that was in front."""
+    import AppKit
+    import Quartz
+    previous = _front_app()
+    app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(window["pid"])
+    if app is None:
+        return False, "the app quit", False
+    try:
+        import ApplicationServices as AX
+        from mint.tools.agentapps import _window as ax_window
+        from mint.screen.axkit import attr
+        AX.AXUIElementSetAttributeValue(AX.AXUIElementCreateApplication(window["pid"]), "AXFrontmost", True)
+        element = ax_window(window["pid"], window["title"]) if window["title"] else None
+        if element is not None:
+            if attr(element, "AXMinimized"):
+                AX.AXUIElementSetAttributeValue(element, "AXMinimized", False)
+            AX.AXUIElementPerformAction(element, "AXRaise")
+    except Exception as error:
+        log.info("raise %s: %s", window["id"], error)
+    app.activateWithOptions_(0)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        shown = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+        if any(int(w["kCGWindowNumber"]) == window["id"] for w in shown or []):
+            break
+        time.sleep(0.1)
+    try:
+        for wait in (0.8, 1.2):                 # the Space slide, then the page paints
+            time.sleep(wait)
+            ok, how, blank = _capture_windows(_group(window, _all_windows()), path, fmt)
+            if ok and not blank:
+                break
+    finally:
+        if previous is not None and previous.processIdentifier() != window["pid"]:
+            previous.activateWithOptions_(0)
+    return ok, how + " (after switching to it and back)", blank
+
+
+def _shoot_window(target: str, title: str, path: Path, fmt: str) -> tuple[str, str, tuple | None]:
+    """(error or '', what was captured, its box) for what=window."""
+    picked = _pick_window(target, title)
+    if "error" in picked:
+        return ("FAILED: " + picked["error"] + ". Give the app (target) and/or words from the window or tab title "
+                "(title)."), "", None
+    if "choices" in picked:
+        lines = "; ".join(f"{_window_label(w)}" + ("" if w["on_screen"] else " (another Space)")
+                          for w in picked["choices"][:8])
+        return (f"AMBIGUOUS: several windows match - {lines}. Ask the user which one, then call again with "
+                "target = the app and title = words from that window's title. Nothing was captured."), "", None
+    if "tab" not in picked:
+        return _shoot_picked(picked, path, fmt, visit=bool(target or title))
+    app, window_index, tab_index, active, tab_title = picked["tab"]
+    restore = None
+    if tab_index != active:
+        _set_tab(app, window_index, tab_index)
+        restore = (app, window_index, active)
+    try:
+        deadline = time.monotonic() + 2.5
+        while time.monotonic() < deadline:
+            windows = _all_windows()
+            hits = [w for w in windows if w["app"] == app and w["title"]
+                    and (tab_title.startswith(w["title"]) or w["title"].startswith(tab_title))]
+            if hits:
+                if restore:
+                    time.sleep(0.5)             # the page paints (if its window is showing)
+                note = " (its tab was brought to the front for the picture, then put back)" if restore else ""
+                return _shoot_picked({"window": hits[0], "group": _group(hits[0], windows), "note": note},
+                                     path, fmt, visit=True)
+            time.sleep(0.15)
+        return f"FAILED: could not find the {app} window showing '{tab_title[:60]}'.", "", None
+    finally:
+        if restore:
+            _set_tab(*restore)
+
+
+def _shoot_picked(picked: dict, path: Path, fmt: str, visit: bool) -> tuple[str, str, tuple | None]:
+    window = picked["window"]
+    ok, how, blank = _capture_windows(picked["group"], path, fmt)
+    if (not ok or blank) and visit and not window["on_screen"]:
+        ok2, how2, blank2 = _visit_and_capture(window, path.with_name("visit-" + path.name), fmt)
+        if ok2 and (not blank2 or not ok):
+            path.unlink(missing_ok=True)
+            path.with_name("visit-" + path.name).replace(path)
+            ok, how, blank = ok2, how2, blank2
+        else:
+            path.with_name("visit-" + path.name).unlink(missing_ok=True)
+    if not ok:
+        return (f"FAILED: could not capture {_window_label(window)} ({how}). Mint may need Screen Recording "
+                "permission (System Settings > Privacy & Security > Screen & System Audio Recording)."), "", None
+    where = "" if window["on_screen"] else ", which is in another Space"
+    empty = " - it came out empty: the app is not drawing that window right now" if blank else ""
+    described = f"the {_window_label(window)} window{where}{picked.get('note', '')}{empty}"
+    return "", described, (window["box"] if window["on_screen"] else None)
+
+
 def _display_of(point) -> int:
     """screencapture's -D number (1-based, CGGetActiveDisplayList order) of the display holding `point`."""
     import Quartz
@@ -1174,10 +1674,32 @@ def screenshot(args: dict) -> str:
     save = args["save"] if isinstance(args.get("save"), bool) else where in ("both", "file")
     stamp = datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S")
     name = str(args.get("name") or "").strip()
-    name = re.sub(r"[/:]", "-", name) if name else f"Mint Screenshot {stamp}"
-    if not name.lower().endswith("." + fmt):
-        name += "." + fmt
+    raw = str(args.get("path") or "").strip()
+    if not raw and (name.startswith("~") or "/" in name):
+        raw, name = name, ""                # "~/MintBench/x.png" given as the name: a path, not a file name
     folder = _save_folder() if save else Path("/tmp")
+    if raw:
+        given = Path(os.path.expanduser(raw))
+        if not given.is_absolute():
+            given = _save_folder() / given
+        if raw.endswith("/") or given.is_dir() or not given.suffix:
+            folder = given
+        else:
+            folder, name = given.parent, given.name
+        if Path(name).suffix.lower() in (".jpg", ".jpeg", ".png") and not args.get("format"):
+            fmt = "png" if Path(name).suffix.lower() == ".png" else "jpg"
+        from mint.tools.harness import _blocked
+        why = _blocked(folder / (name or "x.png"), write=True)
+        if why:
+            return f"FAILED: {why}"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            return f"FAILED: cannot make the folder {_short(str(folder))}: {error.strerror or error}"
+        save = args["save"] if isinstance(args.get("save"), bool) else True    # a place was asked for
+    name = re.sub(r"[/:]", "-", name) if name else f"Mint Screenshot {stamp}"
+    if Path(name).suffix.lower() not in ("." + fmt, ".jpeg" if fmt == "jpg" else ".png"):
+        name += "." + fmt
     path = folder / name
     number = 2
     while path.exists():                    # "name (2).png", like Finder
@@ -1187,16 +1709,10 @@ def screenshot(args: dict) -> str:
     command = ["screencapture", "-x", "-t", fmt]
     described, box = "", None
     if what == "window":
-        info = _front_window_info(target)
-        if info is None:
-            if not target:
-                return "FAILED: no window of the front app is on screen."
-            return (f"FAILED: no window of {target} is on screen ('{target}' is neither a running app nor in the "
-                    "title of a window on this screen). Give the app's name as target (e.g. Google Chrome), or no "
-                    "target for the front window.")
-        window_id, box, app = info
-        command += ["-o", "-l", str(window_id)]
-        described = f"the {app} window"
+        error, described, box = _shoot_window(target, str(args.get("title") or "").strip(), path, fmt)
+        if error:
+            return error
+        command = []
     elif what == "element":
         found = _element_box(target)
         if found is None:
@@ -1242,17 +1758,15 @@ def screenshot(args: dict) -> str:
         display = _display_of((info[1][0] + info[1][2] / 2, info[1][1] + info[1][3] / 2)) if info else 1
         command += ["-D", str(display)]
         described = "the whole screen" if display == 1 else f"display {display}"
-    command.append(str(path))
-
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=90 if what == "select" else 20,
-                              check=False)
+        done = subprocess.run(command + [str(path)], capture_output=True, text=True,
+                              timeout=90 if what == "select" else 20, check=False) if command else None
     except subprocess.TimeoutExpired:
         return "FAILED: the screenshot timed out (no area was selected)."
     if not path.exists() or path.stat().st_size == 0:
         if what == "select":
             return "No screenshot: the selection was cancelled."
-        detail = (done.stderr or "").strip()[:200]
+        detail = (done.stderr or "").strip()[:200] if done is not None else ""
         return (f"FAILED: macOS did not take the screenshot{': ' + detail if detail else ''}. Mint may need Screen "
                 "Recording permission (System Settings > Privacy & Security > Screen & System Audio Recording).")
     note = _resize(path, size) if size else ""
