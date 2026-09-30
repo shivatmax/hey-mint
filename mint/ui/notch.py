@@ -51,7 +51,8 @@ PAD_X = 16             # text inset from the shape's sides
 BTN, STEP = 26, 32     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
-PEEK_AFTER, FULL_AFTER = 0.55, 2.0   # a short rest peeks the controls; staying opens the full notch (seconds)
+PEEK_AFTER, PIN_AWAY = 0.55, 6.0     # a short rest peeks the controls; a clicked-open notch folds after this long unvisited
+FACE_PULL = 30.0                     # how far (points) the little Mint is pulled before it lets go of the notch
 HOME_W, BODY_H = 640, 150          # the open notch on hover (boring.notch's size): header row + body
 BIG_W, BIG_H = 760, 430            # the notch grown for search results ("show more", 3x3 / 3x2 / 3x1)
 SIDE_W = HOME_W - 32 - PLAYER_W - 12   # the right-hand pane: the week calendar or the battery
@@ -127,8 +128,29 @@ class MintNotchView(AppKit.NSView):
         return True
 
     def mouseDown_(self, event):
-        if self.owner is not None:
+        self._moved = False
+        self._face = (self.owner is not None and self.owner.on_face(
+            self.convertPoint_fromView_(event.locationInWindow(), None)))
+        self._start = event.locationInWindow()
+
+    def mouseDragged_(self, event):
+        if not getattr(self, "_face", False) or self.owner is None:
+            return
+        where = event.locationInWindow()
+        dx, dy = where.x - self._start.x, where.y - self._start.y
+        if not self._moved and abs(dx) + abs(dy) < 3:
+            return
+        self._moved = True
+        if self.owner.face_drag(dx, dy):
+            self._face = False                   # it went out: the rest of this drag is over
+
+    def mouseUp_(self, event):
+        if getattr(self, "_moved", False):
+            if self.owner is not None:
+                self.owner.face_release()
+        elif self.owner is not None:
             self.owner.clicked()
+        self._face = self._moved = False
 
     def rightMouseDown_(self, event):
         if self.owner is not None:
@@ -151,6 +173,14 @@ class MintNotchView(AppKit.NSView):
 
     def performDragOperation_(self, sender):
         return bool(self.owner is not None and self.owner.dropped(sender.draggingPasteboard()))
+
+
+class MintNotchLabel(AppKit.NSTextField):
+    """Text that never takes a click: a label faded to nothing still sat over the buttons of the small
+    row (the Mint pane's title and hint), so pressing them did nothing."""
+
+    def hitTest_(self, point):
+        return None
 
 
 class MintNotchButton(AppKit.NSButton):
@@ -213,6 +243,7 @@ class Notch:
         self.battery_peek_until = 0.0        # plugged in / unplugged: the wings show it for a moment
         self.battery_event = ""
         self.drag_until = 0.0                # a file is being dragged near the notch: open on the shelf
+        self.pinned = False                  # opened by a click: the full notch stays until clicked again
         self.search_until = 0.0              # Mint just showed files/apps: the notch stays open on Search
         self._paused_since = 0.0             # when the song in the wings was paused
         self._mint_words = ""                # what Mint is saying (the open notch's Mint pane shows it)
@@ -339,7 +370,7 @@ class Notch:
             AppKit.NSApplicationDidChangeScreenParametersNotification, None, None, lambda note: self._moved())
 
     def _label(self, size, color, weight, lines=1):
-        field = AppKit.NSTextField.wrappingLabelWithString_("")
+        field = MintNotchLabel.wrappingLabelWithString_("")
         field.setFont_(AppKit.NSFont.systemFontOfSize_weight_(size, weight))
         field.setTextColor_(color)
         field.setMaximumNumberOfLines_(lines)
@@ -471,11 +502,15 @@ class Notch:
                 self.hover_since = now
         elif now - self.left_at > 0.1:                  # closes a beat after the pointer leaves
             self.hover_since = 0.0
+        # The full notch opens and closes by CLICKING it (a click anywhere on it but a button); hovering only
+        # ever shows the small row. Left alone for a while, an opened notch folds back by itself.
+        if self.pinned and not (inside or near_notch) and now - self.left_at > PIN_AWAY:
+            self.pinned = False
         # Two stages, so crossing the notch on the way somewhere doesn't throw the whole thing open:
         # a short rest shows the few controls that matter; staying on it opens the full notch.
         rested = now - self.hover_since if self.hover_since else 0.0
         peeking = rested > PEEK_AFTER
-        hovering = rested > FULL_AFTER
+        hovering = self.pinned
         chat_open = getattr(getattr(hud, "chat", None), "is_open", False)
         state = getattr(hud, "_state", "")
         activity = getattr(hud, "_activity", None)
@@ -1377,9 +1412,12 @@ class Notch:
     # --- clicks --------------------------------------------------------------------------------
 
     def clicked(self) -> None:
-        """A click on the notch itself does nothing (the chat has its own icon); it only closes an open chat."""
+        """A click on the notch (not on one of its buttons) opens the full notch, or folds it back; with the
+        chat open it closes the chat. The chat has its own button."""
         if getattr(getattr(self.hud, "chat", None), "is_open", False):
             self._chat()
+            return
+        self.pinned = not self.pinned
 
     def _chat(self) -> None:
         self.hud._fire("console")
@@ -1390,6 +1428,50 @@ class Notch:
 
     def _menu_from_button(self) -> None:
         self._popup(None)
+
+    # --- drag the little Mint out: the notch gives way to the orb ---------------------------------
+
+    def on_face(self, point) -> bool:
+        x, y = self.face_center
+        return self.phase == "on" and (point.x - x) ** 2 + (point.y - y) ** 2 <= (FACE / 2 + 6) ** 2
+
+    def face_drag(self, dx: float, dy: float) -> bool:
+        """The face follows the pointer a little, like something held by an elastic; pulled far enough it
+        lets go: Mint leaves the notch (the orb drops out) and stays the orb. True once it has."""
+        pull = math.hypot(dx, dy)
+        if pull >= FACE_PULL:
+            self._face_reset(animated=False)
+            self.pinned = False
+            print("  [display: the little Mint was pulled out of the notch]", flush=True)
+            prefs.set(PREF, False)              # the orb mode, for good (it plays the drop-out animation)
+            return True
+        stretch = 1.0 + 0.16 * pull / FACE_PULL
+        give = min(1.0, pull / FACE_PULL) * 10.0 / max(pull, 0.001)        # at most 10 pt of give
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        # The host layer covers the whole window and turns about its middle: scale about the face instead.
+        rx, ry = self.face_center[0] - WIN_W / 2, self.face_center[1] - WIN_H / 2
+        t = Quartz.CGAffineTransformIdentity
+        t = Quartz.CGAffineTransformTranslate(t, dx * give, dy * give)         # (each call acts first)
+        t = Quartz.CGAffineTransformTranslate(t, rx, ry)
+        t = Quartz.CGAffineTransformScale(t, stretch, stretch)
+        t = Quartz.CGAffineTransformTranslate(t, -rx, -ry)
+        self.face_host.setAffineTransform_(t)
+        Quartz.CATransaction.commit()
+        return False
+
+    def face_release(self) -> None:
+        self._face_reset(animated=True)         # let go early: it springs back
+
+    def _face_reset(self, animated: bool) -> None:
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(not animated)
+        if animated:
+            Quartz.CATransaction.setAnimationDuration_(0.3)
+            Quartz.CATransaction.setAnimationTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
+                Quartz.kCAMediaTimingFunctionEaseOut))
+        self.face_host.setAffineTransform_(Quartz.CGAffineTransformIdentity)
+        Quartz.CATransaction.commit()
 
     def right_clicked(self, event, view) -> None:
         self._popup(event)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 (2026-10-01)
+
+- **Notch you control:** hovering only shows the small row of controls; a click on the notch opens the full notch
+  and a second click folds it back (it also folds by itself after a few unvisited seconds). Drag the little Mint
+  away from the notch to pull it out: it stretches on an elastic, springs back if let go, and leaves the notch
+  (orb mode) when pulled far enough.
+- **Fixed:** the small row's buttons (mic, voice, chat, sleep, eye, menu) didn't react to clicks: the full notch
+  opened under the pointer while reaching for them, and a faded-out label sat over them.
+
 ## 0.5.0 (2026-10-01)
 
 - **Files into apps** (`mint/tools/handoff.py`): "compress it with Keka", "open these in Preview", "extract this".
