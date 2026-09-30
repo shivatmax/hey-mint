@@ -22,7 +22,9 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 <br>
 
-https://github.com/user-attachments/assets/24e6249c-3859-4013-8a46-baf96e40488b
+https://github.com/user-attachments/assets/0ba21b27-d906-49d5-9c69-f29ad3a530ee
+
+
 
 <p align="center">
   <sub>▶ <b>The 1-minute film</b> · unmute for the voiceover · also on <a href="https://youtu.be/OfXFNvbwlT0">YouTube</a></sub>
