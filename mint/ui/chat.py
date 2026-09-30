@@ -558,7 +558,14 @@ class ChatPanel:
     def set_status(self, state: str, text: str, busy: bool) -> None:
         self._dot.setBackgroundColor_(gfx.cg(gfx.state_rgb(state)))
         self._status.setStringValue_(text)
+        self._status.setToolTip_(text)
         self._stop.setHidden_(not busy)
+        # The status gets all the room left of the header buttons (the Stop button only while busy),
+        # rather than a fixed 80 pt that cut "Mic off" and task names short.
+        leftmost = W - PAD - 26 - (210 if busy else 180)
+        frame = self._status.frame()
+        self._status.setFrame_(AppKit.NSMakeRect(frame.origin.x, frame.origin.y,
+                                                 max(60, leftmost - frame.origin.x - 6), frame.size.height))
         # (The state shows in the header dot; the field keeps its hairline, as in Messages.)
 
     def progress(self, done: int, total: int, label: str = "") -> None:

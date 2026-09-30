@@ -182,7 +182,7 @@ _RO_TEXT = {
 }
 _RO_ACTIONS = {"notifications": {"dismiss", "clear_all"}, "file_action": {"trash"}, "tidy": {"remove_duplicates"},
                "clipboard": {"forget_secret", "clear"}, "automation": {"delete"},
-               "make_shortcut": {"create", "add"}}
+               "make_shortcut": {"create", "add"}, "connector": {"create", "remove", "connect", "run"}}
 _RO_TOOLS = {"forget", "delete_skill"}
 
 _EXTS = ("png|jpe?g|gif|heic|webp|pdf|docx?|xlsx?|csv|pptx?|key|pages|numbers|txt|md|html?|rtf|json|"

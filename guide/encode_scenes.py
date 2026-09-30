@@ -111,7 +111,7 @@ def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:
     on - the real screen showing through (a switch to a full-screen Space, say)."""
     scan = Path("/tmp/_raw_scan")
     subprocess.run(["rm", "-rf", str(scan)], check=False)
-    scan.mkdir()
+    scan.mkdir(parents=True, exist_ok=True)
     cmd = ["ffmpeg", "-y", "-v", "error", "-ss", str(start), "-i", str(src)]
     if length:
         cmd += ["-t", str(length)]

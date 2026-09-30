@@ -534,9 +534,12 @@ def prompt_text() -> str:
     from mint.tools import harness as harness_tools
     from mint.knowledge import journal
     from mint.tools import mac as macctl
+    from mint.tools import apple_apps
     from mint.tools import calc
+    from mint.tools import connector_maker
     from mint.tools import imagegen
     from mint.tools import merge
+    from mint.tools import music
     from mint.tools import notifications
     from mint.tools import shortcut_maker
     from mint.tools import undo
@@ -558,7 +561,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, music.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)
@@ -781,7 +784,7 @@ def _skill_hint(app_name: str) -> str:
     return f"\n[Saved skills for {app_name}: {titles}. Call find_skill with the task to load one.]"
 
 
-_NO_CONTEXT = {"step_done", "task", "automation", "stop_listening", "express", "set_voice", "get_status",
+_NO_CONTEXT = {"music", "step_done", "task", "automation", "stop_listening", "express", "set_voice", "get_status",
                "set_preference", "show_chat", "notify", "set_timer", "media_key", "set_volume"}
 _skill_asked = {"at": 0.0}
 

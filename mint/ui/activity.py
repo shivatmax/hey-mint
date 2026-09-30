@@ -78,6 +78,12 @@ _BUNDLES = {
 
 
 def kind(name: str) -> str:
+    if name not in _KIND:
+        try:
+            from mint.tools import apple_apps
+            return apple_apps.KINDS.get(name, "think")
+        except Exception:
+            pass
     return _KIND.get(name, "think")
 
 
@@ -296,6 +302,26 @@ def phrase(name: str, args: dict) -> str:
                     "right_click": "Right-clicking at your pointer"}.get(str(a.get("action", "where")), "Pointer")
         case "plan_task":
             return f"Planning · {_quote(a.get('goal', ''), 44)}"
+        case "music":
+            return {"play": f"Playing · {_quote(a.get('query') or 'music', 30)}", "pause": "Pausing the music",
+                    "resume": "Resuming the music", "next": "Next song", "previous": "Previous song",
+                    "now_playing": "Checking what's playing",
+                    "volume": f"Music volume · {a.get('value', '')}".rstrip(" ·")}.get(
+                str(a.get("action") or "play"), "Music")
+        case "connector":
+            return {"list": "Checking connectors", "status": f"Checking {_quote(a.get('name') or '', 24)}",
+                    "connect": f"Connecting {_quote(a.get('name') or '', 24)}",
+                    "make": f"Planning a connector · {_quote(a.get('name') or '', 26)}",
+                    "create": "Saving the connector",
+                    "run": f"{_quote(a.get('connector') or '', 18)} · {_quote(a.get('do') or '', 20)}",
+                    "test": "Testing a connector", "remove": "Removing a connector"}.get(
+                str(a.get("action") or "list"), "Connectors").rstrip(" ·")
+    try:
+        from mint.tools import apple_apps
+        if name in apple_apps.HANDLERS:
+            return apple_apps.label(name, a)
+    except Exception:
+        pass
     return name.replace("_", " ").capitalize()
 
 
@@ -307,6 +333,13 @@ def app_hint(name: str, args: dict) -> tuple[str, str] | None:
         return ("name", str(args["name"]))
     if name == "switch_to" and args.get("what"):
         return ("name", str(args["what"]))
+    if name not in _BUNDLES:
+        try:
+            from mint.tools import apple_apps
+            if name in apple_apps.BUNDLES:
+                return ("bundle", apple_apps.BUNDLES[name])
+        except Exception:
+            pass
     if name in _BUNDLES:
         return ("bundle", _BUNDLES[name])
     return None

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Music: Spotify and Apple Music** (`mint/tools/music.py`, `mint/ui/music_player.py`): "play Blinding Lights",
+  "play some lo-fi", "next", "pause", "what's playing", volume, shuffle, repeat, seek. Spotify links are found
+  without a Spotify login or developer account; genres use Spotify's own playlists. A mini player (cover, progress,
+  controls) shows while music plays; in notch mode the notch becomes the player (cover and bars in its wings,
+  controls on hover). Settings ▸ Appearance turns it off.
+- **Apple apps, all the way** (`mint/tools/apple_apps.py`): Notes (search, read, add to, change, rename, move),
+  Reminders (due/overdue, complete, reschedule, move), Calendar (move, rename, edit; clash warnings), Contacts
+  (lookups), Maps (directions and travel time), Safari (Reading List, bookmarks), Photos (find, export copies) and
+  Pages/Keynote/Numbers (new documents). Every change can be undone; deleting only when asked.
+- **Settings ▸ Connectors** (`mint/tools/connectors.py`, `connector_maker.py`): everything Mint can connect to and
+  its status on this Mac, and "integrate <app>": Mint reads an app's scripting dictionary, plans a small tested
+  connector and saves it after a yes. Connectors only talk to their own app and never send, delete or pay unless
+  asked in that request.
+- **Fixed:** a tool schema with an empty choice made the voice session refuse to connect; a new test
+  (`tests/test_declarations.py`) checks every tool against the Live API's rules. Settings text no longer gets cut off.
+
 ## 0.4.0 (2026-09-30)
 
 - **Notch mode (Dynamic Island at the camera):** Mint can live in the MacBook notch instead of the floating orb -

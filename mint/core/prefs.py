@@ -69,6 +69,7 @@ DEFAULTS: dict = {
     "notch_controls": True,     # notch mode: controls when the pointer rests on the notch
     "notch_idle_face": True,    # notch mode: the little Mint beside the camera when idle (off: a plain notch)
     "notch_playful": True,      # notch mode: bouncy springs, hops, breathing with the voice
+    "notch_music": True,        # notch mode: what's playing in the notch (artwork, bars, the player on hover)
     "word_animation": True,
     "voice": True,
     "mic": True,
@@ -119,6 +120,8 @@ DEFAULTS: dict = {
     "wake_models": [],
     # Shortcuts (the Shortcuts app) Mint may not run, by name; empty = all allowed.
     "shortcuts_blocked": [],
+    # The mini music player shows by itself when music starts (Spotify / Music).
+    "music_player_auto": True,
     # Updates of the packaged app: checked at launch and every 12 h, installed while the Mac is idle.
     "auto_update": True,
     "update_channel": "stable",

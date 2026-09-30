@@ -13,6 +13,7 @@ Pages
   Appearance        theme, position, face, effects
   Shortcuts         keys for the chat, talking, dictation, the clipboard
   Accounts & keys   API keys (Gemini required, OpenAI and TypeSafe optional), Google via Internet Accounts
+  Connectors        the apps and services Mint works with, their status, and making new ones
   Skills & Memory   counts, and the window to edit them
   Storage & Privacy the Mint folder, meetings, clipboard, the activity timeline
   Usage             tokens per model: today, 7 days, 30 days
@@ -74,7 +75,8 @@ PAGES = [("general", "General", "gearshape"), ("voice", "Voice & wake word", "wa
          ("speaking", "Speaking", "person.wave.2"), ("audio", "Audio", "speaker.wave.2"),
          ("looks", "Appearance", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
          ("apple_shortcuts", "Apple Shortcuts", "square.stack.3d.up"),
-         ("accounts", "Accounts & keys", "key"), ("models", "Models & agents", "cpu"),
+         ("accounts", "Accounts & keys", "key"), ("connectors", "Connectors", "puzzlepiece.extension"),
+         ("models", "Models & agents", "cpu"),
          ("brain", "Skills & Memory", "brain"),
          ("storage", "Storage & Privacy", "lock.shield"), ("usage", "Usage", "chart.bar"),
          ("help", "Updates & Help", "questionmark.circle")]
@@ -677,14 +679,17 @@ class SettingsWindow:
         self._row_popup(page, "position", "Position", POSITIONS, w=200)
         self._row_switch(page, "face", "Face on the orb")
         self._row_switch(page, "cursor_effects", "On-screen effects", "Sparks, ripples and highlights.")
+        self._row_switch(page, "music_player_auto", "Music player",
+                         "A mini player with the song, art and controls when Spotify or Music plays.")
         page.end()
         page.section("Notch (Dynamic Island)")
         self._row_switch(page, "notch_mode", "Mint lives in the notch",
-                         "Like the iPhone's Dynamic Island, at the camera. Mint restarts to change its look.")
+                         "Like the iPhone's Dynamic Island, at the camera. Switching plays live: the orb flies in, or drops out.")
         self._row_switch(page, "notch_words", "Words in the notch", "What Mint says, word by word, as it drops down.")
         self._row_switch(page, "notch_controls", "Controls on hover", "Mic, voice, chat, sleep and more when you point at it.")
         self._row_switch(page, "notch_idle_face", "Little Mint when idle", "Off: a plain notch until something happens.")
         self._row_switch(page, "notch_playful", "Playful motion", "Bouncy springs, a hop as it opens, breathing with the voice.")
+        self._row_switch(page, "notch_music", "Music in the notch", "Artwork and dancing bars while something plays; the player when you point at it.")
         page.end()
 
     def _page_shortcuts(self, page) -> None:
@@ -1044,6 +1049,10 @@ class SettingsWindow:
             from mint.app import telegram
             telegram.refresh()
         self.refresh()
+
+    def _page_connectors(self, page) -> None:
+        from mint.ui import settings_connectors
+        settings_connectors.page(self, page)
 
     def _page_models(self, page) -> None:
         from mint.ui import settings_models

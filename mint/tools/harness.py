@@ -282,7 +282,7 @@ def _password_field() -> bool:
 def check(name: str, args: dict, result: str) -> str:
     """The loop warning to add to `result`, or ''."""
     now = time.monotonic()
-    if name in _EXEMPT or name in {"scroll", "press_key", "media_key", "set_volume"} or (
+    if name in _EXEMPT or name in {"scroll", "press_key", "media_key", "set_volume", "music"} or (
             name == "browser" and str((args or {}).get("action")) in {"scroll", "back", "forward", "reload", "read"}):
         _outcomes.append(_failed(result))
         return ""

@@ -1844,6 +1844,8 @@ class Mint:
         usage.install()                     # token counts per model for Settings ▸ Usage
         from mint.app import updater
         updater.start(can_install=self._can_unload)   # "Updated to vX" card, checks, idle install
+        from mint.tools import music
+        music.start_service()               # now-playing watcher + the mini player
         from mint.tools import clipboard as clip_tools
         clip_tools.start_watching()         # the clipboard history, from the start (it survives restarts)
         from mint.knowledge import teach

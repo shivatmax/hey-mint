@@ -164,6 +164,12 @@ def _run(spec: dict) -> tuple[bool, str, dict | None]:
     """Run one inverse -> (worked, what it said, the redo)."""
     fn = _INVERSES.get(str((spec or {}).get("kind")))
     if fn is None:
+        try:
+            from mint.tools import apple_apps  # noqa: F401  (registers its inverses: note_body, note_move, reminder/event_restore)
+        except Exception as error:
+            log.info("undo: apple_apps inverses unavailable: %s", error)
+        fn = _INVERSES.get(str((spec or {}).get("kind")))
+    if fn is None:
         return False, f"FAILED: Mint doesn't know how to undo '{(spec or {}).get('kind')}'.", None
     outer, was = getattr(_local, "caught", None), replaying()
     _local.caught, _local.replaying = [], True
@@ -661,7 +667,8 @@ undo action=last; "undo the last 3 things" -> count=3; "undo the brightness chan
 action=last match=<those words>; "what can you undo?" -> action=list; "redo" right after an undo -> action=redo. \
 It covers brightness, volume, mute, dark mode, Do Not Disturb, Night Shift, keep awake, Wi-Fi, window layouts, text \
 you typed or rewrote, clipboard changes, files you moved, renamed, trashed, created or edited, tidy-ups, reminders \
-and notes you created, and your own settings. Say in one line what was reversed. A sent message or email, a \
+and notes you created, notes you edited, moved or deleted, reminders and calendar events you changed or deleted, \
+and your own settings. Say in one line what was reversed. A sent message or email, a \
 purchase or anything done on a web page can't be undone - say so plainly, never pretend."""
 
 
@@ -673,7 +680,8 @@ def declarations():
         description=("Undo what Mint itself did in the last 24 hours, newest first: switches (brightness, volume, "
                      "mute, dark mode, Do Not Disturb, Night Shift, keep awake, Wi-Fi), window layouts, text Mint "
                      "typed or rewrote, clipboard changes, files Mint moved/renamed/trashed/created/edited, "
-                     "tidy-ups, reminders and notes Mint created, Mint's own settings. Actions: last (undo the "
+                     "tidy-ups, reminders and notes Mint created, notes / reminders / events Mint changed or "
+                     "deleted, Mint's own settings. Actions: last (undo the "
                      "newest `count`, or the newest matching `match`), list (what can be undone), redo (the last "
                      "undo). Sent messages and emails and web actions can't be undone."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={

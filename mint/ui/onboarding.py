@@ -10,7 +10,7 @@ Seven pages in one dark window, each fading and springing in:
                Reminders: why each is needed, Allow (macOS's own prompt, or its Settings pane), and
                the status, checked every second.
   shortcuts    the four keys, as keycaps; click one and press new keys (settings_window.record_keys).
-  tour         fourteen things Mint does, each with its clip from the guide, playing one after another.
+  tour         fifteen things Mint does, each with its clip from the guide, playing one after another.
   done         you're set; three first things to try (a click sends it to Mint).
 
 Esc, Skip or the close button ends it at any page; prefs "onboarded" then keeps it from showing
@@ -109,6 +109,9 @@ TOUR = (
     ("image-card", "photo.on.rectangle.angled", "Make and edit pictures",
      "Describe a picture and Apple's Image Playground draws it on your Mac. Say a change to redraw it, then save it.",
      ("make an illustration of a lighthouse at sunset", "add a sailing boat")),
+    ("music", "music.note", "Music, by voice",
+     "Any song, artist or mood in Spotify or Apple Music, with a little player that shows what's on.",
+     ("play some lo-fi", "next song")),
     ("apple-shortcuts", "square.stack.3d.up", "Shortcuts, made for you",
      "Say what a shortcut should do. I plan the steps, you say yes, and it lands in the Shortcuts app.",
      ("make a shortcut that turns on dark mode", "run Hello and Date")),

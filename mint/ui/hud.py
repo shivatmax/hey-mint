@@ -536,7 +536,7 @@ class HUD:
         if self._activity:
             text = self._activity["text"]
         if not prefs.get("mic") and self._state in ("paused", "sleeping"):
-            text = "Mic off · type below"
+            text = "Mic off"
         busy = self._activity is not None or self._state in ("working", "thinking")
         self.chat.set_status(self._state, text, busy)
 

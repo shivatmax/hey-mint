@@ -436,6 +436,44 @@ open ~/Applications/Mint.app</pre>
   <p><strong>Your own wake word.</strong> Want “Hey Jarvis” or “Okay Nova”? Type it in Settings ▸ Voice &amp; wake word and press Train. Mint builds a detector for it on your Mac in about a minute and a half, from dozens of voices plus (if you like) four takes of your own voice. In testing, “Hey Jarvis” caught 93% of voices it had never heard, with about one false wake an hour of other people talking. Keep “Hey Mint” as well if you like, press Test to try it, or Reset to go back. If the voice lock is on, retrain your voice after changing the phrase.</p>
 </section>
 
+<section id="music" data-group="Using Mint">
+  <h2>Music: Spotify and Apple Music</h2>
+  <p class="lead">Ask for a song, an artist, an album, a playlist or a mood, and it plays in Spotify (or the Music app). A mini player shows what's on, with the cover, a progress bar and the controls; in notch mode it lives in the notch.</p>
+  {{video music 320 | The player while Blinding Lights plays in Spotify: the cover, the time, previous, play/pause and next.}}
+  <ul class="say"><li><q>play Blinding Lights by the Weeknd</q></li><li><q>play some lo-fi</q></li><li><q>play Arijit Singh</q></li><li><q>play the album After Hours</q></li>
+    <li><q>next song</q></li><li><q>pause the music</q></li><li><q>what's playing?</q></li><li><q>turn it down</q></li><li><q>shuffle on</q></li><li><q>skip to 1:30</q></li></ul>
+  <p>No Spotify login or developer account is needed: Mint finds the song's Spotify link itself and plays it in the app. Genres and moods (“jazz”, “focus”, “workout”) use Spotify's own playlists. Hovering the player shows the volume; clicking the cover opens the app; × hides it until the next song starts. Turn the player off in Settings ▸ Appearance.</p>
+  <p class="note">Spotify doesn't let other apps “like” a song or start Liked Songs directly: Mint opens Liked Songs for you and says when you need to press Play or the heart. Apple Music works the same way when it's installed.</p>
+</section>
+
+<section id="apple-apps" data-group="Using Mint">
+  <h2>Notes, Reminders, Calendar and the other Apple apps</h2>
+  <p class="lead">Mint does more than create things in Apple's apps: it finds, reads, changes and tidies them, and every change can be undone.</p>
+  <ul class="say"><li><q>add bread to my grocery note</q></li><li><q>change milk to oat milk in groceries</q></li><li><q>what's in my packing list note?</q></li><li><q>move the recipe note to Cooking</q></li>
+    <li><q>what's overdue in my reminders?</q></li><li><q>mark the plumber reminder done</q></li><li><q>push the dentist reminder to Friday</q></li>
+    <li><q>move tomorrow's standup to 11</q></li><li><q>what's Priya's email?</q></li><li><q>how long to drive to the airport?</q></li>
+    <li><q>add this page to my Reading List</q></li><li><q>show my photos from last weekend</q></li><li><q>make a Keynote from these notes</q></li></ul>
+  <div class="table"><table><tr><th>App</th><th>What Mint can do</th></tr>
+    <tr><td>Notes</td><td>Search, read, add to the end or the top, change a word or line, rename, move to a folder</td></tr>
+    <tr><td>Reminders</td><td>List what's due or overdue, tick off, reschedule, move between lists, rename</td></tr>
+    <tr><td>Calendar</td><td>Find, move (keeping the length), rename, change the place or notes; warns about clashes</td></tr>
+    <tr><td>Contacts</td><td>Phone numbers, emails, birthdays, company and address (read only)</td></tr>
+    <tr><td>Maps</td><td>Directions and travel time by car, on foot, by transit or bike</td></tr>
+    <tr><td>Safari</td><td>The page you're on, your Reading List, your bookmarks</td></tr>
+    <tr><td>Photos</td><td>Find by date or album, count, export copies to a folder (your library is never changed)</td></tr>
+    <tr><td>Pages, Keynote, Numbers</td><td>New documents, decks and sheets from what Mint writes</td></tr></table></div>
+  <p class="note">Deleting only happens when you say delete, and notes go to Recently Deleted. The first time, macOS asks whether Mint may use each app: click OK.</p>
+</section>
+
+<section id="connectors" data-group="Using Mint">
+  <h2>Connectors</h2>
+  <p class="lead">Settings ▸ Connectors shows everything Mint can work with - your Google and iCloud accounts, Mail, Calendar, Notes, Spotify, Slack, Chrome, the ChatGPT and Claude apps and more - which are connected, and what each one lets you ask.</p>
+  {{video connectors 560 | Settings ▸ Connectors on this Mac: iCloud, Mail, Reminders, Notes, Messages, FaceTime, Safari, Chrome, Finder, Music and Spotify.}}
+  <ul class="say"><li><q>what can you connect to?</q></li><li><q>integrate TextEdit</q></li><li><q>connect Notion</q></li><li><q>is Spotify connected?</q></li></ul>
+  <p><strong>Connect any app.</strong> Say “integrate Things” (or type it in Connectors ▸ Connect any app): Mint reads what the app lets other apps do, plans a small connector - a handful of actions like “add a to-do” or “list today's items” - tests one safely, and after your yes saves it. It then shows under Your connectors, with Test and Remove. Apps with only web links, and web services, get a link or browser connector instead.</p>
+  <p class="note">Connectors only talk to their own app, never run shell commands or send, delete or pay without you asking in that same request, and everything they do happens on your Mac.</p>
+</section>
+
 <section id="apple-shortcuts" data-group="Using Mint">
   <h2>Apple Shortcuts, made for you</h2>
   <p class="lead">Mint runs your Shortcuts by voice, and makes new ones from plain words: say what it should do, hear the steps, say yes, and it opens in the Shortcuts app for one “Add Shortcut” click.</p>

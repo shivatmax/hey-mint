@@ -49,6 +49,7 @@ EAR = 7                # the concave top corners, where the shape meets the scre
 MAX_W = 380            # the widest the dropped-down shape gets for words
 PAD_X = 16             # text inset from the shape's sides
 BTN, STEP = 26, 32     # hover controls: button size, spacing
+PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 WIN_W, WIN_H = 760, 820    # room for the notch to wrap a card or the chat hanging under it
 # Over the menu bar, as notch apps do (main menu + 3).
 LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 3
@@ -179,7 +180,9 @@ class Notch:
         self._acts = []
         self._ind = ""
         self._styled: dict = {}             # guest windows dressed as part of the notch -> how they were
+        self._backs: dict = {}              # the black backing views added under a dressed chat
         self.phase = "off"                  # off / entering / on / leaving
+        self.music_peek_until = 0.0          # the player shows in the notch until then (music just started)
 
     # --- building -------------------------------------------------------------------------------
 
@@ -362,7 +365,7 @@ class Notch:
         x, y, w, h = self._rect_screen()
         return x <= point.x <= x + w and y <= point.y <= y + h
 
-    def _resize(self, w, h, animate=True) -> None:
+    def _resize(self, w, h, animate=True, lead=False) -> None:
         w, h = round(w), round(h)
         if (w, h) == self.size:
             return
@@ -378,9 +381,12 @@ class Notch:
                 spring = Quartz.CASpringAnimation.animationWithKeyPath_("path")
                 spring.setFromValue_(old)
                 spring.setToValue_(path)
-                playful = prefs.get("notch_playful") is not False
-                spring.setDamping_(13.5 if playful else 24.0)          # a little bounce, or none
-                spring.setStiffness_(240.0 if playful else 280.0)
+                # An unhurried drop and rise, settling without overshoot (critically damped): nothing
+                # swings out past where the shape is going. Wrapping a card, the shape leads (faster),
+                # so the card never shows outside it while both grow.
+                stiffness = 300.0 if lead else 110.0
+                spring.setStiffness_(stiffness)
+                spring.setDamping_(2.0 * math.sqrt(stiffness) * (0.96 if prefs.get("notch_playful") is not False else 1.0))
                 spring.setMass_(1.0)
                 spring.setDuration_(spring.settlingDuration())
                 layer.addAnimation_forKey_(spring, "path")
@@ -426,33 +432,49 @@ class Notch:
 
         guests = self._guests(chat_open)
         shown_island = island is not None and island.shown and island.rect is not None
+        music = self._music()                 # something playing: the notch becomes the player
+        self._no_music_card(music)
+        controls = prefs.get("notch_controls") is not False
         if shown_island or guests:
             mode = "wrap"
             width, height = self._wrap(island.rect if shown_island else None, guests, compact_w)
-        elif hovering and prefs.get("notch_controls") is not False and not chat_open:
-            mode = "hover"
-            text_w, text_h = self._text_size(caption)
-            row_w = len(self.buttons) * STEP + 20
-            width = max(compact_w, row_w, text_w + 2 * PAD_X)
-            height = self.nh + (text_h + 10 if caption else 4) + BTN + 14
         elif (caption or self.progress) and not chat_open:
-            mode = "open"
+            # Words and tasks come first: they take the player's place for a moment, then it returns.
             text_w, text_h = self._text_size(caption)
-            width = max(compact_w, text_w + 2 * PAD_X)
-            height = self.nh + text_h + 18 + (8 if self.progress else 0)
+            if hovering and controls:
+                mode = "hover"
+                width = max(compact_w, len(self.buttons) * STEP + 20, text_w + 2 * PAD_X)
+                height = self.nh + (text_h + 10 if caption else 4) + BTN + 14
+            else:
+                mode = "open"
+                width = max(compact_w, text_w + 2 * PAD_X)
+                height = self.nh + text_h + 18 + (8 if self.progress else 0)
+        elif music and (hovering or now < self.music_peek_until) and not chat_open:
+            mode = "music"
+            show_row = controls and hovering
+            width = max(compact_w, PLAYER_W + 20, len(self.buttons) * STEP + 20 if show_row else 0)
+            height = self.nh + 4 + PLAYER_H + (BTN + 20 if show_row else 10)
+        elif hovering and controls and not chat_open:
+            mode = "hover"
+            width = max(compact_w, len(self.buttons) * STEP + 20)
+            height = self.nh + 4 + BTN + 14
         elif prefs.get("notch_idle_face") is False and state in ("sleeping", "awake") and not activity:
             mode = "plain"                      # just the notch until something happens
             width, height = self.nw, self.nh
         else:
             mode = "compact"
             width, height = compact_w, self.nh
-        if playful and mode in ("open", "hover", "wrap") and self.mode in ("compact", "plain"):
+        if playful and mode in ("open", "hover", "wrap", "music") and self.mode in ("compact", "plain"):
             self.orb.hop()                      # the little Mint hops as the shape opens
-        self._resize(width, height)
+        self._resize(width, height, lead=(mode == "wrap"))
         self._breathe(state, mode, playful)
         self._layout_content(mode, caption, width, height)
-        self._indicator(state, activity, now)
-        showing_face = mode != "plain"
+        wings = bool(music) and mode in ("compact", "plain", "music")
+        self._music_wings(music if wings else None)
+        self._music_player(mode == "music", height)
+        if not wings:
+            self._indicator(state, activity, now)
+        showing_face = mode != "plain" and not wings
         self.face_host.setOpacity_(1.0 if showing_face else 0.0)
         # Clicks only on the shape itself; everywhere else the window is air.
         self.panel.setIgnoresMouseEvents_(not inside)
@@ -498,6 +520,19 @@ class Notch:
             window.setHasShadow_(False)
             if key == "chat":
                 window.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+                # Notch-black under the chat's content (its own grey glass read as a box inside the notch).
+                # A layer just under the header dot: above the glass's own blur, below everything drawn on it.
+                content = window.contentView()
+                back = Quartz.CALayer.layer()
+                back.setFrame_(content.bounds())
+                back.setBackgroundColor_(AppKit.NSColor.blackColor().CGColor())
+                back.setCornerRadius_(20)
+                dot = getattr(self.hud.chat, "_dot", None)
+                if dot is not None and dot.superlayer() is content.layer():
+                    content.layer().insertSublayer_below_(back, dot)
+                else:
+                    content.layer().insertSublayer_atIndex_(back, 0)
+                self._backs[ident] = back
             else:
                 layer = window.contentView().layer()
                 if layer is not None:
@@ -519,6 +554,9 @@ class Notch:
                     layer.setBorderWidth_(border)
             except Exception:
                 log.debug("could not undress a window", exc_info=True)
+        for back in self._backs.values():
+            back.removeFromSuperlayer()
+        self._backs.clear()
         self._styled.clear()
         self.panel.setIgnoresMouseEvents_(True)
 
@@ -541,6 +579,90 @@ class Notch:
         width = max(compact_w, 2 * reach + 16)
         height = self.top - min(y for x, y, w, h in rects) + 8
         return min(width, WIN_W - 2 * EAR - 2), min(height, WIN_H)
+
+    # --- the notch becomes the music player ---------------------------------------------------
+
+    def _music(self):
+        """What is playing (music_player.compact_info), or None when nothing is."""
+        import sys
+        player = sys.modules.get("mint.ui.music_player")
+        if player is None or prefs.get("notch_music") is False:
+            return None
+        try:
+            info = player.compact_info(self.nh - 10)
+        except Exception:
+            log.debug("music info failed", exc_info=True)
+            return None
+        return info if info.get("show") else None
+
+    def peek_music(self, seconds: float = 6.0) -> None:
+        """Music just started (music_player calls this instead of showing its card in notch mode):
+        the notch opens as the player for a few seconds, then closes to the artwork and bars."""
+        self.music_peek_until = time.monotonic() + seconds
+
+    def _no_music_card(self, music) -> None:
+        """In the notch the player lives inside the notch, never as a card of its own under it."""
+        import sys
+        player = sys.modules.get("mint.ui.music_player")
+        card = getattr(player, "card", None)
+        try:
+            if card is not None and card.is_open():
+                card.hide()
+                self.peek_music(8.0)
+        except Exception:
+            log.debug("could not fold the music card into the notch", exc_info=True)
+
+    def _music_wings(self, info) -> None:
+        """Closed notch while music plays: the artwork left of the camera, dancing bars right of it
+        (the little Mint and the status icon step aside), as the iPhone does."""
+        views = []
+        if info is not None:
+            for key, center in (("art_view", self.face_center), ("bars_view", self.ind_center)):
+                view = info.get(key)
+                if view is None:
+                    continue
+                if view.superview() is not self.box:
+                    self.box.addSubview_(view)
+                size = view.frame().size
+                view.setFrameOrigin_(AppKit.NSMakePoint(center[0] - size.width / 2, center[1] - size.height / 2))
+                view.setHidden_(False)
+                views.append(view)
+        for view in getattr(self, "_wing_views", []):
+            if view not in views:
+                view.setHidden_(True)
+        self._wing_views = views
+        hide = info is not None
+        if hide != getattr(self, "_indicator_hidden", False):
+            self._indicator_hidden = hide
+            for layer in list(self.bars) + [self.ring, self.glyph]:
+                layer.setHidden_(True)
+            self._ind = ""                          # repaint the indicator when the music stops
+
+    def _music_player(self, on: bool, height: float) -> None:
+        """Hovering while music plays: the notch opens into the full player."""
+        if on and getattr(self, "player", None) is None:
+            try:
+                from mint.ui import music_player
+                self.player, self.player_update = music_player.player_view(PLAYER_W, PLAYER_H)
+                self.box.addSubview_(self.player)
+                self.player.setHidden_(True)
+            except Exception:
+                log.debug("no music player view", exc_info=True)
+                self.player = False
+        player = getattr(self, "player", None)
+        if not player:
+            return
+        if on:
+            player.setFrameOrigin_(AppKit.NSMakePoint(WIN_W / 2 - PLAYER_W / 2, WIN_H - self.nh - 4 - PLAYER_H))
+            if player.isHidden():
+                player.setHidden_(False)
+                try:
+                    from mint.tools import music
+                    self.player_update(music.cached())          # paint at once
+                except Exception:
+                    pass
+        elif not player.isHidden():
+            player.setHidden_(True)
 
     # --- sizes ---------------------------------------------------------------------------------
 
@@ -594,8 +716,9 @@ class Notch:
         self.track.setOpacity_(1.0 if visible else 0.0)
         self.fill.setOpacity_(1.0 if visible else 0.0)
         # Controls: one row along the bottom, popping in one after another.
-        hover = mode == "hover"
-        entering = hover and self.mode != "hover"
+        hover = mode == "hover" or (mode == "music" and prefs.get("notch_controls") is not False
+                                    and bool(self.hover_since))
+        entering = hover and self.mode not in ("hover", "music")
         start = WIN_W / 2 - (len(self.buttons) - 1) * STEP / 2
         row_y = WIN_H - height + 9
         for i, (symbol, button) in enumerate(self.buttons):
@@ -603,7 +726,7 @@ class Notch:
             if entering:
                 button.setHidden_(False)
                 button.setAlphaValue_(0.0)
-                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode == "hover" and self._pop(b))
+                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode in ("hover", "music") and self._pop(b))
             elif not hover:
                 self._fade(button, False)
         self._paint_buttons()
@@ -1022,6 +1145,12 @@ def _hang_island_scenes() -> None:
     except Exception:
         pass
     row = getattr(island_module, "ROW", 40)
+    spring = type(isl)._spring
+
+    def gentle(layer, key, old, new, damping=20.0, stiffness=190.0):
+        # The same unhurried, overshoot-free spring as the notch, so the scene and the notch grow as one.
+        spring(layer, key, old, new, damping=2.0 * math.sqrt(170.0), stiffness=170.0)
+    isl._spring = gentle
 
     def layout(width, height):
         x = notch.cx - width / 2
@@ -1038,7 +1167,7 @@ def _unhang_island_scenes() -> None:
     except Exception:
         return
     isl = island_module.island
-    for name in ("_layout", "_upper"):               # back to the class's own placement
+    for name in ("_layout", "_upper", "_spring"):    # back to the class's own placement and spring
         isl.__dict__.pop(name, None)
     if _island_saved and getattr(isl, "panel", None) is not None:
         isl.panel.setLevel_(_island_saved["level"])
