@@ -437,6 +437,8 @@ class HUD:
             if self._activity is not None:
                 self.chat.action_done(self._activity["key"], False, self._activity["text"] + " — stopped")
             self._activity = None
+            self._you.clear()                      # "stop" clears the words on screen at once (the notch
+            self._said.clear()                     # and the bubble keep them open otherwise)
             self._status = "■ Stopped"
             self.orb.stopped()
             self.orb.set_progress(None)

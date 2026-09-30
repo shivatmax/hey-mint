@@ -1,6 +1,6 @@
 [project]
 name = "hey-mint"
-version = "0.4.0"
+version = "0.5.0"
 description = "Hey Mint: an open-source, Jarvis-style voice assistant for macOS"
 readme = "README.md"
 license = "GPL-3.0-or-later"

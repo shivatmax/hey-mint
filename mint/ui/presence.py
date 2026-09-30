@@ -166,36 +166,12 @@ class Presence:
         return sub
 
     def _add_settings(self, menu) -> None:
-        """Microphone, voice and appearance: shared by the menu bar and the HUD."""
+        """What changes from minute to minute: the microphone and spoken replies. Everything you set once
+        (voice lock, theme, position, the orb's looks, the notch, screen sharing) lives in Settings."""
         self._row(menu, "Microphone", "toggle:mic", checked=bool(prefs.get("mic")))
         self._row(menu, "Spoken replies", "toggle:voice", checked=bool(prefs.get("voice")))
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
-        from mint.voice import voicelock
-        enrolled = voicelock.lock.enrolled
-        self._row(menu, "Retrain my voice…" if enrolled or voicelock.lock.stale else "Train my voice…", "train_voice")
-        if voicelock.lock.stale:
-            self._row(menu, "Voice model upgraded - please retrain", enabled=False)
-        if enrolled:
-            self._row(menu, "Voice lock - only my voice", "toggle:voice_lock", checked=bool(prefs.get("voice_lock")))
-            self._row(menu, "Forget my voice", "forget_voice")
-        self._row(menu, f"Ignore talk not meant for {prefs.name()}", "toggle:addressee_check",
-                  checked=bool(prefs.get("addressee_check")))
-        menu.addItem_(AppKit.NSMenuItem.separatorItem())
-        themes = self._submenu(menu, "Theme")
-        for key, name in THEME_NAMES.items():
-            self._row(themes, name, f"theme:{key}", checked=prefs.get("theme") == key)
-        places = self._submenu(menu, "Position")
-        for key, name in POSITION_NAMES.items():
-            self._row(places, name, f"position:{key}", checked=prefs.get("position") == key)
-        if prefs.get("position") == "custom":
-            self._row(places, "Where I dragged it", None, enabled=False, checked=True)
-        for key, name in TOGGLES:
-            self._row(menu, name, f"toggle:{key}", checked=bool(prefs.get(key)))
-        menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._row(menu, "Settings…", "open_settings", key=",")
-        self._row(menu, "Skills & memory…", "brain:skills")
-        self._row(menu, "Edit the settings file…", "settings")
-        self._row(menu, "Accounts, aliases and routines…", "customise")
 
     def _settings_menu(self):
         menu = AppKit.NSMenu.alloc().init()

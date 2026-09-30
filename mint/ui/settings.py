@@ -23,6 +23,7 @@ Pages
 from __future__ import annotations
 
 import os
+import subprocess
 import threading
 
 import AppKit
@@ -365,6 +366,8 @@ class SettingsWindow:
         self._switch(card, x, top + (h - 22) / 2, power.starts_at_login(), lambda on: power.set_start_at_login(on))
         self._row_switch(page, "listen_while_working", "Keep listening while it works",
                          "Say “stop” any time to cut it off.")
+        self._row_switch(page, "share_visible", "Visible in screen sharing",
+                         "Shows in Meet, Zoom and screenshots. Off hides Mint from them (the eye button does the same).")
         self._row_popup(page, "unload_after_minutes", "Free memory when asleep", UNLOAD, w=220,
                         hint="Unloads (~270 MB freed); a small listener (~35 MB) keeps the orb, ⌘J and the wake "
                              "word. Waking takes about a second longer.")
@@ -678,6 +681,10 @@ class SettingsWindow:
         self._row_popup(page, "theme", "Theme", THEMES, w=200)
         self._row_popup(page, "position", "Position", POSITIONS, w=200)
         self._row_switch(page, "face", "Face on the orb")
+        self._row_switch(page, "auto_emotions", "Expressions during conversation",
+                         "Smiles, laughs and hearts that follow what you say.")
+        self._row_switch(page, "cute_effects", "Action flourishes", "Little animations when it clicks, types or finishes.")
+        self._row_switch(page, "cute_agents", "Critter helpers", "Cute critters that stand for its sub-agents.")
         self._row_switch(page, "cursor_effects", "On-screen effects", "Sparks, ripples and highlights.")
         self._row_switch(page, "music_player_auto", "Music player",
                          "A mini player with the song, art and controls when Spotify or Music plays.")
@@ -1239,6 +1246,24 @@ class SettingsWindow:
                                "for you to paste in if you like. Nothing is sent until you submit it.")
         self._row_buttons(page, "The log", [("Open log", 110, lambda: _open_file(report.LOG))])
         page.end()
+
+        page.section("Files you can edit")
+        self._row_buttons(page, "The settings file", [("Edit…", 110, self._edit_settings_file)],
+                          hint="Every setting, spelled out as text.")
+        self._row_buttons(page, "Accounts, aliases and routines", [("Edit…", 110, self._edit_custom_file)],
+                          hint="Your own routines, spoken aliases and extra accounts.")
+        page.end()
+
+    def _edit_settings_file(self) -> None:
+        prefs.write_full()
+        subprocess.run(["open", "-e", str(prefs.PATH)], check=False)
+
+    def _edit_custom_file(self) -> None:
+        from mint.core import custom
+        if not custom.PATH.exists():
+            example = custom.PATH.with_name("custom.example.json")
+            custom.PATH.write_text(example.read_text() if example.exists() else "{}\n")
+        subprocess.run(["open", "-e", str(custom.PATH)], check=False)
 
     def _check_updates(self, status) -> None:
         from mint.app import updater

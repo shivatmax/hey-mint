@@ -51,6 +51,7 @@ PAD_X = 16             # text inset from the shape's sides
 BTN, STEP = 26, 32     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
+PEEK_AFTER, FULL_AFTER = 0.55, 2.0   # a short rest peeks the controls; staying opens the full notch (seconds)
 HOME_W, BODY_H = 640, 150          # the open notch on hover (boring.notch's size): header row + body
 BIG_W, BIG_H = 760, 430            # the notch grown for search results ("show more", 3x3 / 3x2 / 3x1)
 SIDE_W = HOME_W - 32 - PLAYER_W - 12   # the right-hand pane: the week calendar or the battery
@@ -470,7 +471,11 @@ class Notch:
                 self.hover_since = now
         elif now - self.left_at > 0.1:                  # closes a beat after the pointer leaves
             self.hover_since = 0.0
-        hovering = bool(self.hover_since) and now - self.hover_since > 0.3     # opens after a 0.3 s rest
+        # Two stages, so crossing the notch on the way somewhere doesn't throw the whole thing open:
+        # a short rest shows the few controls that matter; staying on it opens the full notch.
+        rested = now - self.hover_since if self.hover_since else 0.0
+        peeking = rested > PEEK_AFTER
+        hovering = rested > FULL_AFTER
         chat_open = getattr(getattr(hud, "chat", None), "is_open", False)
         state = getattr(hud, "_state", "")
         activity = getattr(hud, "_activity", None)
@@ -508,8 +513,12 @@ class Notch:
             # Words and tasks come before the idle states: they take the player's place for a moment, then it returns.
             text_w, text_h = self._text_size(caption)
             if hovering and controls:
-                mode = "home"                   # hover opens it all, Mint's words in its pane
+                mode = "home"                   # staying opens it all, Mint's words in its pane
                 width, height = HOME_W, self.nh + 8 + BODY_H + 10
+            elif peeking and controls:
+                mode = "hover"                  # a short rest: the words and the few controls
+                width = max(compact_w, len(self.buttons) * STEP + 20, text_w + 2 * PAD_X)
+                height = self.nh + (text_h + 10 if caption else 4) + BTN + 14
             else:
                 mode = "open"
                 width = max(compact_w, text_w + 2 * PAD_X)
@@ -524,6 +533,10 @@ class Notch:
                 and not chat_open:
             mode = "home"                       # boring.notch's open notch: tabs, player or Mint, calendar, shelf
             width, height = HOME_W, self.nh + 8 + BODY_H + 10
+        elif peeking and controls and not chat_open and now >= self.battery_peek_until:
+            mode = "hover"                      # a short rest on the notch: just the few controls
+            width = max(compact_w, len(self.buttons) * STEP + 20)
+            height = self.nh + 4 + BTN + 14
         elif now < self.battery_peek_until and not chat_open:
             mode = "battery"                    # plugged in / unplugged: said in the wings for a moment
             width, height = self.nw + 2 * 92, self.nh
@@ -757,7 +770,8 @@ class Notch:
                                       left + 36, top_y),
                      "shelf": button("tray.full.fill", "Shelf: files to AirDrop or share", lambda: self._set_tab("shelf"),
                                      left + 72, top_y)}
-        h["gear"] = button("gearshape.fill", "Settings", self._menu_from_button, right - 32, top_y)
+        h["gear"] = button("gearshape.fill", "Menu and Settings", self._menu_from_button, right - 32, top_y)
+        h["chat"] = button("bubble.left.and.bubble.right.fill", "Open the chat", self._chat, right - 64, top_y)
         battery = self._mod("notch_battery") if prefs.get("notch_battery") is not False else None
         h["badge"] = None
         if battery is not None and battery.available():
@@ -978,10 +992,11 @@ class Notch:
                 b.layer().setBackgroundColor_(_white(0.16 if self.tab == name else 0.0).CGColor())
                 b.setContentTintColor_(_white(0.95 if self.tab == name else 0.55))
         h["gear"].setHidden_(not on)
+        h["chat"].setHidden_(not on)
         badge = h["badge"]
         if badge is not None:
             size = badge.frame().size
-            badge.setFrameOrigin_(AppKit.NSMakePoint(right - 40 - size.width, top_y - size.height / 2))
+            badge.setFrameOrigin_(AppKit.NSMakePoint(right - 72 - size.width, top_y - size.height / 2))
             badge.setHidden_(not on)
         # body: home tab
         home = on and self.tab == "home"
@@ -994,8 +1009,8 @@ class Notch:
             h["title"].setStringValue_(title)
             h["hint"].setMaximumNumberOfLines_(3 if words else 2)
             h["hint"].setTextColor_(_white(0.85 if words else 0.55))
-            h["hint"].setStringValue_(words or ("Say “Hey Mint”, or click me to chat." if prefs.get("mic")
-                                                else "Click me to chat, or turn the mic on below."))
+            h["hint"].setStringValue_(words or ("Say “Hey Mint”, or press the chat button." if prefs.get("mic")
+                                                else "Press the chat button, or turn the mic on below."))
             self._reveal(h["title"], AppKit.NSMakeRect(left, body_top - 34, PLAYER_W, 22))
             self._reveal(h["hint"], AppKit.NSMakeRect(left, body_top - 84, PLAYER_W, 46) if words
                          else AppKit.NSMakeRect(left, body_top - 70, PLAYER_W, 32))
@@ -1362,7 +1377,9 @@ class Notch:
     # --- clicks --------------------------------------------------------------------------------
 
     def clicked(self) -> None:
-        self._chat()
+        """A click on the notch itself does nothing (the chat has its own icon); it only closes an open chat."""
+        if getattr(getattr(self.hud, "chat", None), "is_open", False):
+            self._chat()
 
     def _chat(self) -> None:
         self.hud._fire("console")
@@ -1652,7 +1669,7 @@ def _gone() -> None:
     hud = notch.hud
     notch.phase = "off"
     _busy[0] = False
-    AppHelper.callLater(0.45, lambda: (not _live[0]) and notch.panel.orderOut_(None))
+    AppHelper.callLater(0.45, lambda: (not _live[0] and notch.phase == "off") and notch.panel.orderOut_(None))
     try:
         hud._orb_moved(final=False)
     except Exception:
@@ -1757,7 +1774,19 @@ def _watch_setting() -> None:
     prefs.on_change(changed)
 
 
-def _switch(want: bool) -> None:
+def _switch(want: bool, tries: int = 0) -> None:
+    """Make Mint live in the notch (want) or be the orb, even if another move is still playing: wait for
+    it (a flight takes a couple of seconds) and go on, instead of dropping the request - that left the
+    setting on "notch" with the orb on screen."""
+    if _busy[0]:
+        if tries < 40:
+            AppHelper.callLater(0.4, lambda: _switch(want, tries + 1))
+            return
+        log.warning("a display transition never finished; resetting it")
+        _busy[0] = False
+        notch.phase = "on" if _live[0] else "off"
+    if _live[0] == want:
+        return
     try:
         if want:
             enter(animated=True)
@@ -1775,9 +1804,12 @@ def set_mode(mode: str) -> str:
     want = mode in ("notch", "island", "dynamic island", "dynamic_island", "top")
     if mode not in ("orb", "circle", "floating", "notch", "island", "dynamic island", "dynamic_island", "top"):
         return "Say orb (the floating circle) or notch (the Dynamic Island at the camera)."
-    if bool(prefs.get(PREF)) == want and active() == want:
+    if bool(prefs.get(PREF)) == want and active() == want and not _busy[0]:
         return f"Mint is already in {'notch' if want else 'orb'} mode."
-    prefs.set(PREF, want)
+    if bool(prefs.get(PREF)) == want:
+        AppHelper.callAfter(_switch, want)        # the setting already says so but the screen doesn't: redo it
+    else:
+        prefs.set(PREF, want)
     return ("Flying into the notch now: Mint becomes the Dynamic Island at the camera." if want else
             "Dropping out of the notch now: Mint is the floating orb again.")
 

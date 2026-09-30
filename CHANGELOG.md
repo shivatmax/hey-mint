@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-10-01)
 
 - **Files into apps** (`mint/tools/handoff.py`): "compress it with Keka", "open these in Preview", "extract this".
   Mint hands files over like Finder's Open With (sandboxed apps included), answers the app's save-location
@@ -13,6 +13,11 @@
   Mint, also over a song; hovering while Mint talks shows its words.
 - **Connectors for file jobs:** a connector action can hand files to its app (Keka's scripted "compress" does
   nothing from a script); "compress", "zip", "extract" and other verbs count as asking for the action.
+- **Calmer notch:** hovering is two-stage (a short rest shows a small row of controls, staying opens the full
+  notch); clicking the notch no longer opens the chat (there is a chat button; a click only closes it). The
+  right-click menu is down to Microphone, Spoken replies and Settings; the rest moved into Settings.
+- **Fixed:** asking for the notch again while Mint was still leaving it was ignored, leaving the orb on screen
+  (or hiding the notch); "stop" clears the words on screen.
 - **Fixed:** closing the chat could hide every Mint window, so Mint looked crashed; "stop" now also refuses
   tool calls the model sends after it in the same turn; notch search and shelf tiles start a drag from their
   picture too.
