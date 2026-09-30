@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-09-30)
 
 - **Telegram: files and quick share.** Send Mint a PDF, document, photo, video or audio file from your phone:
   with a caption it is saved in the Mint folder's "From phone" and done ("summarise this"); without one you get
