@@ -44,6 +44,7 @@ _state = {"request": "", "latest": "", "nudges": 0, "tools_total": 0, "tools_sin
 
 
 def _reset(request: str) -> None:
+    _state["changed"] = False
     _state.update(request=request, latest=request, nudges=0, tools_total=0, tools_since=0,
                   last_name="", waiting=False, sent=False, off=False, finished=False)
 
@@ -64,6 +65,17 @@ def _sync_request() -> str:
     return _state["request"]
 
 
+_READING = re.compile(r"^(read_|find_|get_|list_|look|calendar_events|ui_elements|frontmost_app|video_info|"
+                      r"search_|web_search|recall|find_skill|notifications$|clipboard$)")
+
+
+def tools_done() -> int:
+    """Tool calls made for the current request."""
+    with _lock:
+        _sync_request()
+        return _state["tools_total"]
+
+
 def note(name: str, args: dict, result: str) -> None:
     """After every tool call."""
     with _lock:
@@ -71,6 +83,8 @@ def note(name: str, args: dict, result: str) -> None:
         _state["tools_total"] += 1
         _state["tools_since"] += 1
         _state["last_name"] = name
+        if not _READING.match(name):
+            _state["changed"] = True        # something was done, not only looked at
         text = str(result or "")
         _state["waiting"] = bool(_WAITING.search(text[:600])) or name in {"delegate_task", "delegate_tasks",
                                                                          "wait_until_done"} and not \
@@ -123,6 +137,8 @@ def decide(said: str, task_step: str = "", agent_asking: bool = False) -> str:
                 return ""
             if _DONE.search(said) and not offer:
                 return ""
+            if not st.get("changed") and len(said.split()) >= 8 and not offer:
+                return ""                    # it only looked things up and answered: a question, answered
             # "I have opened X, Y and Z" is a report of finished work, not a pause mid-list.
             unbounded = bool(_UNBOUNDED.search(request)) and not _REPORTED.search(said)
             listed = parts(request)

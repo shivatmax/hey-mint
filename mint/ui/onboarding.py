@@ -10,7 +10,7 @@ Seven pages in one dark window, each fading and springing in:
                Reminders: why each is needed, Allow (macOS's own prompt, or its Settings pane), and
                the status, checked every second.
   shortcuts    the four keys, as keycaps; click one and press new keys (settings_window.record_keys).
-  tour         twelve things Mint does, each with its clip from the guide, playing one after another.
+  tour         fourteen things Mint does, each with its clip from the guide, playing one after another.
   done         you're set; three first things to try (a click sends it to Mint).
 
 Esc, Skip or the close button ends it at any page; prefs "onboarded" then keeps it from showing
@@ -37,9 +37,13 @@ log = logging.getLogger("mint.ui.onboarding")
 
 W, H = 980, 660
 PAGES = ("welcome", "about", "voice", "permissions", "shortcuts", "tour", "done")
-TOP, BOTTOM = (0.055, 0.062, 0.078), (0.018, 0.02, 0.027)
-INK = (1.0, 1.0, 1.0)
-DIM = (0.63, 0.65, 0.71)
+TOP, BOTTOM = (0.95, 0.97, 1.0), (0.80, 0.87, 1.0)       # a pale sky, lighter at the top
+INK = (0.07, 0.11, 0.22)                                    # deep navy text
+DIM = (0.36, 0.42, 0.56)
+WHITE = (1.0, 1.0, 1.0)
+SKY = (0.22, 0.49, 1.0)                                     # the buttons and highlights
+DEEP = (0.12, 0.36, 0.88)                                   # blue text on glass
+OK = (0.09, 0.6, 0.35)                                      # "Allowed"
 GREEN = (0.3, 0.86, 0.55)
 BLUE = (0.36, 0.56, 1.0)
 VIOLET = (0.64, 0.47, 1.0)
@@ -102,6 +106,12 @@ TOUR = (
     ("island-teach", "graduationcap", "Teach me a task",
      "Show me once while I watch. Next time, just ask and I'll do it the same way.",
      ("watch how I do this", "do my expense report")),
+    ("image-card", "photo.on.rectangle.angled", "Make and edit pictures",
+     "Describe a picture and Apple's Image Playground draws it on your Mac. Say a change to redraw it, then save it.",
+     ("make an illustration of a lighthouse at sunset", "add a sailing boat")),
+    ("apple-shortcuts", "square.stack.3d.up", "Shortcuts, made for you",
+     "Say what a shortcut should do. I plan the steps, you say yes, and it lands in the Shortcuts app.",
+     ("make a shortcut that turns on dark mode", "run Hello and Date")),
     ("island-trackers", "bell.badge", "Let me know when…",
      "I keep an eye on downloads, uploads, long commands and Claude sessions, and tell you when they finish.",
      ("tell me when the download finishes",)),
@@ -109,7 +119,7 @@ TOUR = (
 
 TRY = (
     ("calendar", "What's on my calendar today?", "Your day, on the island"),
-    ("envelope.fill", "Summarize my unread emails", "What needs you, and drafts"),
+    ("photo.on.rectangle.angled", "Make an illustration of a lighthouse at sunset", "Then say a change to redraw it"),
     ("waveform.badge.mic", "Train my voice", "So only you can wake me"),
 )
 
@@ -134,7 +144,40 @@ def _font(size, weight=AppKit.NSFontWeightRegular, rounded=False):
 
 
 def _accent():
+    """The highlight colour: sky blue (Mint's own mint stays on its face)."""
+    return SKY
+
+
+def _mint():
     return tuple(gfx.accent())
+
+
+def _glass(view, radius: float, tint=None):
+    """Liquid Glass (NSGlassEffectView, macOS 26+) behind a view's content; frosted white before that."""
+    cls = getattr(AppKit, "NSGlassEffectView", None)
+    if cls is None:
+        view.setWantsLayer_(True)
+        view.layer().setBackgroundColor_(_cg(WHITE, 0.6))
+        view.layer().setCornerRadius_(radius)
+        return None
+    glass = cls.alloc().initWithFrame_(view.bounds())
+    glass.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
+    glass.setCornerRadius_(radius)
+    if tint is not None:
+        glass.setTintColor_(tint)
+    view.addSubview_positioned_relativeTo_(glass, AppKit.NSWindowBelow, None)
+    view.glass = glass
+    return glass
+
+
+def _tint(view, rgb=None, alpha=0.0) -> None:
+    """Colour a glass surface (or, without glass, its layer)."""
+    glass = getattr(view, "glass", None)
+    color = _ns(rgb, alpha) if rgb is not None and alpha else None
+    if glass is not None:
+        glass.setTintColor_(color)
+    else:
+        view.layer().setBackgroundColor_(_cg(rgb, alpha) if color is not None else _cg(WHITE, 0.6))
 
 
 def _media(name: str, ext: str):
@@ -226,6 +269,16 @@ class _OnbWindow(AppKit.NSWindow):
 class _OnbFlipped(AppKit.NSView):
     def isFlipped(self):
         return True
+
+
+class _OnbOverlay(AppKit.NSView):
+    """A layer above a glass card for lines and badges; clicks go through to the card."""
+
+    def isFlipped(self):
+        return True
+
+    def hitTest_(self, point):
+        return None
 
 
 class _OnbClick(AppKit.NSView):
@@ -333,7 +386,7 @@ class Onboarding:
         window.setTitleVisibility_(AppKit.NSWindowTitleHidden)
         window.setMovableByWindowBackground_(True)
         window.setReleasedWhenClosed_(False)
-        window.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+        window.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameAqua))
         window.setBackgroundColor_(_ns(BOTTOM))
         for button in (AppKit.NSWindowMiniaturizeButton, AppKit.NSWindowZoomButton):
             control = window.standardWindowButton_(button)
@@ -365,11 +418,12 @@ class Onboarding:
         layer.addSublayer_(base)
         # Three soft lights drifting slowly; each page moves them somewhere new.
         self.lights = []
-        for rgb, size, period in ((_accent(), 760, 13.0), (BLUE, 680, 17.0), (VIOLET, 620, 21.0)):
+        for rgb, size, period in (((0.3, 0.6, 1.0), 780, 13.0), ((0.45, 0.86, 1.0), 700, 17.0),
+                                  ((0.72, 0.64, 1.0), 640, 21.0)):
             light = Quartz.CAGradientLayer.layer()
             light.setType_(Quartz.kCAGradientLayerRadial)
             light.setBounds_(Quartz.CGRectMake(0, 0, size, size))
-            light.setColors_([_cg(rgb, 0.22), _cg(rgb, 0.07), _cg(rgb, 0.0)])
+            light.setColors_([_cg(rgb, 0.5), _cg(rgb, 0.18), _cg(rgb, 0.0)])
             light.setLocations_([0.0, 0.45, 1.0])
             light.setStartPoint_(Quartz.CGPointMake(0.5, 0.5))
             light.setEndPoint_(Quartz.CGPointMake(1.0, 1.0))
@@ -389,7 +443,7 @@ class Onboarding:
         edge.setFrame_(Quartz.CGRectMake(0, H - 1, W, 1))
         edge.setStartPoint_(Quartz.CGPointMake(0, 0.5))
         edge.setEndPoint_(Quartz.CGPointMake(1, 0.5))
-        edge.setColors_([_cg(INK, 0.0), _cg(INK, 0.14), _cg(INK, 0.0)])
+        edge.setColors_([_cg(WHITE, 0.0), _cg(WHITE, 0.9), _cg(WHITE, 0.0)])
         layer.addSublayer_(edge)
         self._drift(0, animated=False)
 
@@ -432,7 +486,7 @@ class Onboarding:
         for i, (segment, width) in enumerate(zip(self.segments, widths)):
             segment.setFrame_(Quartz.CGRectMake(x, H - 30, width, 4))
             done = i + 1 < page
-            segment.setBackgroundColor_(_cg(mint) if i + 1 == page else _cg(INK, 0.5 if done else 0.13))
+            segment.setBackgroundColor_(_cg(mint) if i + 1 == page else _cg(INK, 0.32 if done else 0.1))
             segment.setOpacity_(0.0 if page == 0 else 1.0)
             x += width + 6
         Quartz.CATransaction.commit()
@@ -479,23 +533,33 @@ class Onboarding:
         label.setFrameOrigin_(AppKit.NSMakePoint(x + icon_w, y))
 
     def _pill(self, view, text, x, y, w, h, action, primary=True, symbol=None, size=15, trailing=False):
-        mint = _accent()
+        """A rounded button: solid sky blue with a glassy sheen (primary), or Liquid Glass (secondary)."""
         button = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, h))
         button.setWantsLayer_(True)
         layer = button.layer()
         layer.setCornerRadius_(h / 2)
-        rest = _cg(mint) if primary else _cg(INK, 0.08)
-        over = _cg(gfx.light(mint)) if primary else _cg(INK, 0.14)
-        layer.setBackgroundColor_(rest)
         if primary:
-            layer.setShadowColor_(_cg(mint))
-            layer.setShadowOpacity_(0.35)
+            rest, over = _cg(SKY), _cg((0.36, 0.6, 1.0))
+            layer.setBackgroundColor_(rest)
+            layer.setShadowColor_(_cg(SKY))
+            layer.setShadowOpacity_(0.4)
             layer.setShadowRadius_(14)
-            layer.setShadowOffset_(Quartz.CGSizeMake(0, -2))
-        else:
-            layer.setBorderColor_(_cg(INK, 0.1))
+            layer.setShadowOffset_(Quartz.CGSizeMake(0, -3))
+            sheen = Quartz.CAGradientLayer.layer()
+            sheen.setFrame_(Quartz.CGRectMake(0, 0, w, h))
+            sheen.setCornerRadius_(h / 2)
+            sheen.setColors_([_cg(WHITE, 0.32), _cg(WHITE, 0.0), _cg(WHITE, 0.0)])
+            sheen.setLocations_([0.0, 0.55, 1.0])
+            sheen.setStartPoint_(Quartz.CGPointMake(0.5, 0.0))
+            sheen.setEndPoint_(Quartz.CGPointMake(0.5, 1.0))
+            layer.addSublayer_(sheen)
+            layer.setBorderColor_(_cg(WHITE, 0.35))
             layer.setBorderWidth_(0.5)
-        ink = (0.02, 0.07, 0.05) if primary else INK
+            button.on_hover = lambda on: layer.setBackgroundColor_(over if on else rest)
+        else:
+            _glass(button, h / 2)
+            button.on_hover = lambda on: _tint(button, WHITE, 0.55 if on else 0.0)
+        ink = WHITE if primary else INK
         button.label = self._label(button, text, 0, 0, w, size=size, weight=AppKit.NSFontWeightSemibold, rgb=ink,
                                    rounded=True)
         button.icon = None
@@ -507,7 +571,6 @@ class Onboarding:
             button.icon = icon
         button.trailing = trailing
         button.on_click = action
-        button.on_hover = lambda on: layer.setBackgroundColor_(over if on else rest)
         view.addSubview_(button)
         self._center(button)
         return button
@@ -521,19 +584,25 @@ class Onboarding:
         view.addSubview_(button)
         return button
 
-    def _card(self, view, x, y, w, h, radius=18, action=None, fill=0.045):
+    def _card(self, view, x, y, w, h, radius=18, action=None, fill=0.0):
+        """A Liquid Glass card; clickable ones brighten under the pointer."""
         card = (_OnbClick if action else _OnbFlipped).alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, h))
         card.setWantsLayer_(True)
         layer = card.layer()
         layer.setCornerRadius_(radius)
-        layer.setBackgroundColor_(_cg(INK, fill))
-        layer.setBorderColor_(_cg(INK, 0.09))
-        layer.setBorderWidth_(0.5)
+        layer.setShadowColor_(_cg((0.1, 0.2, 0.5)))
+        layer.setShadowOpacity_(0.1)
+        layer.setShadowRadius_(18)
+        layer.setShadowOffset_(Quartz.CGSizeMake(0, -6))
+        _glass(card, radius)
+        card.top = _OnbOverlay.alloc().initWithFrame_(card.bounds())
+        card.top.setWantsLayer_(True)
+        card.addSubview_(card.top)
+        if fill:
+            _tint(card, WHITE, fill)
         if action:
             card.on_click = action
-            card.fill = fill
-            card.on_hover = lambda on: getattr(card, "chosen", False) or layer.setBackgroundColor_(
-                _cg(INK, fill + (0.035 if on else 0.0)))
+            card.on_hover = lambda on: getattr(card, "chosen", False) or _tint(card, WHITE, 0.5 if on else fill)
         view.addSubview_(card)
         return card
 
@@ -563,7 +632,8 @@ class Onboarding:
             glow = Quartz.CAGradientLayer.layer()
             glow.setType_(Quartz.kCAGradientLayerRadial)
             glow.setFrame_(Quartz.CGRectMake(0, 0, size, size))
-            glow.setColors_([_cg(_accent(), 0.35), _cg(_accent(), 0.0)])
+            glow.setColors_([_cg(_mint(), 0.45), _cg(WHITE, 0.25), _cg(WHITE, 0.0)])
+            glow.setLocations_([0.0, 0.45, 1.0])
             glow.setStartPoint_(Quartz.CGPointMake(0.5, 0.5))
             glow.setEndPoint_(Quartz.CGPointMake(1.0, 1.0))
             breathe = Quartz.CABasicAnimation.animationWithKeyPath_("transform.scale")
@@ -591,10 +661,10 @@ class Onboarding:
     def _field(self, view, key, x, y, w, placeholder, value):
         box = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, 46))
         box.setWantsLayer_(True)
-        box.layer().setCornerRadius_(12)
-        box.layer().setBackgroundColor_(_cg(INK, 0.06))
-        box.layer().setBorderColor_(_cg(INK, 0.1))
-        box.layer().setBorderWidth_(1)
+        box.layer().setCornerRadius_(14)
+        box.layer().setBorderColor_(_cg(WHITE, 0.0))
+        box.layer().setBorderWidth_(1.5)
+        _glass(box, 14)
         field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(14, 12, w - 28, 24))
         field.setBezeled_(False)
         field.setDrawsBackground_(False)
@@ -603,7 +673,7 @@ class Onboarding:
         field.setTextColor_(_ns(INK))
         field.setStringValue_(value or "")
         field.setPlaceholderAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            placeholder, {AppKit.NSForegroundColorAttributeName: _ns(DIM, 0.7),
+            placeholder, {AppKit.NSForegroundColorAttributeName: _ns(DIM, 0.75),
                           AppKit.NSFontAttributeName: _font(16, AppKit.NSFontWeightMedium)}))
         field.cell().setUsesSingleLineMode_(True)
         field.cell().setScrollable_(True)
@@ -636,7 +706,7 @@ class Onboarding:
         mint = _accent()
         brow = self._label(page, eyebrow.upper(), x, 76, w, size=12, weight=AppKit.NSFontWeightBold, rgb=mint)
         brow.setAttributedStringValue_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            eyebrow.upper(), {AppKit.NSKernAttributeName: 1.6, AppKit.NSForegroundColorAttributeName: _ns(mint),
+            eyebrow.upper(), {AppKit.NSKernAttributeName: 1.6, AppKit.NSForegroundColorAttributeName: _ns(DEEP),
                               AppKit.NSFontAttributeName: _font(12, AppKit.NSFontWeightBold)}))
         head = self._label(page, title, x, 98, w + 200, size=34, weight=AppKit.NSFontWeightBold, rounded=True)
         text = self._label(page, sub, x, 146, w + 160, size=15, rgb=DIM, lines=2)
@@ -686,7 +756,9 @@ class Onboarding:
         bubble = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(28, 160, 284, 112))
         bubble.setWantsLayer_(True)
         bubble.layer().setCornerRadius_(18)
-        bubble.layer().setBackgroundColor_(_cg(INK, 0.08))
+        bubble.layer().setBackgroundColor_(_cg(WHITE, 0.6))
+        bubble.layer().setBorderColor_(_cg(WHITE, 0.9))
+        bubble.layer().setBorderWidth_(1)
         card.addSubview_(bubble)
         self.greeting = self._label(bubble, "", 16, 16, 252, size=15, weight=AppKit.NSFontWeightMedium, lines=4,
                                     align=AppKit.NSTextAlignmentCenter, h=80)
@@ -708,12 +780,12 @@ class Onboarding:
         on = role in self.roles
         mint = _accent()
         chip.chosen = on
-        chip.layer().setBackgroundColor_(_cg(mint, 0.2) if on else _cg(INK, 0.08))
-        chip.layer().setBorderColor_(_cg(mint, 0.8) if on else _cg(INK, 0.1))
-        chip.layer().setBorderWidth_(1 if on else 0.5)
-        chip.label.setTextColor_(_ns(gfx.light(mint) if on else INK))
-        chip.on_hover = None if on else (lambda over, c=chip: getattr(c, "chosen", False) or c.layer().setBackgroundColor_(
-            _cg(INK, 0.14 if over else 0.08)))
+        _tint(chip, mint, 0.22) if on else _tint(chip)
+        chip.layer().setBorderColor_(_cg(mint, 0.85) if on else _cg(WHITE, 0.0))
+        chip.layer().setBorderWidth_(1.2 if on else 0)
+        chip.label.setTextColor_(_ns(DEEP if on else INK))
+        chip.on_hover = None if on else (lambda over, c=chip: getattr(c, "chosen", False) or _tint(
+            c, WHITE, 0.55 if over else 0.0))
 
     def _greet(self, pop: bool = True) -> None:
         you = str(self.fields["user_name"].stringValue()).strip() if "user_name" in self.fields else ""
@@ -747,7 +819,7 @@ class Onboarding:
             grad = Quartz.CAGradientLayer.layer()
             grad.setFrame_(Quartz.CGRectMake(0, 0, 52, 52))
             grad.setCornerRadius_(26)
-            hue = (_accent(), BLUE, VIOLET, ORANGE, PINK, GREEN)[i]
+            hue = (_mint(), BLUE, VIOLET, ORANGE, PINK, GREEN)[i]
             grad.setColors_([_cg(hue, 0.95), _cg(tuple(c * 0.6 for c in hue), 0.95)])
             grad.setStartPoint_(Quartz.CGPointMake(0, 1))
             grad.setEndPoint_(Quartz.CGPointMake(1, 0))
@@ -757,7 +829,7 @@ class Onboarding:
                 bar = Quartz.CALayer.layer()
                 bar.setFrame_(Quartz.CGRectMake(15 + b * 6.5, 16, 3.5, 20))
                 bar.setCornerRadius_(1.75)
-                bar.setBackgroundColor_(_cg(INK, 0.95))
+                bar.setBackgroundColor_(_cg(WHITE, 0.95))
                 bar.setAffineTransform_(Quartz.CGAffineTransformMakeScale(1, (0.35, 0.8, 0.55, 0.3)[b]))
                 avatar.layer().addSublayer_(bar)
                 bars.append(bar)
@@ -766,14 +838,14 @@ class Onboarding:
             self._label(card, f"{GENDER.get(name, '').capitalize()} · {TONES.get(name, '')}", 88, 54, 150, size=13,
                         rgb=DIM)
             state = self._label(card, "", 88, 74, 160, size=11, weight=AppKit.NSFontWeightMedium, rgb=_accent())
-            check = gfx.number_badge("", 22, _cg(_accent()), _cg(BOTTOM), 11)
+            check = gfx.number_badge("", 22, _cg(SKY), _cg(WHITE), 11)
             check.setPosition_(Quartz.CGPointMake(266 - 22, 22))
             mark = Quartz.CALayer.layer()
             mark.setFrame_(Quartz.CGRectMake(5, 5, 12, 12))
-            mark.setContents_(gfx.cg_image(gfx.symbol("checkmark", 9, weight="bold")))
+            mark.setContents_(gfx.cg_image(gfx.symbol("checkmark", 9, weight="bold", white=True)))
             mark.setContentsGravity_(Quartz.kCAGravityResizeAspect)
             check.addSublayer_(mark)
-            card.layer().addSublayer_(check)
+            card.top.layer().addSublayer_(check)
             card.bars, card.state, card.check = bars, state, check
             self.voice_cards[name] = card
             self._paint_voice(name)
@@ -787,9 +859,9 @@ class Onboarding:
         mint = _accent()
         on = name == self.voice
         card.chosen = on
-        card.layer().setBackgroundColor_(_cg(mint, 0.12) if on else _cg(INK, 0.045))
-        card.layer().setBorderColor_(_cg(mint, 0.9) if on else _cg(INK, 0.09))
-        card.layer().setBorderWidth_(1.5 if on else 0.5)
+        _tint(card, mint, 0.16) if on else _tint(card)
+        card.layer().setBorderColor_(_cg(mint, 0.9) if on else _cg(WHITE, 0.0))
+        card.layer().setBorderWidth_(1.5 if on else 0)
         card.check.setOpacity_(1.0 if on else 0.0)
 
     def _pick_voice(self, name: str) -> None:
@@ -829,7 +901,7 @@ class Onboarding:
         self.summary = self._pill(page, "", W - 80 - 150, 104, 150, 32, lambda: None, primary=False, size=13)
         self.summary.on_click = None
         items.append(self.summary)
-        box = self._card(page, 80, 204, W - 160, 6 * 58 + 8, radius=18, fill=0.035)
+        box = self._card(page, 80, 204, W - 160, 6 * 58 + 8, radius=18, fill=0.2)
         items.append((box, 0.1, 0.97))
         self.perm_rows = {}
         for i, (kind, symbol, rgb, title, why, required) in enumerate(PERMISSIONS):
@@ -837,20 +909,22 @@ class Onboarding:
             if i:
                 line = Quartz.CALayer.layer()
                 line.setFrame_(Quartz.CGRectMake(70, y, W - 160 - 90, 0.5))
-                line.setBackgroundColor_(_cg(INK, 0.07))
-                box.layer().addSublayer_(line)
+                line.setBackgroundColor_(_cg(INK, 0.08))
+                box.top.layer().addSublayer_(line)
             self._tile(box, symbol, rgb, 20, y + 11)
             label = self._label(box, title, 70, y + 10, 300, size=15, weight=AppKit.NSFontWeightSemibold)
             if required:
                 label.sizeToFit()
                 self._label(box, "REQUIRED", 70 + label.frame().size.width + 8, y + 13, 70, size=9,
-                            weight=AppKit.NSFontWeightBold, rgb=PINK)
+                            weight=AppKit.NSFontWeightBold, rgb=(0.86, 0.18, 0.4))
             self._label(box, why, 70, y + 31, 520, size=13, rgb=DIM)
             button = self._pill(box, "Allow", W - 160 - 20 - 132, y + 13, 132, 32, lambda k=kind: self._allow(k),
                                 primary=False, size=13)
-            button.label.setTextColor_(_ns(gfx.light(_accent())))
+            button.label.setTextColor_(_ns(DEEP))
+            _tint(button, WHITE, 0.6)
+            button.on_hover = lambda on, b=button: _tint(b, WHITE, 0.9 if on else 0.6)
             done = self._label(box, "Allowed", W - 160 - 20 - 132, y + 19, 132, size=13,
-                               weight=AppKit.NSFontWeightSemibold, rgb=GREEN, align=AppKit.NSTextAlignmentRight)
+                               weight=AppKit.NSFontWeightSemibold, rgb=OK, align=AppKit.NSTextAlignmentRight)
             self.perm_rows[kind] = (button, done, None)
         self._check_permissions(first=True)
         return items
@@ -939,7 +1013,7 @@ class Onboarding:
         text = f"{allowed} of {len(PERMISSIONS)} allowed"
         if self.summary.label.stringValue() != text:
             self.summary.label.setStringValue_(text)
-            self.summary.label.setTextColor_(_ns(GREEN if allowed == len(PERMISSIONS) else INK))
+            self.summary.label.setTextColor_(_ns(OK if allowed == len(PERMISSIONS) else INK))
             self._center(self.summary)
             if not first:
                 _pop(self.summary)
@@ -963,8 +1037,8 @@ class Onboarding:
             change = self._label(card, "Change", 300, 106, 80, size=12, weight=AppKit.NSFontWeightMedium, rgb=DIM,
                                  align=AppKit.NSTextAlignmentRight)
             card.change = change
-            card.on_hover = (lambda over, c=card: c.layer().setBackgroundColor_(_cg(INK, 0.08 if over else 0.045))
-                             or c.change.setTextColor_(_ns(INK if over else DIM)))
+            card.on_hover = (lambda over, c=card: _tint(c, WHITE, 0.5 if over else 0.0)
+                             or c.change.setTextColor_(_ns(DEEP if over else DIM)))
             self.key_cards[key] = card
             self._paint_keys(key)
             items.append((card, 0.0, 0.95))
@@ -988,8 +1062,8 @@ class Onboarding:
             card.layer().addAnimation_forKey_(pulse, "listening")
             return
         card.layer().removeAnimationForKey_("listening")
-        card.layer().setBorderColor_(_cg(INK, 0.09))
-        card.layer().setBorderWidth_(0.5)
+        card.layer().setBorderColor_(_cg(WHITE, 0.0))
+        card.layer().setBorderWidth_(0)
         value = prefs.get("shortcuts").get(key, "")
         caps = _caps(value)
         x = 0
@@ -1007,12 +1081,12 @@ class Onboarding:
             cap_view.setWantsLayer_(True)
             layer = cap_view.layer()
             layer.setCornerRadius_(8)
-            layer.setBackgroundColor_(_cg(INK, 0.1))
-            layer.setBorderColor_(_cg(INK, 0.16))
+            layer.setBackgroundColor_(_cg(WHITE, 0.92))
+            layer.setBorderColor_(_cg(INK, 0.1))
             layer.setBorderWidth_(0.5)
-            layer.setShadowColor_(_cg((0, 0, 0)))
-            layer.setShadowOpacity_(0.5)
-            layer.setShadowRadius_(0)
+            layer.setShadowColor_(_cg((0.1, 0.2, 0.45)))
+            layer.setShadowOpacity_(0.22)
+            layer.setShadowRadius_(1)
             layer.setShadowOffset_(Quartz.CGSizeMake(0, -2))
             label = self._label(cap_view, cap, 0, 0, width, size=15 if len(cap) == 1 else 13,
                                 weight=AppKit.NSFontWeightSemibold, rounded=True, align=AppKit.NSTextAlignmentCenter)
@@ -1044,22 +1118,25 @@ class Onboarding:
         items = []
         head = self._label(page, "What I can do", 40, 70, 250, size=13, weight=AppKit.NSFontWeightBold, rgb=_accent())
         head.setAttributedStringValue_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            "WHAT I CAN DO", {AppKit.NSKernAttributeName: 1.6, AppKit.NSForegroundColorAttributeName: _ns(_accent()),
+            "WHAT I CAN DO", {AppKit.NSKernAttributeName: 1.6, AppKit.NSForegroundColorAttributeName: _ns(DEEP),
                               AppKit.NSFontAttributeName: _font(12, AppKit.NSFontWeightBold)}))
         items.append(head)
         self.tour_items = []
+        # The list fits between the heading and Back, however many features there are.
+        step = min(38.0, (H - 96 - 78) / len(TOUR))
+        tall = min(34.0, step - 3)
         for i, (_clip, symbol, title, _text, _say) in enumerate(TOUR):
-            row = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(28, 96 + i * 38, 256, 34))
+            row = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(28, 96 + i * step, 256, tall))
             row.setWantsLayer_(True)
             row.layer().setCornerRadius_(10)
-            icon = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(12, 9, 16, 16))
+            icon = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(12, (tall - 16) / 2, 16, 16))
             icon.setImage_(gfx.symbol(symbol, 12))
             row.addSubview_(icon)
-            label = self._label(row, title, 38, 8, 210, size=13, weight=AppKit.NSFontWeightMedium)
+            label = self._label(row, title, 38, (tall - 18) / 2, 210, size=13, weight=AppKit.NSFontWeightMedium)
             row.icon, row.text = icon, label
             row.on_click = lambda n=i: self._show_feature(n, by_hand=True)
             row.on_hover = lambda over, r=row: getattr(r, "chosen", False) or r.layer().setBackgroundColor_(
-                _cg(INK, 0.05 if over else 0.0))
+                _cg(WHITE, 0.45 if over else 0.0))
             page.addSubview_(row)
             self.tour_items.append(row)
             items.append((row, 0.0, 1.0))
@@ -1068,9 +1145,9 @@ class Onboarding:
         frame.setWantsLayer_(True)
         frame.layer().setCornerRadius_(18)
         frame.layer().setMasksToBounds_(True)
-        frame.layer().setBackgroundColor_(_cg((0.93, 0.92, 0.97)))
-        frame.layer().setBorderColor_(_cg(INK, 0.12))
-        frame.layer().setBorderWidth_(0.5)
+        frame.layer().setBackgroundColor_(_cg((0.97, 0.97, 1.0)))
+        frame.layer().setBorderColor_(_cg(WHITE, 0.95))
+        frame.layer().setBorderWidth_(3)
         page.addSubview_(frame)
         self.poster = AppKit.NSImageView.alloc().initWithFrame_(frame.bounds())
         self.poster.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
@@ -1087,7 +1164,10 @@ class Onboarding:
         video.layer().addSublayer_(player_layer)
         self.video_frame = frame
         self.counter = self._pill(frame, "", 14, 14, 64, 26, lambda: None, primary=False, size=11)
-        self.counter.layer().setBackgroundColor_(_cg((0, 0, 0), 0.55))
+        self.counter.glass.removeFromSuperview()
+        self.counter.glass = None
+        self.counter.layer().setBackgroundColor_(_cg(INK, 0.62))
+        self.counter.label.setTextColor_(_ns(WHITE))
         self.counter.on_click, self.counter.on_hover = None, None
         items.append((frame, 0.08, 0.97))
         self.feature_title = self._label(page, "", 316, 452, 624, size=24, weight=AppKit.NSFontWeightBold, rounded=True)
@@ -1110,10 +1190,10 @@ class Onboarding:
         for i, row in enumerate(self.tour_items):
             on = i == index
             row.chosen = on
-            row.layer().setBackgroundColor_(_cg(mint, 0.14) if on else _cg(INK, 0.0))
+            row.layer().setBackgroundColor_(_cg(WHITE, 0.7) if on else _cg(WHITE, 0.0))
             row.text.setTextColor_(_ns(INK if on else DIM))
             row.text.setFont_(_font(13, AppKit.NSFontWeightSemibold if on else AppKit.NSFontWeightMedium))
-            row.icon.setContentTintColor_(_ns(mint if on else DIM))
+            row.icon.setContentTintColor_(_ns(SKY if on else DIM))
         fade = Quartz.CATransition.animation()
         fade.setType_(Quartz.kCATransitionFade)
         fade.setDuration_(0.35)
@@ -1150,7 +1230,7 @@ class Onboarding:
                 words, {AppKit.NSFontAttributeName: _font(13, AppKit.NSFontWeightMedium)}).size().width) + 28
             chip = self._pill(self.feature_say, words, x, 0, width, 30, lambda: None, primary=False, size=13)
             chip.on_click, chip.on_hover = None, None
-            chip.label.setTextColor_(_ns(gfx.light(mint)))
+            chip.label.setTextColor_(_ns(DEEP))
             _enter(chip, 0.12 + x / 3000, rise=8)
             x += width + 8
         for view in (self.feature_title, self.feature_text):
@@ -1203,7 +1283,7 @@ class Onboarding:
         emitter.setEmitterSize_(Quartz.CGSizeMake(W * 0.8, 1))
         emitter.setEmitterShape_(Quartz.kCAEmitterLayerLine)
         cells = []
-        for rgb in (_accent(), BLUE, VIOLET, ORANGE, PINK, (1.0, 0.86, 0.3)):
+        for rgb in (_mint(), BLUE, VIOLET, ORANGE, PINK, (1.0, 0.8, 0.2)):
             for shape in ("circle.fill", "star.fill", "rectangle.fill"):
                 cell = Quartz.CAEmitterCell.emitterCell()
                 cell.setContents_(gfx.cg_image(gfx.symbol(shape, 9, white=True)))
@@ -1364,8 +1444,8 @@ class Onboarding:
         if box is None:
             return
         mint = _accent()
-        box.layer().setBorderColor_(_cg(mint, 0.85) if on else _cg(INK, 0.1))
-        box.layer().setBackgroundColor_(_cg(INK, 0.085 if on else 0.06))
+        box.layer().setBorderColor_(_cg(mint, 0.8) if on else _cg(WHITE, 0.0))
+        _tint(box, WHITE, 0.45 if on else 0.0)
 
     def tick(self) -> None:
         if self.window is None or not self.window.isVisible():

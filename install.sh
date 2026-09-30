@@ -86,7 +86,7 @@ find "$RUNTIME/mint" -name '__pycache__' -type d -prune -exec rm -rf {} +
 if [[ -d "$ROOT/guide/media" ]]; then
   mkdir -p "$RUNTIME/media/tour"
   for clip in doing island-schedule island-meeting dictation clipboard-window convert video-edit translate drop \
-              agent island-teach island-trackers; do
+              agent island-teach island-trackers image-card apple-shortcuts settings; do
     for ext in mp4 jpg; do
       [[ -f "$ROOT/guide/media/$clip.$ext" ]] && cp "$ROOT/guide/media/$clip.$ext" "$RUNTIME/media/tour/"
     done

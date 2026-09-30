@@ -41,7 +41,8 @@ open ~/Applications/Mint.app</pre>
     <tr><td>Wake it</td><td>“Hey Mint”, click the orb, or <kbd>⌘J</kbd> and type</td></tr>
     <tr><td>Interrupt</td><td>Just talk while it speaks; it stops and listens</td></tr>
     <tr><td>Stop everything</td><td>“stop”, “cancel”, “never mind”: queued clicks and keys too</td></tr>
-    <tr><td>Send it to sleep</td><td>“bye”, “that's all”; or 12 quiet seconds</td></tr></table></div>
+    <tr><td>Send it to sleep</td><td>“bye”, “that's all”: a one-line goodbye (“Bye, Boss.”), then quiet; or 12 quiet seconds</td></tr></table></div>
+  <p>A lone “hmm” or “okay” gets no answer, unless Mint has just asked you something: it only speaks when there's something to say.</p>
   <details><summary>The chat window</summary>
     {{video chat 320 | <kbd>⌘J</kbd> opens the chat: the conversation, every action with a ✓ or ✗, and a box to type in.}}
     <p>The buttons along the top show or hide Mint in screen sharing, compact or clear the chat, send Mint to sleep, turn the mic or spoken replies off, and open Settings. Typing never turns the microphone on.</p>
@@ -158,7 +159,8 @@ open ~/Applications/Mint.app</pre>
     <li>In Mint, open Settings ▸ Accounts &amp; keys ▸ Telegram remote control, add the token and switch it on.</li>
     <li>Send your bot the 6-digit code shown there. From then on only your Telegram account can control Mint.</li></ol>
   <ul class="say"><li><q>what's on my calendar today?</q></li><li><q>find the Q3 report and send it here</q></li><li><q>/screenshot</q></li><li><q>/status</q></li><li><q>/stop</q></li></ul>
-  <p>Commands: <code>/stop</code> stops whatever Mint is doing, <code>/status</code> says what it is doing, <code>/screenshot</code> sends the screen, <code>/pause</code> and <code>/resume</code> switch phone control off and on, <code>/help</code> lists them. Alerts from trackers (“the download finished”) and agents come to the chat too.</p>
+  <p><strong>It works like an app inside Telegram.</strong> The live message shows a plan, each step as it's done, the time and the app in use, with <b>⏸ Pause · ⏹ Stop · 📸 Screen</b> buttons; when it finishes, <b>🔁 Run again · ↩️ Undo</b>. Quick buttons sit under the typing box (What did I miss? · My day · Screen · Stop · Status), and the ☰ menu lists every command: <code>/status</code>, <code>/screenshot</code>, <code>/briefing</code>, <code>/missed</code>, <code>/clipboard</code> (tap one of your recent copies to put it back on the Mac), <code>/trackers</code>, <code>/undo</code>, <code>/chatgpt</code>, <code>/claude</code>, <code>/pause</code>, <code>/resume</code>, <code>/stop</code>, <code>/help</code>. Mint's cards (your schedule, lists) arrive as pictures, and files it made as attachments.</p>
+  <p>⏸ Pause stops the current step and holds the plan; ▶️ Resume carries on from where it stopped without redoing finished steps. Alerts from trackers (“the download finished”) and agents arrive with buttons to send the file here or open it on the Mac.</p>
   <p class="note">Only your Mac talks to Telegram, over HTTPS: no server, nothing to open on your router. Keep the Mac awake and plugged in; while the screen is locked, clicking and typing in apps may fail, but files, the web, agents and reminders still work. “Read-only from Telegram” stops phone requests from sending, deleting or buying anything. Every phone request is logged on the Mac.</p>
 </section>
 
@@ -224,6 +226,16 @@ open ~/Applications/Mint.app</pre>
   <ul class="say"><li><q>OCR this and copy the text</q></li><li><q>copy the text from this image</q></li><li><q>make an Excel of this table</q></li>
     <li><q>put the data in this PDF into a spreadsheet</q></li><li><q>convert this English PDF to a Hindi Word doc</q></li><li><q>translate report.docx to Spanish as a PDF</q></li><li><q>turn this PDF into a Word document</q></li></ul>
   <p>Text is read on your Mac (scanned PDFs too) and copied as it reads, tables with tabs. Spreadsheets get a bold, frozen header, filters and real numbers and dates, and phone numbers stay as text. Translations keep the document's shape and are saved next to the original, like “report (Hindi).docx”. Long documents carry on in the background, and Mint tells you when they're done.</p>
+</section>
+
+<section id="images" data-group="Using Mint">
+  <h2>Pictures: make and edit</h2>
+  <p class="lead">Describe a picture and Apple's Image Playground draws it on your Mac, in seconds. It opens on a card by the orb: type or say a change and it redraws, with every version kept to go back to.</p>
+  {{video image-card 380 | A real run: “a lighthouse on a cliff at sunset”, then “add a small sailing boat on the sea” typed on the card.}}
+  <ul class="say"><li><q>make an illustration of a lighthouse at sunset</q></li><li><q>draw a fox in the snow as a sketch</q></li><li><q>make the sky purple</q></li>
+    <li><q>make another one</q></li><li><q>improve it</q></li><li><q>save it to my Desktop</q></li><li><q>copy it</q></li><li><q>open it in Image Playground</q></li></ul>
+  <p>The card has <b>Save…</b>, <b>Another</b> (a new variation), <b>Improve</b> (a richer description, drawn again), <b>Copy</b> and <b>Playground</b> (for Visual Edit and captions in Apple's app). Drag the picture out into any app. Pictures are kept in your Mint folder ▸ Images.</p>
+  <p class="note">Needs Apple Intelligence (Image Playground). The first time, Mint opens two small shortcuts, “Mint Draw” and “Mint Redraw”: click Add Shortcut on each. Everything is made on your Mac.</p>
 </section>
 
 <section id="video-editing" data-group="Using Mint">
@@ -336,6 +348,16 @@ open ~/Applications/Mint.app</pre>
   {{video show | Showtime: the critters pop out, do a stadium wave, a solo each and a dance, then bow.}}
 </section>
 
+<section id="personality-tone" data-group="Personality">
+  <h2>Personality</h2>
+  <p class="lead">Give Mint a personality in one line: funny, calm, argumentative, sarcastic, motivating, formal, or your own words. Settings ▸ General ▸ Personality, up to 100 characters, or pick a preset.</p>
+  <div class="table"><table><tr><th>Asked “Is pineapple on pizza a good idea?”</th><th>Mint answered</th></tr>
+    <tr><td>Default</td><td>“That's a classic debate!…”</td></tr>
+    <tr><td>Argumentative</td><td>“Absolutely not, Boss!…”</td></tr>
+    <tr><td>Funny</td><td>“The ultimate food debate… a sweet and savory masterpiece.”</td></tr></table></div>
+  <p>It changes only the tone. Mint's rules, tools, short replies and safety stay the same. A new personality applies in a few seconds, once Mint is quiet, and the conversation carries on.</p>
+</section>
+
 <section id="personality" data-group="Personality">
   <h2>Expressions and tricks</h2>
   <p class="lead">Fourteen expressions and eight tricks, each a real 60 fps animation. Mint uses them sparingly on its own, and whenever you ask.</p>
@@ -393,13 +415,24 @@ open ~/Applications/Mint.app</pre>
   <p><strong>Your own wake word.</strong> Want “Hey Jarvis” or “Okay Nova”? Type it in Settings ▸ Voice &amp; wake word and press Train. Mint builds a detector for it on your Mac in about a minute and a half, from dozens of voices plus (if you like) four takes of your own voice. In testing, “Hey Jarvis” caught 93% of voices it had never heard, with about one false wake an hour of other people talking. Keep “Hey Mint” as well if you like, press Test to try it, or Reset to go back. If the voice lock is on, retrain your voice after changing the phrase.</p>
 </section>
 
+<section id="apple-shortcuts" data-group="Using Mint">
+  <h2>Apple Shortcuts, made for you</h2>
+  <p class="lead">Mint runs your Shortcuts by voice, and makes new ones from plain words: say what it should do, hear the steps, say yes, and it opens in the Shortcuts app for one “Add Shortcut” click.</p>
+  {{video apple-shortcuts 560 | Settings ▸ Apple Shortcuts: Mint's own shortcuts, yours, and a new one planned from “turn on dark mode, set the brightness to 40% and turn on Do Not Disturb”.}}
+  <ul class="say"><li><q>make me a shortcut that turns on dark mode and sets the volume to 30%</q></li><li><q>make a shortcut that tells me the weather and my battery</q></li>
+    <li><q>run Hello and Date</q></li><li><q>what shortcuts do I have?</q></li><li><q>add Mint's Focus shortcuts</q></li></ul>
+  <p>Settings ▸ Apple Shortcuts lists <b>Mint's shortcuts</b> (the ones it uses for Image Playground and Do Not Disturb, with an Add button for any that are missing), <b>your shortcuts</b> (each with Run and a “Mint may run it” switch), and <b>Create a shortcut</b>: type what it should do, Plan it, then Create.</p>
+  <p>Mint builds from 39 Shortcuts actions whose exact format it has checked: speaking and showing text, notifications, the clipboard, apps and web pages, volume, brightness, dark mode, Focus, Wi-Fi and Bluetooth, weather, battery, the date, dictation, calculations, Apple Intelligence, music playlists, calendar events, reminders, email drafts, Image Playground pictures, menus and repeats. If something isn't possible it says so rather than guessing.</p>
+  <p class="note">Mint never makes a shortcut that sends messages or deletes things. An email is only ever a draft, a shell command is always shown in the plan first, and by voice nothing is made until you say yes.</p>
+</section>
+
 <section id="settings" data-group="Settings">
   <h2>Settings</h2>
   <p class="lead">Open Settings from the menu bar icon (<kbd>⌘,</kbd>), or just ask Mint to change something. Pages sit in a sidebar, like System Settings.</p>
   {{video settings 560 | Settings: every page, from General to Usage and Updates.}}
   <ul class="say"><li><q>don't speak, just chat</q></li><li><q>always answer in Hindi</q></li><li><q>make it pink</q></li><li><q>move to the top left</q></li><li><q>Mint, be visible</q></li><li><q>quit Mint</q></li></ul>
   <div class="table"><table><tr><th>Page</th><th>What's in it</th></tr>
-    <tr><td>General</td><td>The assistant's name (and so its wake word), your name, what Mint should know about you, start at login, memory when asleep, Quit</td></tr>
+    <tr><td>General</td><td>The assistant's name (and so its wake word), its personality, your name, what Mint should know about you, start at login, memory when asleep, Quit</td></tr>
     <tr><td>Voice &amp; wake word</td><td>The wake word, training your voice, the voice lock and its strictness</td></tr>
     <tr><td>Speaking</td><td>Which of the 30 voices, speaking style, the language Mint answers in, captions</td></tr>
     <tr><td>Audio</td><td>Microphone, speaker, echo cancellation, stepping aside for calls</td></tr>

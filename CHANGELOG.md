@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Pictures with Image Playground** (`mint/tools/imagegen.py`, `mint/ui/image_card.py`): "make an illustration of…"
+  draws on your Mac in seconds through two small shortcuts Mint installs ("Mint Draw", "Mint Redraw"; one Add
+  Shortcut click each). A card by the orb shows the picture with "Describe a change…" (redraws, every version kept),
+  Save…, Another, Improve (a richer prompt), Copy and Open in Image Playground; all by voice too.
+- **Apple Shortcuts, made for you** (`mint/tools/shortcut_maker.py`, `shortcut_library.py`): "make me a shortcut
+  that…" plans it from 39 verified Shortcuts actions, reads the steps back and, after a yes, opens it for one Add
+  click. Settings ▸ Apple Shortcuts lists Mint's own shortcuts (Add), yours (Run, "Mint may run it"), and Create a
+  shortcut. Never sends messages or deletes; email is a draft; shell commands are always shown.
+- **Autopilot:** no nudge after a question that was answered; a bare "All done." to a new request is caught and the
+  request is done.
+- **Welcome tour:** pictures and Shortcuts added (14 features), the list fits, three things to try.
+- **Welcome window, light theme:** pale sky-blue background with drifting light, Liquid Glass (NSGlassEffectView)
+  cards, fields, chips and buttons, deep-navy text and sky-blue highlights.
 - **Reliability, from the benchmark (67% -> 96% on 70 tasks):**
   - **Save and create where asked:**
     - spreadsheets and PDFs save where the user says (`save_to`, or the path in the request)

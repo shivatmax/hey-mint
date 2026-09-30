@@ -760,6 +760,25 @@ class Mint:
                 self._pending_text.append(text)
                 self._print("[typed while reconnecting - sending once connected]")
 
+    def _check_empty_done(self, said: str) -> None:
+        """A new request answered with just "All done." and nothing done: after a few autopilot nudges ("if it
+        is all done, say 'All done.'") the model took the user's next requests for nudges too and did nothing
+        (seen 30 Sep). Tell it once that this was the user."""
+        nudge, self._nudge_turn = getattr(self, "_nudge_turn", False), False
+        words = " ".join((said or "").lower().split()).rstrip(".! ")
+        if nudge or self._suppress_turn or not words.startswith("all done") or len(words.split()) > 4:
+            return
+        from mint.app import autopilot
+        if autopilot.tools_done() or getattr(self, "_empty_done_at", 0) > time.monotonic() - 60:
+            return
+        self._empty_done_at = time.monotonic()
+        self._print("[the model said 'All done.' to a new request without doing it: telling it]")
+        note = ("(Mint note - not the user: the user's last message was a NEW request, not an autopilot note. "
+                "Nothing has been done for it yet. Do it now.)")
+        if self.loop is not None and self.session is not None:
+            self._turn_open = True
+            self.loop.create_task(self.session.send_realtime_input(text=note))
+
     async def _answer_watch(self, text: str, sent_at: float, epoch: int, wait: float = 30.0) -> None:
         """A typed request that gets nothing at all back - no words, no tool call - within `wait`
         seconds: the session is connected but deaf. Seen after a voice-change reconnect (resumed with
@@ -952,6 +971,7 @@ class Mint:
                         memory.add("mint", self._said)
                         self._last_said = self._said
                 finished_said = "" if self._suppress_turn else self._said
+                self._check_empty_done(finished_said)
                 self._heard = self._said = ""
                 self._turn_open = False
                 self._turn_levels = []
@@ -1128,6 +1148,7 @@ class Mint:
         if self.session is None or epoch != self._stop_epoch:
             return
         self._print(f"[autopilot: carrying on - {step or 'the rest of the request'}]")
+        self._nudge_turn = True
         self._turn_open = True
         try:
             await self.session.send_realtime_input(text=note)

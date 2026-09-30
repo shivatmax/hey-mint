@@ -22,11 +22,13 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import plistlib
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -35,7 +37,7 @@ from mint.core import config
 
 log = logging.getLogger("mint.tools.imagegen")
 
-SHORTCUTS = {"create": "Mint Generate Image", "edit": "Mint Edit Image"}
+SHORTCUTS = {"create": "Mint Draw", "edit": "Mint Redraw"}
 # Image Playground's style ids (ImagePlaygroundStyle.id); the first is the default.
 STYLES = {"animation": "Animation", "illustration": "Illustration", "sketch": "Sketch"}
 APP = "Image Playground"
@@ -43,7 +45,9 @@ _ACTION = "com.apple.GenerativePlaygroundApp.GenerateImageIntent"
 _DESCRIPTOR = {"AppIntentIdentifier": "GenerateImageIntent", "BundleIdentifier": "com.apple.GenerativePlaygroundApp",
                "Name": "Image Playground", "TeamIdentifier": "0000000000"}
 _TIMEOUT = 180
-_state: dict = {"last": None, "offered": 0.0}
+_state: dict = {"last": None, "offered": 0.0, "prompt": "", "style": ""}
+_prompts: dict[str, str] = {}     # picture path -> the prompt it was drawn from (for "another" / "improve")
+_job = threading.Lock()           # one picture at a time: the card and the voice share it
 
 
 # --- The shortcuts -----------------------------------------------------------------------
@@ -82,28 +86,16 @@ def _workflow(edit: bool) -> dict:
                 _action("is.workflow.actions.getvalueforkey", UUID=style, WFGetDictionaryValueType="Value",
                         WFDictionaryKey="style", WFInput=_attachment(_ref(spec, "Dictionary")))]
 
-    def create(style_id: str) -> list[dict]:
-        made = str(uuid.uuid4()).upper()
-        params = {"AppIntentDescriptor": dict(_DESCRIPTOR), "UUID": made,
-                  "prompt": _token_string(_ref(prompt, "Dictionary Value")),
-                  "style": {"identifier": style_id, "title": {"key": STYLES[style_id]},
-                            "subtitle": {"key": STYLES[style_id]}},
-                  "saveToLibrary": "never"}
-        if image is not None:
-            params["image"] = image
-        return [_action(_ACTION, **params),
+    made = str(uuid.uuid4()).upper()
+    # No style: a fixed style entity written by Mint was rejected ("Please choose a value for each parameter",
+    # 30 Sep); left out, Image Playground uses its default. The style asked for goes into the prompt instead.
+    params = {"AppIntentDescriptor": dict(_DESCRIPTOR), "UUID": made,
+              "prompt": _token_string(_ref(prompt, "Dictionary Value")), "saveToLibrary": "never"}
+    if image is not None:
+        params["image"] = image
+    actions += [_action(_ACTION, **params),
                 _action("is.workflow.actions.output", WFOutput=_token_string(_ref(made, "Image")))]
-
-    default, *others = STYLES
-    for style_id in others:     # If style is <id>: create in that style and stop there
-        group = str(uuid.uuid4()).upper()
-        actions.append(_action("is.workflow.actions.conditional", GroupingIdentifier=group, WFControlFlowMode=0,
-                               WFCondition=4, WFConditionalActionString=style_id,
-                               WFInput={"Type": "Variable", "Variable": _attachment(_ref(style, "Dictionary Value"))}))
-        actions += create(style_id)
-        actions.append(_action("is.workflow.actions.conditional", GroupingIdentifier=group, WFControlFlowMode=2,
-                               UUID=str(uuid.uuid4()).upper()))
-    actions += create(default)
+    del style
     inputs = ["WFGenericFileContentItem", "WFImageContentItem", "WFStringContentItem", "WFRichTextContentItem",
               "WFPDFContentItem", "WFURLContentItem"]
     return {"WFWorkflowActions": actions, "WFWorkflowClientVersion": "4042.0.2.2",
@@ -216,12 +208,14 @@ def _is_image(path: Path) -> bool:
             or head[4:8] == b"ftyp" or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
 
 
-def _generate(prompt: str, style: str, image: Path | None) -> tuple[Path | None, str]:
-    """One picture through the shortcut. -> (saved PNG, '') or (None, message)."""
+def _generate(prompt: str, style: str, image: Path | None, name: str = "") -> tuple[Path | None, str]:
+    """One picture through the shortcut. -> (saved PNG, '') or (None, message). `name`: what the file is
+    named after (the picture's prompt, for an edit)."""
     kind = "edit" if image is not None else "create"
     work = Path(tempfile.mkdtemp(prefix="mint-imagegen-run-"))
     spec, out = work / "spec.json", work / "out.png"
-    spec.write_text(json.dumps({"prompt": prompt, "style": style}))
+    styled = f"{prompt}, in {style} style" if style and style.lower() not in prompt.lower() else prompt
+    spec.write_text(json.dumps({"prompt": styled, "style": style}))
     command = ["shortcuts", "run", SHORTCUTS[kind], "--input-path", str(spec)]
     if image is not None:
         command += ["--input-path", str(image)]
@@ -238,7 +232,7 @@ def _generate(prompt: str, style: str, image: Path | None) -> tuple[Path | None,
         if done.returncode != 0 or not out.exists() or not _is_image(out):
             said = (done.stderr or done.stdout or "").strip()
             return None, _explain(said) if said else "FAILED: the shortcut ran but gave back no picture."
-        target = _new_file(prompt)
+        target = _new_file(name or prompt)
         if out.read_bytes()[:4] == b"\x89PNG":
             shutil.move(str(out), target)
         else:
@@ -247,6 +241,7 @@ def _generate(prompt: str, style: str, image: Path | None) -> tuple[Path | None,
             if convert.returncode != 0 or not target.exists():
                 return None, f"FAILED: could not save the picture as PNG ({convert.stderr.strip()[:120]})."
         _state["last"] = target
+        _prompts[str(target)] = name or prompt
         return target, ""
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -272,63 +267,314 @@ def _style(value) -> str:
     return next(iter(STYLES))
 
 
-def _card(title: str, paths: list[Path], detail: str) -> None:
+
+
+# --- The picture card (image_card.py): shown after every picture, and what voice can do to it ----------
+
+_BUSY = ("BUSY: Mint is still drawing the last picture (a few seconds). Wait until it is on the card, then do "
+         "this; tell the user in a few words.")
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".heic", ".tiff", ".tif")
+
+
+def _on_card(name: str, *args) -> None:
     try:
-        from mint.tools import cards
-        cards.show(title, subtitle=f"saved in {images_folder().name} · click one to open", icon="photo.fill",
-                   tint="purple", seconds=30,
-                   items=[{"title": p.stem, "detail": detail, "path": str(p)} for p in paths])
+        from mint.ui import image_card
+        getattr(image_card, name)(*args)
     except Exception as error:
-        log.info("card: %s", error)
+        log.info("image card %s: %s", name, error)
+
+
+def _card_picture() -> Path | None:
+    """The picture on the open card, else None."""
+    try:
+        from mint.ui import image_card
+        return image_card.current()
+    except Exception:
+        return None
+
+
+def _card_prompt_style() -> tuple[str, str]:
+    try:
+        from mint.ui import image_card
+        if image_card.is_open():
+            return image_card.current_prompt(), image_card.current_style()
+    except Exception:
+        pass
+    return "", ""
+
+
+def _prompt_of(path: Path) -> str:
+    """What a picture was drawn from: remembered, else its file name without the date."""
+    known = _prompts.get(str(path))
+    if known:
+        return known
+    return re.sub(r"\s*\d{4}-\d{2}-\d{2} at [\d.]+( \(\d+\))?$", "", path.stem).strip() or path.stem
+
+
+def file_name(prompt: str) -> str:
+    """A good file name for a picture of `prompt`: 'Small red fox in the snow.png'."""
+    words = re.sub(r"[^\w\s-]", "", str(prompt or "")).split()
+    while len(words) > 1 and words[0].lower() in ("a", "an", "the"):
+        words = words[1:]
+    name = ""
+    for word in words:
+        if len(name) + len(word) + 1 > 44:
+            break
+        name = f"{name} {word}".strip()
+    name = name or "Image"
+    return name[:1].upper() + name[1:] + ".png"
+
+
+def _stamp(started: float) -> str:
+    return f"{time.time() - started:.0f} s"
+
+
+def _create(prompt: str, style: str, count: int, fresh: bool, note: str) -> str:
+    """Draw `count` pictures of `prompt` onto the card (a fresh card, or new versions on the open one).
+    The caller holds _job."""
+    words = "Drawing…" if count == 1 else f"Drawing 1 of {count}…"
+    if fresh:
+        _on_card("start", prompt, style, words, None, prompt[:70])
+    else:
+        _on_card("work", words, prompt[:70])
+    waiting = _ready(("create",))
+    if waiting:
+        _on_card("fail", waiting)
+        return waiting
+    made, problem, started = [], "", time.time()
+    for n in range(count):
+        path, problem = _generate(prompt, style, None)
+        if path is None:
+            break
+        made.append(path)
+        more = f"Drawing {n + 2} of {count}…" if n + 1 < count else ""
+        _on_card("add", path, prompt, note or STYLES[style], more, style)
+    _state.update(prompt=prompt, style=style)
+    if not made:
+        _on_card("fail", problem)
+        return problem
+    if problem:
+        _on_card("work", "")
+    said = (f"Made {len(made)} {STYLES[style].lower()} picture{'s' if len(made) > 1 else ''} of '{prompt[:80]}' in "
+            f"{_stamp(started)}, saved: " + "; ".join(str(p) for p in made) + ". It is on the picture card, where "
+            "the user can type a change, save, copy or draw another.")
+    return said + (f" Stopped early: {problem}" if problem else "")
 
 
 def create(prompt: str, style: str = "", count: int = 1) -> str:
     prompt = " ".join(str(prompt or "").split())
     if not prompt:
         return "FAILED: say what the picture should show."
-    waiting = _ready(("create",))
-    if waiting:
-        return waiting
     style, count = _style(style), max(1, min(4, int(count or 1)))
-    made, problem, started = [], "", time.time()
-    for _ in range(count):
-        path, problem = _generate(prompt, style, None)
-        if path is None:
-            break
-        made.append(path)
-    if not made:
-        return problem
-    _card("Image Playground", made, f"{STYLES[style]} · {prompt[:60]}")
-    said = (f"Made {len(made)} {STYLES[style].lower()} picture{'s' if len(made) > 1 else ''} of '{prompt[:80]}' in "
-            f"{time.time() - started:.0f} s, saved: " + "; ".join(str(p) for p in made) + ". Shown on a card.")
-    return said + (f" Stopped early: {problem}" if problem else "")
+    if not _job.acquire(blocking=False):
+        return _BUSY
+    try:
+        return _create(prompt, style, count, True, "")
+    finally:
+        _job.release()
 
 
 def edit(instruction: str, image: str = "", style: str = "") -> str:
     instruction = " ".join(str(instruction or "").split())
     if not instruction:
         return "FAILED: say what to change."
-    source = Path(image).expanduser() if image else last_image()
+    on_card = _card_picture()
+    source = Path(image).expanduser() if image else (on_card or last_image())
     if source is None or not source.exists():
         return ("FAILED: no picture to change - give the image's path, or make one first." if not image
                 else f"FAILED: there is no picture at {source}.")
     if not _is_image(source):
         return f"FAILED: {source.name} is not a picture."
-    waiting = _ready(("edit",))
-    if waiting:
-        return waiting
-    style = _style(style)
-    path, problem = _generate(instruction, style, source)
-    if path is None:
-        return problem
-    _card("Image Playground", [path], f"from {source.name} · {instruction[:50]}")
-    return (f"Made a new picture from {source.name} with '{instruction[:80]}', saved: {path}. Shown on a card. "
-            "(Image Playground redraws the picture from the description; it does not paint on the original.)")
+    if not _job.acquire(blocking=False):
+        return _BUSY
+    try:
+        card_prompt, card_style = _card_prompt_style()
+        same = on_card is not None and on_card.resolve() == source.resolve()
+        base = (card_prompt if same and card_prompt else _prompt_of(source))
+        style = _style(style or (card_style if same else "") or _state.get("style"))
+        if same:
+            _on_card("work", "Redrawing…", instruction[:70])
+        else:
+            _on_card("start", base, style, "Redrawing…", [{"path": str(source), "prompt": base, "note": "Original"}],
+                     instruction[:70])
+        waiting = _ready(("edit",))
+        if waiting:
+            _on_card("fail", waiting)
+            return waiting
+        started = time.time()
+        path, problem = _generate(instruction, style, source, name=base)
+        if path is None:
+            _on_card("fail", problem)
+            return problem
+        _on_card("add", path, base, f"Changed: {instruction}", "", style)
+        _state.update(prompt=base, style=style)
+        return (f"Made a new picture from {source.name} with '{instruction[:80]}' in {_stamp(started)}, saved: "
+                f"{path}. It is on the picture card (earlier versions stay in its strip). (Image Playground redraws "
+                "the picture from the description; it does not paint on the original.)")
+    finally:
+        _job.release()
+
+
+def _base() -> tuple[str, str]:
+    """The prompt and style of the picture on the card, else of the last one made."""
+    prompt, style = _card_prompt_style()
+    if not prompt:
+        last = last_image()
+        prompt = _state.get("prompt") or (_prompt_of(last) if last else "")
+        style = _state.get("style") or ""
+    return prompt, _style(style)
+
+
+def another() -> str:
+    """The same prompt again: a new variation, added to the open card."""
+    prompt, style = _base()
+    if not prompt:
+        return "FAILED: there is no picture yet to make another of - say what to draw."
+    if not _job.acquire(blocking=False):
+        return _BUSY
+    try:
+        return _create(prompt, style, 1, _card_picture() is None, "Another take")
+    finally:
+        _job.release()
+
+
+_IMPROVE = """Rewrite this description of a picture for Apple's Image Playground so the picture comes out more \
+detailed and better looking. Keep the same subject and idea; add concrete details: the setting, lighting, colours, \
+mood and composition. One sentence, at most 35 words. Image Playground makes animation, illustration and sketch \
+pictures only: no photorealism, no words or text in the picture, no real people's names, and don't name an art \
+style. Reply with the new description only.
+
+Description: """
+
+
+def _better(prompt: str) -> str:
+    from mint.core import llm
+    text, _model = llm.generate(_IMPROVE + prompt)
+    text = " ".join(str(text or "").strip().strip('"“”').split())
+    text = re.sub(r"^(description|prompt)\s*:\s*", "", text, flags=re.I)
+    return text[:400]
+
+
+def improve() -> str:
+    """Gemini rewrites the prompt with more detail and quality, then Image Playground draws that."""
+    prompt, style = _base()
+    if not prompt:
+        return "FAILED: there is no picture yet to improve - say what to draw."
+    if not _job.acquire(blocking=False):
+        return _BUSY
+    try:
+        fresh = _card_picture() is None
+        if fresh:
+            _on_card("start", prompt, style, "Improving the prompt…", None, prompt[:70])
+        else:
+            _on_card("work", "Improving the prompt…", prompt[:70])
+        try:
+            better = _better(prompt)
+        except Exception as error:
+            log.info("improve: %s", error)
+            better = ""
+        if not better:
+            problem = "FAILED: Gemini could not rewrite the prompt just now; try again in a moment."
+            _on_card("fail", problem)
+            return problem
+        said = _create(better, style, 1, False, "Improved prompt")
+        return f"Improved the prompt to: '{better}'. " + said
+    finally:
+        _job.release()
+
+
+def _save_target(path: str, prompt: str) -> Path:
+    """Where 'save it (to ...)' puts the picture: a file, a folder (named after the prompt) or the Desktop."""
+    from mint.tools.saveto import _free
+    home, name = Path.home(), file_name(prompt)
+    raw = str(path or "").strip()
+    if not raw:
+        return _free(home / "Desktop" / name)
+    folder_hint = raw.endswith("/")
+    target = Path(os.path.expanduser(raw))
+    if not target.is_absolute():
+        parts = target.parts
+        places = {"desktop": "Desktop", "documents": "Documents", "downloads": "Downloads", "pictures": "Pictures"}
+        if parts and parts[0].lower() in places:
+            target = home.joinpath(places[parts[0].lower()], *parts[1:])
+        else:
+            target = home / "Desktop" / target
+    if target.is_dir() or folder_hint:
+        target = target / name
+    elif target.suffix.lower() not in _IMAGE_SUFFIXES:
+        target = target.with_name(target.name + ".png")
+    return _free(target)
+
+
+def save(path: str = "", source: str = "", replace: bool = False) -> str:
+    """A copy of the card's picture (or `source`) at `path`: a file, a folder, or '' = the Desktop.
+    `replace`: the user chose that exact file in a save panel (it asked about replacing)."""
+    picture = Path(source).expanduser() if source else (_card_picture() or last_image())
+    if picture is None or not picture.exists():
+        return "FAILED: there is no picture to save - make one first."
+    if replace and path:
+        target = Path(path).expanduser()
+    else:
+        target = _save_target(path, _card_prompt_style()[0] or _prompt_of(picture))
+    try:
+        from mint.tools.harness import _blocked
+        why = _blocked(target, write=True)
+    except Exception:
+        why = ""
+    if why:
+        return f"FAILED: can't save there - {why}. Ask where else."
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.suffix.lower() in ("", ".png") or target.suffix.lower() == picture.suffix.lower():
+            shutil.copyfile(picture, target)
+        else:
+            kind = {".jpg": "jpeg", ".jpeg": "jpeg", ".heic": "heic", ".tif": "tiff", ".tiff": "tiff"}[target.suffix.lower()]
+            done = subprocess.run(["sips", "-s", "format", kind, str(picture), "--out", str(target)],
+                                  capture_output=True, text=True, timeout=60)
+            if done.returncode != 0 or not target.exists():
+                return f"FAILED: could not save it as {kind.upper()} ({done.stderr.strip()[:120]})."
+    except OSError as error:
+        return f"FAILED: could not save the picture: {error}"
+    where = str(target.parent).replace(str(Path.home()), "~")
+    _on_card("flash", f"Saved to {target.parent.name}  ·  {target.name}")
+    return f"Saved the picture as {target.name} in {where} ({target})."
+
+
+def copy_image(image: str = "") -> str:
+    """Put the picture on the clipboard; it lands in the clipboard history as Mint's."""
+    picture = Path(image).expanduser() if image else (_card_picture() or last_image())
+    if picture is None or not picture.exists():
+        return "FAILED: there is no picture to copy."
+    data = picture.read_bytes()
+    if not data.startswith(b"\x89PNG"):
+        work = Path(tempfile.mkdtemp(prefix="mint-imagegen-copy-"))
+        try:
+            subprocess.run(["sips", "-s", "format", "png", str(picture), "--out", str(work / "copy.png")],
+                           capture_output=True, timeout=60)
+            data = (work / "copy.png").read_bytes()
+        except OSError as error:
+            return f"FAILED: could not copy the picture: {error}"
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+    from mint.tools import clipboard as clip_tools
+    clip_tools._put_png(data)
+    _on_card("flash", "Copied - paste it with ⌘V")
+    return "Copied the picture to the clipboard."
+
+
+def close_card() -> str:
+    try:
+        from mint.ui import image_card
+        was = image_card.is_open()
+        image_card.close()
+    except Exception as error:
+        return f"FAILED: {error}"
+    return "Closed the picture card." if was else "The picture card was not open."
 
 
 def open_app(image: str = "") -> str:
     """Hand a picture to the Image Playground app for Visual Edit, Add Caption or Describe a Change by hand."""
-    source = Path(image).expanduser() if image else last_image()
+    source = Path(image).expanduser() if image else (_card_picture() or last_image())
     if image and (source is None or not source.exists()):
         return f"FAILED: there is no picture at {source}."
     command = ["open", "-a", APP] + ([str(source)] if source is not None else [])
@@ -349,6 +595,16 @@ def tool(args: dict) -> str:
                         str(args.get("style") or ""))
         if action in ("open_app", "open"):
             return open_app(str(args.get("image") or ""))
+        if action == "save":
+            return save(str(args.get("path") or ""), str(args.get("image") or ""))
+        if action in ("another", "again", "variation"):
+            return another()
+        if action == "improve":
+            return improve()
+        if action in ("close", "dismiss"):
+            return close_card()
+        if action == "copy":
+            return copy_image(str(args.get("image") or ""))
         if action == "setup":
             missing = [n for n in SHORTCUTS.values() if n not in _installed()]
             return _offer(missing) if missing else "Both Image Playground shortcuts are installed."
@@ -358,13 +614,16 @@ def tool(args: dict) -> str:
         return f"FAILED: {error}"
 
 
-PROMPT = """Pictures: "make/draw/generate an image of ...", "a sketch of ...", "four versions", "change it so ...", \
-"give it a hat" -> make_image (Apple's Image Playground, on this Mac). action=create with prompt (the picture in \
-plain words, the user's own description), style animation (default), illustration or sketch, count 1-4. \
-action=edit with prompt = the change and image = a path (empty = the picture made last): it redraws from that \
-picture. action=open_app opens the picture in the Image Playground app for Visual Edit / Add Caption by hand. \
-Pictures are saved in the Mint folder's Images and shown on a card - say one short sentence, don't read paths out. \
-If the result says NOT DONE YET, pass on the one-click 'Add Shortcut' step. Don't try other image tools."""
+PROMPT = """Pictures: "make/draw/generate an image of ...", "a sketch of ...", "four versions" -> make_image \
+(Apple's Image Playground, on this Mac). action=create with prompt (the picture in plain words, the user's own \
+description), style animation (default), illustration or sketch, count 1-4. Every picture opens on the PICTURE \
+CARD by the orb; while it is open, "it" means the picture on the card: "make the sky purple" / "give it a hat" -> \
+action=edit with prompt = the change (image empty); "save it (to my Desktop / as fox.png)" -> action=save with path \
+(a file or folder; empty = the Desktop); "make another one" -> action=another (same prompt, new variation); "make it \
+better / more detailed" -> action=improve (rewrites the prompt, then draws it); "copy it" -> action=copy; "close it" \
+-> action=close; "open it in Image Playground" -> action=open_app (Visual Edit / Add Caption by hand). Pictures are \
+saved in the Mint folder's Images - say one short sentence, don't read paths out. If the result says NOT DONE YET, \
+pass on the one-click 'Add Shortcut' step; BUSY means one is still being drawn. Don't try other image tools."""
 
 
 def declarations():
@@ -372,17 +631,22 @@ def declarations():
     S, N = types.Type.STRING, types.Type.NUMBER
     return [types.FunctionDeclaration(
         name="make_image",
-        description=("Make pictures with Apple's Image Playground (on-device Apple Intelligence): create from a "
-                     "description in a style, change a picture by description, or open one in the Image "
-                     "Playground app. Saved as PNG in Mint's Images folder and shown on a card."),
+        description=("Make pictures with Apple's Image Playground (on-device Apple Intelligence) and work on the "
+                     "picture card that shows them: create from a description in a style, change the picture by "
+                     "description, save a copy, draw another, improve the prompt, copy, close the card, or open "
+                     "it in the Image Playground app. Saved as PNG in Mint's Images folder."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=S, enum=["create", "edit", "open_app", "setup"],
-                                   description="create (default), edit, open_app, or setup (install the shortcuts)"),
+            "action": types.Schema(type=S, enum=["create", "edit", "save", "another", "improve", "copy", "close",
+                                                 "open_app", "setup"],
+                                   description="create (default), edit, save, another, improve, copy, close, "
+                                               "open_app, or setup (install the shortcuts). All but create act on "
+                                               "the picture on the card (else the last one made)."),
             "prompt": types.Schema(type=S, description="create: what the picture shows; edit: the change to make"),
             "style": types.Schema(type=S, enum=list(STYLES), description="default animation"),
             "count": types.Schema(type=N, description="create: how many pictures, 1-4 (default 1)"),
-            "image": types.Schema(type=S, description="edit/open_app: path of the picture; empty = the last one "
-                                                      "made")},
+            "path": types.Schema(type=S, description="save: a file (…/fox.png) or a folder; empty = the Desktop"),
+            "image": types.Schema(type=S, description="edit/open_app/save/copy: path of a picture; empty = the one "
+                                                      "on the card, else the last one made")},
             required=["action"]))]
 
 

@@ -41,6 +41,12 @@ ECHO = [("auto", "Automatic"), ("on", "Always on"), ("off", "Off")]
 STRICTNESS = [("relaxed", "Relaxed"), ("balanced", "Balanced (recommended)"), ("strict", "Strict")]
 THEMES = [("mint", "Mint"), ("blue", "Classic blue"), ("aurora", "Aurora"), ("sunset", "Sunset"),
           ("rose", "Rose"), ("mono", "Mono")]
+PERSONALITIES = [("", "Default"), ("funny and playful, with light jokes", "Funny"),
+                 ("calm, gentle and patient", "Calm"),
+                 ("loves a friendly argument - pushes back and makes its case", "Argumentative"),
+                 ("dry and a little sarcastic, but kind", "Sarcastic"),
+                 ("an upbeat coach who cheers me on", "Motivating"),
+                 ("formal and precise, like a butler", "Formal")]
 STYLES = [("", "Natural (no style)"), ("warm and calm", "Warm and calm"),
           ("cheerful and energetic", "Cheerful and energetic"), ("slow and clear", "Slow and clear"),
           ("brisk and to the point", "Brisk and to the point"), ("soft and gentle", "Soft and gentle"),
@@ -66,6 +72,7 @@ KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/api
 PAGES = [("general", "General", "gearshape"), ("voice", "Voice & wake word", "waveform"),
          ("speaking", "Speaking", "person.wave.2"), ("audio", "Audio", "speaker.wave.2"),
          ("looks", "Appearance", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
+         ("apple_shortcuts", "Apple Shortcuts", "square.stack.3d.up"),
          ("accounts", "Accounts & keys", "key"), ("brain", "Skills & Memory", "brain"),
          ("storage", "Storage & Privacy", "lock.shield"), ("usage", "Usage", "chart.bar"),
          ("help", "Updates & Help", "questionmark.circle")]
@@ -332,6 +339,7 @@ class SettingsWindow:
         page.section("Assistant")
         self._row_text(page, "assistant_name", "Name", "Mint",
                        hint=f"You wake it with “Hey {name}”. A new name gets its own wake word (about a minute).")
+        self._personality_row(page, name)
         self._row_text(page, "user_name", "Your name", "What should it call you?")
         card, top, _, _ = page.row("About you", "Your work, people and projects, how you like answers. Given to "
                                    f"{name} at the start of every conversation.", height=150, control_w=300)
@@ -506,6 +514,42 @@ class SettingsWindow:
                 prefs.set("wake_phrase", ""), prefs.set("wake_models", []), self.refresh()))])
         page.end("Trained here from many built-in voices plus your takes. Nothing leaves your Mac.")
 
+    def _personality_row(self, page, name: str) -> None:
+        """How the assistant comes across: a short line in the user's words, or a preset."""
+        from mint.core.custom import PERSONALITY_LIMIT
+        card, top, x, h = page.row("Personality", f"How {name} speaks and behaves - funny, calm, argumentative… "
+                                   f"Up to {PERSONALITY_LIMIT} characters; empty is the default.", control_w=350)
+        field = self._text(card, "personality", x, top + (h - 24) / 2, 250, "e.g. funny and a bit sarcastic",
+                           settle=3.0)
+        count = self._label(card, "", x, top + (h - 24) / 2 + 26, 250, h=14, size=10, alpha=0.5)
+        count.setAlignment_(AppKit.NSTextAlignmentRight)
+        save_later = self._handlers[objc.pyobjc_id(field)]
+
+        def typed(control) -> None:
+            value = str(control.stringValue())
+            if len(value) > PERSONALITY_LIMIT:
+                value = value[:PERSONALITY_LIMIT]
+                control.setStringValue_(value)
+                AppKit.NSBeep()
+            count.setStringValue_(f"{len(value)}/{PERSONALITY_LIMIT}")
+            save_later(control)
+        self._handlers[objc.pyobjc_id(field)] = typed
+        count.setStringValue_(f"{len(str(field.stringValue()))}/{PERSONALITY_LIMIT}")
+
+        presets = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            AppKit.NSMakeRect(x + 258, top + (h - 26) / 2, 92, 26), True)
+        presets.addItemWithTitle_("Presets")
+        for _, title in PERSONALITIES:
+            presets.addItemWithTitle_(title)
+        card.addSubview_(presets)
+
+        def preset(control) -> None:
+            value = PERSONALITIES[control.indexOfSelectedItem() - 1][0]
+            field.setStringValue_(value)
+            count.setStringValue_(f"{len(value)}/{PERSONALITY_LIMIT}")
+            prefs.set("personality", value)
+        self._on(presets, preset)
+
     def _page_speaking(self, page) -> None:
         from mint.core import config
         name = prefs.name()
@@ -676,6 +720,190 @@ class SettingsWindow:
             else:
                 self._set_shortcut(key, value, button)
         record_keys(modifier_ok, button.setTitle_, done)
+
+    def _page_apple_shortcuts(self, page) -> None:
+        """Shortcuts-app shortcuts (not keys): Mint's own, the user's (run / allow), and making new ones."""
+        import time
+
+        from mint.tools import shortcut_library
+        from mint.tools import shortcut_maker
+        name = prefs.name()
+        state = self.__dict__.setdefault("_apple_sc", {"desc": "", "plan": None, "status": "", "lib": "", "ran": "",
+                                                       "listening": False, "watching": set()})
+
+        def later(fn) -> None:
+            def run() -> None:
+                if self.window is not None and self.page_key == "apple_shortcuts":
+                    fn()
+            AppHelper.callAfter(run)
+
+        def background(fn, label: str) -> None:
+            threading.Thread(target=fn, daemon=True, name=f"settings-{label}").start()
+
+        def status_row(words: str, buttons: list, title: str = ""):
+            """A row with a grey status line on the left (and `title` above it) and buttons on the right."""
+            total = sum(w for _, w, _ in buttons) + 8 * max(0, len(buttons) - 1)
+            card, top, x, h = page.row("", height=54 if title else ROW, control_w=total)
+            if title:
+                self._label(card, title, 16, top + 8, x - 24, h=18, size=13)
+            label = self._label(card, words, 16, top + (28 if title else (h - 16) / 2), x - 24, h=16, size=11,
+                                alpha=0.6)
+            label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
+            for text, w, handler in buttons:
+                self._button(card, text, x, top + (h - 28) / 2, w, handler)
+                x += w + 8
+            return label
+
+        def watch(names: list[str]) -> None:
+            """After an Add: look for the user's click for 5 minutes, then show the page again."""
+            def run() -> None:
+                deadline = time.time() + 300
+                while time.time() < deadline:
+                    time.sleep(4)
+                    have = shortcut_library.installed(fresh=True)
+                    if all(n in have for n in names):
+                        state["lib"] = f"Added {', '.join(names)} ✓"
+                        later(self.refresh)
+                        break
+                state["watching"].difference_update(names)
+            fresh = [n for n in names if n not in state["watching"]]
+            if fresh:
+                state["watching"].update(fresh)
+                background(run, "shortcut-watch")
+
+        # --- Mint's own shortcuts ---
+        have = shortcut_library.installed(fresh=False)
+        page.section("Mint's shortcuts")
+        page.text(f"A few things only the Shortcuts app can do (Image Playground pictures, Do Not Disturb), so {name} "
+                  "uses small shortcuts of its own. Add opens one in Shortcuts, where you click “Add Shortcut” once.",
+                  size=12, alpha=0.7)
+        missing = []
+        for item in shortcut_library.registry():
+            if item["name"] in have:
+                self._row_value(page, item["name"], "Added ✓", hint=item["purpose"], w=110)
+            else:
+                missing.append(item["name"])
+                self._row_buttons(page, item["name"], [("Add", 80, lambda n=item["name"]: add([n]))],
+                                  hint=item["purpose"])
+
+        def add(names: list[str]) -> None:
+            lib_status.setStringValue_("Preparing…")
+
+            def run() -> None:
+                said = shortcut_library.offer(names[0]) if len(names) == 1 else shortcut_library.offer_missing()
+                words = ("Opened in Shortcuts - click “Add Shortcut” there." if said.startswith("NOT DONE")
+                         else said.removeprefix("FAILED: "))
+                state["lib"] = words
+                AppHelper.callAfter(lib_status.setStringValue_, words)
+                if said.startswith("NOT DONE"):
+                    watch(names)
+            background(run, "shortcut-add")
+
+        def reload() -> None:
+            shortcut_library.installed(fresh=True)
+            state["lib"] = ""
+            self.refresh()
+        buttons = [("Refresh", 90, reload)]
+        if missing:
+            buttons.append(("Add all missing", 140, lambda: add(list(missing))))
+        lib_status = status_row(state["lib"], buttons)
+        page.end()
+
+        # --- The user's shortcuts ---
+        page.section("Your shortcuts")
+        theirs = shortcut_library.user_shortcuts()
+        if not theirs:
+            page.text("None yet. Make one below, or in the Shortcuts app (a Home scene, a Focus, a playlist) - then "
+                      "say “run <its name>”.", size=12, alpha=0.7)
+        ran = None
+        for title in theirs[:80]:
+            card, top, x, h = page.row(title, control_w=262)
+            words = self._label(card, "Mint may run it", x, top + (h - 16) / 2, 128, h=16, size=11, alpha=0.6)
+            words.setAlignment_(AppKit.NSTextAlignmentRight)
+            self._switch(card, x + 136, top + (h - 22) / 2, shortcut_library.allowed(title),
+                         lambda on, t=title: shortcut_library.set_allowed(t, on))
+            self._button(card, "Run", x + 186, top + (h - 28) / 2, 76, lambda t=title: run_one(t))
+        if len(theirs) > 80:
+            page.text(f"… and {len(theirs) - 80} more.", size=11, alpha=0.55)
+        if theirs:
+            ran = status_row(state["ran"] or "Run shows what the shortcut gives back.", [])
+
+        def run_one(title: str) -> None:
+            if ran is not None:
+                ran.setStringValue_(f"Running “{title}”…")
+
+            def go() -> None:
+                result = shortcut_library.run(title)
+                state["ran"] = f"“{title}”: {result}"
+                if ran is not None:
+                    AppHelper.callAfter(ran.setStringValue_, state["ran"])
+            background(go, "shortcut-run")
+        page.end(f"Switched off, {name} won't run that shortcut when asked. Run here always works.")
+
+        # --- Making a new one ---
+        page.section("Create a shortcut")
+        page.text(f"Say what it should do and {name} plans it from the Shortcuts actions it knows - for example "
+                  "“say hello and show today's date” or “set the volume to 30% and turn on dark mode”.",
+                  size=12, alpha=0.7)
+        card, top, x, h = page.row("", height=52, control_w=page.width - 32)
+        field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + 14, page.width - 32 - 112, 24))
+        field.setStringValue_(state["desc"])
+        field.setPlaceholderString_("a shortcut that…")
+        field.setBezelStyle_(AppKit.NSTextFieldRoundedBezel)
+        field.cell().setUsesSingleLineMode_(True)
+        field.cell().setScrollable_(True)
+        field.setDelegate_(self.target)
+        self._handlers[objc.pyobjc_id(field)] = lambda c: state.update(desc=str(c.stringValue()))
+        card.addSubview_(field)
+        self._button(card, "Plan it", page.width - 16 - 100, top + 12, 100, lambda: plan_it())
+        result = state["plan"]
+        if result:
+            page.text(shortcut_maker.plan_text(result).split("\n", 1)[-1] if result.get("steps")
+                      else shortcut_maker.plan_text(result).removeprefix("FAILED: ").removeprefix("REFUSED: "),
+                      size=12, alpha=0.85)
+        if result and result.get("steps"):
+            status = status_row(state["status"] or "Not made yet.", [("Create", 100, lambda: create())],
+                                title=f"Name: {result['name']}")
+        else:
+            status = status_row(state["status"] or "Plan it shows the steps first; nothing is made until Create.",
+                                [])
+        page.end("It opens in the Shortcuts app and you click “Add Shortcut”. Mint never makes shortcuts that send "
+                 "messages or delete things; an email is only a draft, and a shell command is always shown first.")
+
+        def plan_it() -> None:
+            desc = str(field.stringValue()).strip()
+            state["desc"] = desc
+            if not desc:
+                status.setStringValue_("Say what the shortcut should do first.")
+                return
+            status.setStringValue_("Planning…")
+
+            def run() -> None:
+                state["plan"] = shortcut_maker.plan(desc)
+                state["status"] = ""
+                later(self.refresh)
+            background(run, "shortcut-plan")
+
+        def create() -> None:
+            result = state["plan"]
+            status.setStringValue_("Building and signing…")
+            if not state["listening"]:
+                state["listening"] = True
+
+                def heard(made: str, how: str) -> None:
+                    state["status"] = {"added": f"Added “{made}” ✓ - say “run {made}”.",
+                                       "not added": f"“{made}” wasn't added (no click in 5 minutes). Create opens it "
+                                                    "again."}.get(how, state["status"])
+                    later(self.refresh)
+                shortcut_maker.on_status(heard)
+
+            def run() -> None:
+                said = shortcut_maker.create(result["id"])
+                words = (f"Opened “{result['name']}” in Shortcuts - click “Add Shortcut” there."
+                         if said.startswith("NOT DONE") else said.removeprefix("FAILED: "))
+                state["status"] = words
+                AppHelper.callAfter(status.setStringValue_, words)
+            background(run, "shortcut-create")
 
     def _page_accounts(self, page) -> None:
         page.section("API keys")

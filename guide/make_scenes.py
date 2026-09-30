@@ -782,6 +782,43 @@ def clipboard_window_scene(p):
     time.sleep(1.2)
 
 
+@scene("image-card", 44)
+def image_card_scene(p):
+    """A real picture from Image Playground on the card, then a typed change redraws it."""
+    import threading
+    from mint.ui import image_card
+    from mint.tools import imagegen
+    made_before = set(imagegen.images_folder().glob("*.png"))
+    time.sleep(1.2)
+    threading.Thread(target=lambda: imagegen.create("a lighthouse on a cliff at sunset", "illustration"),
+                     daemon=True).start()
+    for _ in range(80):                                   # drawn (about 7-15 s)
+        time.sleep(0.5)
+        if image_card.current() is not None and not image_card.card.busy:
+            break
+    print("  image card frame", tuple(image_card.card.panel.frame().origin), tuple(image_card.card.panel.frame().size),
+          flush=True)
+    time.sleep(2.0)
+    change = "add a small sailing boat on the sea"
+    for i in range(1, len(change) + 1):                  # typed into the card
+        ms.main_sync(lambda t=change[:i]: image_card.card.field.setStringValue_(t))
+        time.sleep(0.045)
+    time.sleep(0.5)
+    ms.main_sync(image_card.card.submit)
+    time.sleep(1.0)
+    for _ in range(80):
+        time.sleep(0.5)
+        if not image_card.card.busy:
+            break
+    time.sleep(3.0)
+    ms.main_sync(image_card.close)
+    time.sleep(1.5)
+    import AppKit
+    for path in set(imagegen.images_folder().glob("*.png")) - made_before:     # the scene's own pictures
+        AppKit.NSWorkspace.sharedWorkspace().recycleURLs_completionHandler_([AppKit.NSURL.fileURLWithPath_(str(path))],
+                                                                            None)
+
+
 def tour(p):
     try:
         time.sleep(1.8)
@@ -791,7 +828,7 @@ def tour(p):
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
-                     clipboard_scene, clipboard_window_scene):
+                     clipboard_scene, clipboard_window_scene, image_card_scene):
             step(p)
         print("  [done]", flush=True)
     except Exception:

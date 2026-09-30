@@ -27,6 +27,7 @@ changes apply at once, shortcuts included.
       "vocabulary": [],             extra names and words for Mint to expect
       "assistant_name": "Mint",     what it is called; "Hey <name>" wakes it
       "user_name": "", "about_me": "",   who you are (Settings > You)
+      "personality": "",            up to 100 characters: "funny and a bit sarcastic"; "" = default
       "voice_name": "",             one of the 30 Gemini live voices; "" = Zephyr
       "speaking_style": "",         e.g. "warm and calm, a little faster"
       "hearing_fixes": [],          words Mint misheard: [{"heard": "amen", "meant": "Aman"}]
@@ -100,6 +101,9 @@ DEFAULTS: dict = {
     "assistant_name": "Mint",
     "user_name": "",
     "about_me": "",
+    # How the assistant comes across, in the user's words (Settings > General > Personality).
+    # Up to 100 characters; "" = its default personality.
+    "personality": "",
     # How Mint sounds: a Gemini live voice ("" = config.VOICE) and a free-text style.
     "voice_name": "",
     "speaking_style": "",
@@ -108,6 +112,8 @@ DEFAULTS: dict = {
     # The wake phrase ("" = "Hey <assistant name>"); wake_models: more phrases that also wake it.
     "wake_phrase": "",
     "wake_models": [],
+    # Shortcuts (the Shortcuts app) Mint may not run, by name; empty = all allowed.
+    "shortcuts_blocked": [],
     # Updates of the packaged app: checked at launch and every 12 h, installed while the Mac is idle.
     "auto_update": True,
     "update_channel": "stable",

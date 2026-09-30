@@ -524,6 +524,7 @@ def prompt_text() -> str:
     from mint.tools import imagegen
     from mint.tools import merge
     from mint.tools import notifications
+    from mint.tools import shortcut_maker
     from mint.tools import undo
     from mint.tools import agentapps
     from mint.tools import mailtriage
@@ -543,7 +544,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, agentapps.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

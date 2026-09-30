@@ -71,6 +71,9 @@ def routines() -> dict[str, dict]:
             for name, spec in get().get("routines", {}).items()}
 
 
+PERSONALITY_LIMIT = 100
+
+
 def prompt_addendum() -> str:
     """What Gemini should know about this particular user."""
     from mint.core import prefs
@@ -78,6 +81,12 @@ def prompt_addendum() -> str:
     parts = []
     if user := str(prefs.get("user_name") or "").strip():
         parts.append(f"The user's name is {user}; use it now and then, naturally.")
+    if personality := " ".join(str(prefs.get("personality") or "").split())[:PERSONALITY_LIMIT]:
+        # Tone and nature only: every rule above (tools, safety, short replies,
+        # language, goodbyes) still applies.
+        parts.append(f"Your personality, chosen by the user: {personality}. Let it show in how you speak and "
+                     "react - wording, humour, attitude - while you still do what is asked, follow every rule "
+                     "above, and keep replies as short as before.")
     for about in (str(prefs.get("about_me") or "").strip(), settings.get("about_me")):
         if about:
             parts.append(f"About the user: {about}")

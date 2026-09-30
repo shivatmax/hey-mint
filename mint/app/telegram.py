@@ -152,7 +152,8 @@ _RO_TEXT = {
     "system_action": (("action",), None), "run_routine": (("name",), None),
 }
 _RO_ACTIONS = {"notifications": {"dismiss", "clear_all"}, "file_action": {"trash"}, "tidy": {"remove_duplicates"},
-               "clipboard": {"forget_secret", "clear"}, "automation": {"delete"}}
+               "clipboard": {"forget_secret", "clear"}, "automation": {"delete"},
+               "make_shortcut": {"create", "add"}}
 _RO_TOOLS = {"forget", "delete_skill"}
 
 _EXTS = ("png|jpe?g|gif|heic|webp|pdf|docx?|xlsx?|csv|pptx?|key|pages|numbers|txt|md|html?|rtf|json|"

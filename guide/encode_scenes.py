@@ -48,6 +48,7 @@ CUTS = {
     "video-edit":      ("video-edit", 1050, 520, 390, 346, 0, None),
     "clipboard":       ("clipboard", 200, 128, 1240, 738, 0, None),
     "clipboard-window": ("clipboard-window", 1028, 334, 412, 532, 0, None),
+    "image-card":      ("image-card", 1028, 232, 412, 634, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -97,9 +98,11 @@ def stitch_agent():
 
 
 PROBES = [(40, 60), (1400, 60), (40, 840), (1000, 120), (1180, 300), (140, 400)]   # never under Mint's UI
+# Scenes whose own Mint UI covers a probe (the image card is tall: its top edge reaches (1180, 300)).
+SKIP_PROBES = {"image-card": {(1180, 300)}}
 
 
-def foreign(src, start=0.0, length=None) -> list[float]:
+def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:
     """Moments (seconds) where the raw recording is not all the demo backdrop at points Mint never draws
     on - the real screen showing through (a switch to a full-screen Space, say)."""
     scan = Path("/tmp/_raw_scan")
@@ -113,7 +116,7 @@ def foreign(src, start=0.0, length=None) -> list[float]:
     for frame in sorted(scan.glob("f*.png")):
         im = Image.open(frame).convert("RGB")
         k = im.width / 1440
-        for px, py in PROBES:
+        for px, py in (p for p in PROBES if p not in skip):
             r, g, b = im.getpixel((int(px * k), int(py * k)))
             if min(r, g, b) < 180 or max(r, g, b) > 252:
                 bad.append(start + (int(frame.stem[1:]) - 1) / 4)
@@ -123,7 +126,7 @@ def foreign(src, start=0.0, length=None) -> list[float]:
 
 def encode(name, scene, x, y, w, h, start, length):
     src = RAW / f"{scene}.mov"
-    leaked = foreign(src, start, length)
+    leaked = foreign(src, start, length, SKIP_PROBES.get(scene, frozenset()))
     if leaked:
         print(f"  {name:9s} REJECTED: the real screen shows at {leaked[:6]} s - record the scene again")
         for old in (OUT / f"{name}.mp4", OUT / f"{name}.jpg"):

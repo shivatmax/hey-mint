@@ -667,6 +667,7 @@ def _power_modules():
     from mint.tools import cards
     from mint.tools import imagegen
     from mint.tools import merge
+    from mint.tools import shortcut_maker
     from mint.tools import convert
     from mint.voice import dictation
     from mint.tools import mac as macctl
@@ -687,7 +688,7 @@ def _power_modules():
     from mint.tools import video_edit
     from mint.tools import agentapps
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -707,7 +708,7 @@ def _power(name: str):
 _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "edit_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
-                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "agent_app",
+                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "agent_app",
                                                   "dictation", "edit_video", "video_info", "ocr_copy",
                                                   "data_to_sheet", "convert_document")})
 

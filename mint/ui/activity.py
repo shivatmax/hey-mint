@@ -188,9 +188,17 @@ def phrase(name: str, args: dict) -> str:
             return f"Editing the video · {_quote(a.get('instruction') or '', 30)}".rstrip(" ·")
         case "show_card":
             return f"Showing · {_quote(a.get('title') or '', 30)}".rstrip(" ·")
+        case "make_shortcut":
+            return {"plan": f"Planning a shortcut · {_quote(a.get('description') or '', 30)}",
+                    "create": "Making the shortcut", "library": "Checking shortcuts",
+                    "add": f"Adding {_quote(a.get('name') or '', 30)}"}.get(str(a.get("action") or "plan"),
+                                                                            "Shortcuts").rstrip(" ·")
         case "make_image":
             return {"edit": f"Changing the picture · {_quote(a.get('prompt') or '', 28)}",
                     "open_app": "Opening Image Playground",
+                    "save": "Saving the picture", "another": "Drawing another one",
+                    "improve": "Improving the picture", "copy": "Copying the picture",
+                    "close": "Closing the picture",
                     "setup": "Setting up Image Playground"}.get(str(a.get("action") or "create"),
                                                                 f"Drawing · {_quote(a.get('prompt') or '', 30)}").rstrip(" ·")
         case "edit_spreadsheet":

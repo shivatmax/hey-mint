@@ -362,8 +362,8 @@ def main() -> int:
             mint.apply_audio_settings()
         elif key == "assistant_name":
             rename_later()
-        elif key in ("voice_name", "speaking_style", "reply_language"):
-            revoice_later()
+        elif key in ("voice_name", "speaking_style", "reply_language", "personality"):
+            revoice_later()                   # applies at a reconnect, once Mint is quiet
 
     # A new voice or speaking style (Settings, or set_voice): once the typing
     # stops, reconnect when Mint is quiet; the conversation carries on.

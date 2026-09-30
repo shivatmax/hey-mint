@@ -63,6 +63,9 @@ def run(name: str, text: str = "") -> str:
     if chosen is None:
         close = difflib.get_close_matches(name, options, n=5, cutoff=0.2) or options[:8]
         return f"No shortcut matches '{name}'. Some there are: {', '.join(close)}."
+    if not _allowed(chosen):
+        return (f"REFUSED: the user switched off 'Mint may run it' for the shortcut '{chosen}' (Settings > Apple "
+                "Shortcuts). Tell them; don't run it another way.")
     command = ["shortcuts", "run", chosen]
     source = None
     if text:
@@ -85,17 +88,29 @@ def run(name: str, text: str = "") -> str:
     return f"Ran the shortcut '{chosen}'." + (f" It returned: {result[:1500]}" if result else "")
 
 
+def _allowed(name: str) -> bool:
+    """False when the user switched this shortcut off for Mint (pref shortcuts_blocked)."""
+    try:
+        from mint.tools import shortcut_library
+        return shortcut_library.allowed(name)
+    except Exception:
+        return True
+
+
 def tool(args: dict) -> str:
     action = str(args.get("action") or "run").lower()
     if action == "list":
         options = names(fresh=True)
-        return ("Shortcuts: " + ", ".join(options)) if options else run("")
+        off = [n for n in options if not _allowed(n)]
+        words = ("Shortcuts: " + ", ".join(options)) if options else run("")
+        return words + (f" (switched off for Mint: {', '.join(off)})" if off and options else "")
     return run(str(args.get("name") or ""), str(args.get("input") or ""))
 
 
 PROMPT = """Apple Shortcuts: the user's own shortcuts (Home scenes and lights, Focus modes, Spotify, their \
 workflows) run with shortcut action=run name=<what they said>. Lights, the thermostat or a scene -> a shortcut \
-(Mint cannot reach HomeKit any other way); if none fits, say they can make one in the Shortcuts app."""
+(Mint cannot reach HomeKit any other way); if none fits, offer to make one (make_shortcut action=plan). If the \
+result says REFUSED, the user switched that shortcut off for Mint in Settings; say so."""
 
 
 def declarations():
