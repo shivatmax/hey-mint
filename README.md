@@ -36,10 +36,11 @@ https://github.com/user-attachments/assets/0ba21b27-d906-49d5-9c69-f29ad3a530ee
 
 ## What it can do
 
-Mint is a small orb with a face that lives in the corner of your screen. Ask in your own
-words: say “Hey Mint”, press <kbd>⌃⌥Space</kbd>, or type (<kbd>⌘J</kbd>). Like the Dynamic Island,
-the orb changes shape for what's going on: a meeting recorder, your day's schedule, a lesson,
-a video it's watching, an answer as a card.
+Mint is a small orb with a face that lives in the corner of your screen - or, on a MacBook,
+right in the camera notch like the iPhone's Dynamic Island. Ask in your own words: say
+“Hey Mint”, press <kbd>⌃⌥Space</kbd>, or type (<kbd>⌘J</kbd>). It changes shape for what's
+going on: a meeting recorder, your day's schedule, a lesson, a video it's watching, an answer
+as a card - and every card has a × to close it.
 
 | Ask | What happens |
 |---|---|
@@ -71,7 +72,14 @@ a video it's watching, an answer as a card.
 | “Hey Jarvis” (your own wake word), “always answer in Hindi” | Train a wake word of your own on your Mac in about a minute and a half; pick the language Mint answers in |
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
+| “become the notch”, “go out of my notch” | Notch mode: Mint lives in the camera notch as a Dynamic Island - words, tasks and cards grow out of it, the notch wraps whatever opens. Switching is live: the orb flies into the notch, or drops out and bounces home |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
+| *just talk* | Feelings from the moment: a sad face when you share bad news, a laugh at a joke, applause for good news, sunglasses when a task is done |
+
+<p align="center">
+  <img src="docs/media/notch.gif" alt="Mint in the MacBook notch: a question drops the notch down with the task, its progress bar and the reply word by word" width="560">
+  <img src="docs/media/notch-switch.gif" alt="Switching looks live: the little Mint drops out of the notch and bounces home as the orb, then flies back into the notch" width="260">
+</p>
 
 <p align="center">
   <img src="docs/media/mark-box.gif" alt="Mint boxing the deadline in a document and flying over beside it" width="560">
