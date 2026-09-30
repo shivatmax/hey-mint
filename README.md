@@ -134,6 +134,8 @@ Optional extras, each unlocking one thing:
 curl -fsSL https://hey-mint.pages.dev/install.sh | bash
 ```
 
+(If `hey-mint.pages.dev` can't be reached from your network, use the same script from GitHub: `curl -fsSL https://raw.githubusercontent.com/shivatmax/hey-mint/main/packaging/install.sh | bash`.)
+
 It downloads the latest release, checks its checksum, installs Hey Mint in Applications, approves it with macOS
 and opens it: no "cannot check for malware" box and nothing to find in System Settings. (The script is
 [`packaging/install.sh`](packaging/install.sh), short enough to read first. Release builds are not notarized by
