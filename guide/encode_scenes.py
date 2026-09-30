@@ -52,6 +52,7 @@ CUTS = {
     # Notch mode: the top middle of the screen, the (demo) menu bar included.
     "notch":           ("notch", 440, 0, 560, 140, 0, None),
     "notch-hover":     ("notch-hover", 440, 0, 560, 140, 0, None),
+    "notch-switch":    ("notch-switch", 440, 0, 1000, 932, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length

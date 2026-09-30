@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-09-30)
 
 - **Notch mode (Dynamic Island at the camera):** Mint can live in the MacBook notch instead of the floating orb -
   its face beside the camera, the island dropping down from the notch for cards, calls and progress (menu bar
   toggle, or "become the notch" / "go out of my notch"). Switching is live, with no restart: the orb flies into the
   notch or drops back out. In notch mode the notch wraps each card into one black shape (compact sizing, Settings ▸
   Appearance ▸ Notch). Mint doesn't unload itself while in notch mode.
+- **Feelings from the conversation, and a cuter face:** Mint now reads the moment (Jev, about 0.4 s) - a sad
+  face when you share something sad, a laugh at a joke, applause for your good news, hearts when it comforts
+  you - and stays neutral for ordinary requests. The orb has sparkly eyes, rosy cheeks, a tiny cat mouth at
+  rest and floating "z"s while asleep.
 - **A close (×) button on every pop-up:** island scenes, the schedule and info cards, video, trackers, drop, lessons,
   meetings, the picture card and the clipboard, in both modes. Closing hides the card; it never stops the work under
   it (a recording keeps recording).

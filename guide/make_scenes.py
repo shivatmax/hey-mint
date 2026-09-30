@@ -871,6 +871,17 @@ def notch_hover(p):
     NOTCH_PREFS["mic"] = True; p.set_state("awake"); time.sleep(1.6)
 
 
+@scene("notch-switch", 11)
+def notch_switch(p):
+    """Live switching: out of the notch as the orb (drop, bounce home), then back in (the flight)."""
+    from mint.ui import notch
+    time.sleep(1.2)
+    AppHelper.callAfter(notch.leave, True)
+    time.sleep(4.2)
+    AppHelper.callAfter(notch.enter, True)
+    time.sleep(4.6)
+
+
 def _notch_demo():
     """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
     never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
@@ -939,7 +950,7 @@ def tour(p):
         time.sleep(1.8)
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
-        steps = (notch_talk, notch_hover) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+        steps = (notch_talk, notch_hover, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
