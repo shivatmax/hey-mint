@@ -42,6 +42,7 @@ TOGGLES = (("face", "Face on the orb"), ("word_animation", "Word-by-word caption
            ("cute_agents", "Cute critter helpers (sub-agents)"),
            ("cute_effects", "Cute action flourishes"),
            ("auto_emotions", "Expressions during conversation"),
+           ("notch_mode", "Dynamic Island at the notch"),
            ("share_visible", "Visible in screen sharing"))
 
 

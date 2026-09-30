@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Notch mode (Dynamic Island at the camera):** Mint can live in the MacBook notch instead of the floating orb -
+  its face beside the camera, the island dropping down from the notch for cards, calls and progress (menu bar
+  toggle, or "switch to notch mode"). The clipboard and picture cards open centred under the notch; switching modes
+  restarts Mint at once (exit 76), and Mint doesn't unload itself while in notch mode.
+- **Settings ▸ Models & agents:** keys for OpenAI, Anthropic (Claude), OpenRouter, Groq, xAI, Ollama and custom
+  OpenAI-compatible endpoints, each with Test; up to three backup models for every agent with Gemini as the last
+  resort; edit or add agents (name, role, instructions, model, backups, thinking, web tools). A second Gemini key
+  is optional: "split" gives the voice its own key, or it is a backup that takes over on rate limits. OpenAI and
+  Gemini were tested live; Claude, Groq, xAI and Ollama against local test servers only.
+
 ## 0.3.1 (2026-09-30)
 
 - **Signed releases:** the app is signed with the Hey Mint Release certificate, so from now on updates install themselves and keep Microphone, Accessibility and Screen Recording. Coming from 0.3.0 (unsigned), install this version by hand once.

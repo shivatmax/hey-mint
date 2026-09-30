@@ -34,11 +34,18 @@ from mint.voice.wake import phrase_cut as wake_phrase_cut
 log = logging.getLogger("mint.app.session")
 
 
+_live_env = ""          # which Gemini key the Live session is using (gemini_keys.py)
+
+
 def _client() -> genai.Client:
-    return genai.Client(
-        http_options={"api_version": "v1beta"},
-        api_key=os.environ[config.API_KEY_ENV],
-    )
+    """The Live client, on the key gemini_keys picks for voice (key 1, or key 2 while key 1 is set aside)."""
+    global _live_env
+    from mint.core import gemini_keys
+    try:
+        _live_env, key = gemini_keys.live_key()
+    except KeyError:
+        _live_env, key = config.API_KEY_ENV, os.environ[config.API_KEY_ENV]
+    return genai.Client(http_options={"api_version": "v1beta"}, api_key=key)
 
 
 # Set by Mint.compact(): the compacted conversation the next session starts from.
@@ -1853,7 +1860,6 @@ class Mint:
             # A meeting cut off by a quit or crash still gets its transcript and notes.
             threading.Timer(20, meetings.resume_pending).start()
         membank.tidy_later()                # merge duplicate memories, drop past ones (once a day)
-        client = _client()
         attempt = 0
         self._state("starting")
         if self.ear is not None and self.ear.reason != "wake":
@@ -1869,6 +1875,7 @@ class Mint:
         while True:
             try:
                 settings = _live_config()
+                client = _client()            # the key can change between connections (gemini_keys.py)
                 if self._resume_handle:
                     settings.session_resumption = types.SessionResumptionConfig(
                         handle=self._resume_handle)
@@ -1926,6 +1933,14 @@ class Mint:
             return
         message = str(error)
         self._state("offline", _short_error(message))
+        from mint.core import gemini_keys
+        if gemini_keys.failed(_live_env, message, "live"):
+            # Rate-limited or refused, and a second Gemini key is set: reconnect on it at once, same model.
+            print(f"  [Gemini key {_live_env[-1] if _live_env.endswith('2') else '1'} "
+                  f"{'refused' if gemini_keys.classify(message) == 'key' else 'is rate-limited'}; "
+                  "switching to the other key]", flush=True)
+            self._resume_handle = None         # a resumption handle may not carry across keys
+            return
         if "suspended" in message or "API key" in message or "PERMISSION_DENIED" in message:
             # Retrying cannot fix a bad key; say so plainly and stop.
             print(f"\nGemini rejected the API key: {_short_error(message)}\n"
@@ -2146,6 +2161,8 @@ class Mint:
             return
         while True:
             await asyncio.sleep(15)
+            if prefs.get("notch_mode"):
+                continue                     # the Ear's stand-in is the floating orb, hidden in notch mode
             minutes = prefs.get("unload_after_minutes")
             try:
                 minutes = float(minutes)

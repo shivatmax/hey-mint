@@ -118,7 +118,8 @@ class Memory:
             turns = "\n".join(f"[{e['t']}] {e['role']}: {e['text']}" for e in batch)
             prompt = _PROMPT.format(limit=KEEP_SUMMARY_CHARS, summary=self.summary() or "(empty)",
                                     turns=turns)
-            client = genai.Client(api_key=os.environ[config.API_KEY_ENV])
+            from mint.core import gemini_keys
+            client = gemini_keys.client()          # key 2 first, key 1 as backup
             last_error = None
             for model in MODELS:
                 try:

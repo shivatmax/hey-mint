@@ -82,7 +82,12 @@ def declarations() -> list[types.FunctionDeclaration]:
             {"name": STRING, "role": {**STRING, "description": "One line: what it is for."},
              "instructions": {**STRING, "description": "Its own system prompt: how it should work."},
              "thinking": {**STRING, "enum": ["none", "low", "medium"],
-                          "description": "Its usual thinking level (every agent runs on GPT-6 Luna)."},
+                          "description": "Its usual thinking level."},
+             "model": {**STRING, "description": "Only if the user named one: e.g. 'Claude Sonnet', 'GPT-6 Sol', "
+                                                "'Grok', 'Groq Llama', 'Gemini Pro', 'ollama llama3.2', or "
+                                                "'provider/model'. Default GPT-6 Luna."},
+             "backups": {**STRING, "description": "Only if the user named them: backup models, comma-separated, "
+                                                  "tried in order when the main one is rate-limited or fails."},
              "web": {"type": types.Type.BOOLEAN, "description": "Give it web search and page reading."},
              "color": {**STRING, "description": "Optional colour, e.g. '#FF6B9A' or 'pink'."}},
             ["name", "role"]),
@@ -107,6 +112,23 @@ def _create(args: dict) -> str:
         agent["instructions"] = f"You are {name}. {agent['role']} Work carefully and report concisely."
     if args.get("thinking") in ("none", "low", "medium"):
         agent["thinking"] = args["thinking"]
+    from mint.agents import catalog
+    wanted = [str(args.get("model") or "")] + [b for b in str(args.get("backups") or "").split(",")]
+    wanted = [w.strip() for w in wanted if w.strip()]
+    if wanted:
+        chosen, unknown = [], []
+        for words in wanted:
+            ref = catalog.resolve(words)
+            (chosen if ref else unknown).append(ref or words)
+        if unknown:
+            return (f"NOT SAVED: no model matches {', '.join(repr(u) for u in unknown)}. Models look like "
+                    "'openai/gpt-6-luna', 'anthropic/claude-sonnet-5-5', 'groq/llama-3.3-70b-versatile', "
+                    "'xai/grok-4.7', 'gemini/gemini-3.5-flash' or 'ollama/<name>'. Ask the user which.")
+        missing = [r for r in chosen if not catalog.configured(r.split("/", 1)[0])]
+        agent["models"] = chosen
+        agent["models_v2"] = True
+    else:
+        missing = []
     tools = ["write_file", "read_file", "list_files", "ask_user", "report_progress"]
     if args.get("web", True):
         tools = ["web_search", "fetch_url"] + tools
@@ -114,8 +136,12 @@ def _create(args: dict) -> str:
     color = str(args.get("color") or "").strip().lower()
     agent["color"] = _COLORS.get(color, color if color.startswith("#") else agent.get("color") or registry.next_color())
     saved = registry.save(agent)
-    return (f"{'Updated' if existing else 'Created'} {saved['name']} ({saved['role']}), on {saved['models'][0]} "
-            f"via {saved['provider']}, thinking {saved['thinking']} by default, colour {saved['color']}.")
+    backups = saved["models"][1:]
+    note = (f" Heads-up: {', '.join(sorted({m.split('/', 1)[0] for m in missing}))} has no API key yet - the user "
+            "can add it in Settings ▸ Models & agents; until then the backups run." if missing else "")
+    return (f"{'Updated' if existing else 'Created'} {saved['name']} ({saved['role']}), on {saved['models'][0]}"
+            + (f" (backups: {', '.join(backups)})" if backups else "")
+            + f", thinking {saved['thinking']} by default, colour {saved['color']}.{note}")
 
 
 def _list(args: dict) -> str:
@@ -123,7 +149,8 @@ def _list(args: dict) -> str:
     for a in registry.load():
         run = hub.find(a["name"])
         doing = f" - now {run.status}: {run.doing}" if run and run.active else ""
-        lines.append(f"{a['name']}: {a['role']} ({a['models'][0]} via {a['provider']}, thinks {a['thinking']}){doing}")
+        backups = f", backups {', '.join(a['models'][1:])}" if a["models"][1:] else ""
+        lines.append(f"{a['name']}: {a['role']} ({a['models'][0]}{backups}, thinks {a['thinking']}){doing}")
     return "\n".join(lines) or "No agents yet."
 
 
@@ -166,9 +193,10 @@ HANDLERS = {
 
 def prompt_text() -> str:
     agents = registry.load()
-    roster = "; ".join(f"{a['name']} - {a['role']}" for a in agents)
+    roster = "; ".join(f"{a['name']} - {a['role']} ({a['models'][0]})" for a in agents)
     return (
-        "You are the orchestrator of sub-agents that work in the background on GPT-6 Luna: " + roster + ". "
+        "You are the orchestrator of sub-agents that work in the background, each on its own model with "
+        "backups (the user picks them in Settings ▸ Models & agents): " + roster + ". "
         "When the user names an agent ('ask Luna', 'give it to Sage'), use exactly that agent. "
         "Otherwise, to BUILD something the user will open or run - a web page, an app, a script - give it to Codex "
         "(it writes, runs and checks the code itself); put everything it should build from (e.g. research "

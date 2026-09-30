@@ -14,3 +14,4 @@ pyobjc-framework-AVFoundation>=10.0
 kaldi-native-fbank>=1.20
 yt-dlp>=2026.8.19
 openpyxl>=3.1
+anthropic>=1.9

@@ -232,6 +232,16 @@ class HUD:
         effects.fx.origin = self.orb_center
         effects.fx.on_target = self._glance
         AppHelper.callLater(0.3, self.orb.boot)
+        # Notch mode (notch.py): the orb moves into the camera notch, like a Dynamic Island.
+        # Before the expressions attach, since they draw on whichever orb is self.orb.
+        try:
+            from mint.ui import notch
+            notch.install(self)
+        except ImportError:
+            pass
+        except Exception:
+            import logging
+            logging.getLogger("mint.ui.hud").exception("notch mode failed")
         # Extension point: expressions (emotes.py) attach here, if present.
         try:
             from mint.ui import emotes

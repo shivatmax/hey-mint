@@ -4,12 +4,17 @@ Messages are kept in a neutral shape and converted per provider:
     {"role": "user" | "assistant" | "tool", "content": str,
      "tool_calls": [{"id", "name", "args"}],   # assistant turns that call tools
      "tool_call_id": str, "name": str}          # tool results
+Assistant turns also carry what one provider needs to continue exactly (`_via` = "provider/model" that wrote
+it, `_response_id` for OpenAI, `_gemini` for Gemini, `_anthropic` for Claude, `_reasoning_details` for
+OpenRouter); another provider gets the neutral form, so a run can move to a backup model mid-way.
 Tools are {"name", "description", "parameters": JSON schema}.
 
-Gemini (google-genai, GEMINI_API_KEY) and OpenAI (Chat Completions over
-httpx, OPENAI_API_KEY). Models are tried in order: a model that is out of
-quota (429), overloaded (503) or unknown (404) is skipped for five minutes -
-on this key several Gemini models answer 429 at any given time.
+Providers (catalog.py): OpenAI (Responses API), Anthropic (SDK, anthropic_provider.py), Gemini (two keys,
+gemini_keys.py), and OpenAI-compatible Chat Completions for OpenRouter, Groq, xAI Grok, Ollama and custom
+endpoints. An agent has an ordered list of models ("openai/gpt-6-luna", "anthropic/claude-sonnet-5-5", ...),
+then the backup models set for every agent (catalog.fallbacks()). A model that is out of quota (429),
+overloaded (5xx) or unknown (404) is benched for a while; a refused key or an empty account skips that
+provider; the next model in the chain answers instead.
 """
 
 from __future__ import annotations
@@ -30,9 +35,15 @@ class NoProvider(RuntimeError):
     pass
 
 
-KEYS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+KEYS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY", "groq": "GROQ_API_KEY", "xai": "XAI_API_KEY"}
 BASES = {"openai": ("OPENAI_BASE_URL", "https://api.openai.com/v1"),
          "openrouter": ("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")}
+
+
+def _key_env(provider: str) -> str:
+    from mint.agents import catalog
+    return catalog.all_providers().get(provider, {}).get("env") or KEYS.get(provider, "")
 EFFORTS = ("none", "low", "medium")      # never high: the user asked for low-to-medium thinking at most
 
 
@@ -61,11 +72,11 @@ def _no_credit(status: int, data) -> bool:
 def _flag_no_credit(provider: str, data) -> str:
     error = data.get("error") if isinstance(data, dict) else None
     message = str(error.get("message", "") if isinstance(error, dict) else error or "")[:160]
-    where = "platform.openai.com/settings/organization/billing" if provider == "openai" else "openrouter.ai/settings/credits"
+    where = {"openai": "platform.openai.com/settings/organization/billing", "openrouter": "openrouter.ai/settings/credits",
+             "anthropic": "console.anthropic.com/settings/billing"}.get(provider, f"the {provider} dashboard")
     problem = (f"The {provider} account behind the agents has no credits left ({message or 'insufficient quota'}). "
-               f"The user must add credits at {where} (or put another key in .env as {KEYS[provider]}); no agent "
-               "can run until then.")
-    NO_CREDIT[provider] = (os.environ.get(KEYS[provider], ""), problem, time.monotonic())
+               f"The user must add credits at {where} (or change the key in Settings ▸ Models & agents).")
+    NO_CREDIT[provider] = (os.environ.get(_key_env(provider), ""), problem, time.monotonic())
     log.warning("agents: %s", problem)
     return problem
 
@@ -84,7 +95,7 @@ def key_problem(provider: str, recheck: bool = False) -> str:
 
     recheck=True (blocking - not on the event loop): a no-credit account last seen more
     than RECHECK s ago is asked again with a tiny call, so a top-up is noticed at once."""
-    key = os.environ.get(KEYS.get(provider, ""), "")
+    key = os.environ.get(_key_env(provider), "") if _key_env(provider) else ""
     bad = BAD_KEYS.get(provider)
     if bad and bad[0] == key:
         return bad[1]
@@ -122,7 +133,8 @@ def _probe(provider: str) -> None:
 
 
 def available(provider: str) -> bool:
-    return bool(os.environ.get(KEYS.get(provider, "")))
+    from mint.agents import catalog
+    return catalog.configured(provider)
 
 
 _http = None
@@ -139,33 +151,28 @@ def _client():
 
 
 def check_keys() -> dict:
-    """Ask each configured provider whether it accepts its key (cheap calls, no
-    model run), so routing knows up front - otherwise the first task would say
-    "via OpenRouter" and only then find the OpenRouter key expired."""
-    import httpx
+    """Ask each configured provider whether it accepts its key (cheap listing calls, no model run), so
+    routing knows up front - otherwise the first task would start on a provider and only then find its
+    key refused."""
+    from mint.agents import catalog
     results = {}
-    # Only OpenAI: agents never use OpenRouter (the user's choice), so its key is not even checked.
-    probes = {"openai": (os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") + "/models", None)}
-    for provider, (url, _) in probes.items():
-        key = os.environ.get(KEYS[provider], "")
-        if not key:
+    for provider, spec in catalog.all_providers().items():
+        if provider == "gemini" or not spec.get("env") or not catalog.configured(provider):
             continue
+        key = catalog.key(provider)
         try:
-            response = httpx.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=15)
+            catalog._fetch(provider)
         except Exception as error:
-            results[provider] = f"unreachable ({str(error)[:60]})"
+            text = str(error)
+            if any(code in text for code in ("401", "403", "refused", "authentication", "permission")):
+                BAD_KEYS[provider] = (key, f"{spec['label']} refused the API key ({text[:120]}). The user must make "
+                                           "a new key and add it in Settings ▸ Models & agents.")
+                results[provider] = "refused"
+            else:
+                results[provider] = f"unreachable ({text[:60]})"
             continue
-        if response.status_code in (401, 403):
-            try:
-                message = response.json().get("error", {}).get("message", "")
-            except Exception:
-                message = response.text[:100]
-            BAD_KEYS[provider] = (key, f"{provider} refused the API key ({response.status_code}: {message}). "
-                                       f"The user must make a new key and put it in .env as {KEYS[provider]}.")
-            results[provider] = f"refused: {message}"
-        else:
-            BAD_KEYS.pop(provider, None)
-            results[provider] = "ok" if response.status_code == 200 else f"HTTP {response.status_code}"
+        BAD_KEYS.pop(provider, None)
+        results[provider] = "ok"
     log.info("agent provider keys: %s", results)
     return results
 
@@ -175,30 +182,58 @@ def _direct(models: list[str]) -> list[str]:
     return [m.split("/", 1)[1] if m.startswith("openai/") else m for m in models]
 
 
-def route(agent: dict) -> tuple[str, list[str], str]:
-    """-> (provider, models, note). Falls back when the agent's provider has no key."""
-    provider, models = agent.get("provider", "gemini"), list(agent.get("models") or [])
+def chain(agent: dict) -> list[tuple[str, str]]:
+    """The models an agent tries, in order: its own, then the backups set for every agent. Deduplicated."""
+    from mint.agents import catalog
+    if agent.get("provider") == "codex" or agent.get("runner") == "codex":
+        return [("codex", m.split("/", 1)[-1]) for m in (agent.get("models") or ["gpt-6-luna"])]
+    default = agent.get("provider") or ""
+    refs = list(agent.get("models") or [])
+    fb = agent.get("fallback")
+    if isinstance(fb, dict):                                # the old shape: {"provider", "models"}
+        refs += [catalog.join(fb.get("provider", "gemini"), m) for m in fb.get("models") or []]
+    if agent.get("use_backups", True):
+        refs += catalog.fallbacks()
+    out, seen = [], set()
+    for ref in refs:
+        provider, model = catalog.split(ref, default)
+        if (provider, model) not in seen and model:
+            seen.add((provider, model))
+            out.append((provider, model))
+    return out
+
+
+def _problem(provider: str) -> str:
+    from mint.agents import catalog
     if provider == "codex":
         from mint.agents import codex
-        if codex.problem():
-            raise NoProvider(codex.problem())
-        return "codex", models, ""
-    if provider == "openrouter":
-        # Never OpenRouter (the user's rule): the same model, straight from OpenAI.
-        provider, models = "openai", _direct(models)
-    if provider == "openai":
-        if not available("openai"):
-            raise NoProvider("Agents run on GPT-6 Luna from OpenAI, and there is no OPENAI_API_KEY in .env.")
-        return "openai", models or ["gpt-6-luna"], ""
-    if available(provider):
-        return provider, models, ""
-    fallback = agent.get("fallback") or {"provider": "gemini", "models": []}
-    fb_provider = fallback.get("provider", "gemini")
-    if available(fb_provider):
-        from mint.agents.registry import GEMINI_FAST
-        return (fb_provider, list(fallback.get("models") or GEMINI_FAST),
-                f"{provider} has no API key yet (add {provider.upper()}_API_KEY to .env); using {fb_provider}")
-    raise NoProvider(f"No API key for {provider} or {fb_provider}.")
+        return codex.problem()
+    spec = catalog.all_providers().get(provider)
+    if spec is None:
+        return f"'{provider}' is not a provider Mint knows."
+    if not catalog.configured(provider):
+        return f"{spec['label']} has no API key (add it in Settings ▸ Models & agents)."
+    return key_problem(provider)
+
+
+def route(agent: dict) -> tuple[str, list[str], str]:
+    """-> (provider, models, note) of the first model in the agent's chain that can run now. `models` is the
+    rest of the chain as "provider/model" (for display); `note` says why earlier ones were skipped."""
+    entries = chain(agent)
+    skipped = []
+    for i, (provider, model) in enumerate(entries):
+        problem = _problem(provider)
+        if problem:
+            skipped.append(f"{provider}/{model}: {problem}")
+            continue
+        note = ""
+        if skipped:
+            first = entries[0]
+            note = f"{first[0]}/{first[1]} can't run ({skipped[0].split(': ', 1)[1][:100]}); using {provider}/{model}"
+        return provider, [model] + [f"{p}/{m}" for p, m in entries[i + 1:]], note
+    if not entries:
+        raise NoProvider("This agent has no model set (Settings ▸ Models & agents).")
+    raise NoProvider("None of this agent's models can run: " + "; ".join(skipped)[:500])
 
 
 def _skip(provider, model) -> bool:
@@ -208,63 +243,101 @@ def _skip(provider, model) -> bool:
 def _mark(provider, model, error) -> bool:
     """Bench a failing model for a while. -> True if the failure is transient."""
     text = str(error)
-    if any(code in text for code in ("404", "NOT_FOUND", "model_not_found", "does not exist")):
+    kind = getattr(error, "kind", "")
+    if kind == "missing" or any(code in text for code in ("404", "NOT_FOUND", "model_not_found", "does not exist")):
         _dead[(provider, model)] = time.monotonic() + 3600        # not on this key
         return False
-    if any(code in text for code in ("429", "RESOURCE_EXHAUSTED")):
+    if kind == "quota" or any(code in text for code in ("429", "RESOURCE_EXHAUSTED")):
         # A daily quota ("...PerDay...") will not come back in five minutes.
         _dead[(provider, model)] = time.monotonic() + (3600 if "PerDay" in text else 300)
         return True
-    if any(code in text for code in ("503", "UNAVAILABLE", "500", "INTERNAL", "timed out", "Timeout")):
+    if kind == "busy" or any(code in text for code in ("503", "529", "UNAVAILABLE", "500", "502", "INTERNAL",
+                                                       "timed out", "Timeout", "overloaded", "unreachable")):
         # Overloaded - "high demand" blips pass quickly. Benching for five
         # minutes left a whole chain empty in testing and failed two agents.
         _dead[(provider, model)] = time.monotonic() + 30
         return True
+    if kind == "refusal":
+        return False                  # the next model in the chain may answer; retrying this one won't
     return False
 
 
 def chat(agent: dict, system: str, messages: list[dict], tools: list[dict], effort: str | None = None) -> dict:
-    """-> {"text", "tool_calls", "provider", "model", "note"}. Blocking.
+    """-> {"text", "tool_calls", "provider", "model", "note", "_via", ...}. Blocking.
 
-    `effort` is the reasoning effort for models that think: none, low or medium."""
-    provider, models, note = route(agent)
-    known = key_problem(provider, recheck=True)      # a refused key or no credits: fail at once, not after retries
-    if known:
-        raise KeyProblem(known)
-    last, transient = None, True
+    Tries the agent's models in order (its own, then the backups for every agent). `effort` is the
+    reasoning effort for models that think: none, low or medium."""
+    entries = chain(agent)
+    if not entries:
+        raise NoProvider("This agent has no model set (Settings ▸ Models & agents).")
+    first = entries[0]
+    reasons: list[str] = []
+    last, any_transient = None, True
     for round_, wait in enumerate(BACKOFF):
-        if round_ and not transient:
+        if round_ and not any_transient:
             break
         if wait:
-            log.info("all %s models busy; retrying in %ss", provider, wait)
+            log.info("every model for %s is busy; retrying in %ss", agent.get("name"), wait)
             time.sleep(wait)
-        transient = False
-        for model in models:
-            # First round respects the bench; later rounds try every model again.
+        any_transient = False
+        for provider, model in entries:
+            problem = _problem(provider) if provider != "codex" else "Codex runs through the Codex runner."
+            if problem:
+                if round_ == 0:
+                    reasons.append(f"{provider}/{model}: {problem}")
+                continue
             if round_ == 0 and _skip(provider, model):
-                transient = True
+                any_transient = True          # benched a moment ago: try again in a later round
                 continue
             try:
                 started = time.monotonic()
-                if provider == "openai":
-                    out = _responses(model, system, messages, tools, effort=effort)
-                elif provider == "openrouter":
-                    out = _openai(model, system, messages, tools, provider=provider, effort=effort)
-                else:
-                    out = _gemini(model, system, messages, tools)
-                out.update(provider=provider, model=model, note=note,
-                           seconds=round(time.monotonic() - started, 1))
-                return out
-            except KeyProblem:
-                if provider == "openrouter" and available("openai"):
-                    provider, models, note = route(agent)       # now routes to OpenAI direct
-                    return chat(agent, system, messages, tools, effort)
-                raise
+                out = _call(provider, model, system, messages, tools, effort)
+            except KeyProblem as error:
+                reasons.append(f"{provider}/{model}: {error}")
+                last = error
+                continue                      # this provider cannot run now; the next one may
             except Exception as error:
                 last = error
-                transient |= _mark(provider, model, error)
+                transient = _mark(provider, model, error)
+                any_transient |= transient
+                if round_ == 0:
+                    reasons.append(f"{provider}/{model}: {str(error)[:120]}")
                 log.info("agent model %s/%s failed: %s", provider, model, str(error)[:160])
-    raise RuntimeError(f"no {provider} model answered ({', '.join(models)}): {str(last)[:200]}")
+                continue
+            served = out.pop("served_by", "") or model
+            note = ""
+            if (provider, model) != first and reasons:
+                note = f"{first[0]}/{first[1]} did not answer ({reasons[0].split(': ', 1)[1][:120]}); {provider}/{model} took over"
+            out.update(provider=provider, model=model, note=note, _via=f"{provider}/{served}",
+                       seconds=round(time.monotonic() - started, 1))
+            return out
+    if last is not None and isinstance(last, KeyProblem) and len(reasons) == 1:
+        raise last
+    detail = "; ".join(reasons)[:600] or str(last)[:300]
+    raise RuntimeError(f"no model answered ({', '.join(f'{p}/{m}' for p, m in entries)}): {detail}")
+
+
+def _call(provider: str, model: str, system: str, messages: list[dict], tools: list[dict],
+          effort: str | None) -> dict:
+    from mint.agents import catalog
+    kind = catalog.all_providers()[provider]["kind"]
+    if kind == "responses":
+        return _responses(model, system, messages, tools, effort=effort)
+    if kind == "gemini":
+        return _gemini(model, system, messages, tools)
+    if kind == "anthropic":
+        from mint.agents import anthropic_provider
+        try:
+            return anthropic_provider.chat(model, system, messages, tools, effort)
+        except anthropic_provider.AnthropicError as error:
+            if error.kind == "key":
+                BAD_KEYS["anthropic"] = (catalog.key("anthropic"), str(error))
+                raise KeyProblem(str(error)) from error
+            if error.kind == "credit":
+                NO_CREDIT["anthropic"] = (catalog.key("anthropic"), str(error), time.monotonic())
+                raise KeyProblem(str(error)) from error
+            raise
+    return _openai(model, system, messages, tools, provider=provider, effort=effort)
 
 
 # --- Gemini ------------------------------------------------------------------------
@@ -273,15 +346,15 @@ def _gemini(model: str, system: str, messages: list[dict], tools: list[dict]) ->
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
-                          http_options=types.HttpOptions(timeout=90000,
-                                                         retry_options=types.HttpRetryOptions(attempts=1)))
+    from mint.core import gemini_keys
+    client = gemini_keys.client(http_options=types.HttpOptions(timeout=90000,
+                                                               retry_options=types.HttpRetryOptions(attempts=1)))
     contents = []
     for m in messages:
         if m["role"] == "user":
             contents.append(types.Content(role="user", parts=[types.Part(text=m["content"])]))
         elif m["role"] == "assistant":
-            if m.get("_gemini") is not None:
+            if m.get("_gemini") is not None and m.get("_via", f"gemini/{model}") == f"gemini/{model}":
                 # Gemini 3 wants its own reply back verbatim: the function-call
                 # parts carry a thought_signature, and without it the next call
                 # fails with 400 INVALID_ARGUMENT.
@@ -289,8 +362,11 @@ def _gemini(model: str, system: str, messages: list[dict], tools: list[dict]) ->
                 continue
             parts = [types.Part(text=m["content"])] if m.get("content") else []
             for call in m.get("tool_calls") or []:
+                # Calls another model made (before a fallback) have no signature of Gemini's own: Google's
+                # documented placeholder lets them through.
                 parts.append(types.Part(function_call=types.FunctionCall(
-                    id=call["id"], name=call["name"], args=call["args"])))
+                    id=call["id"], name=call["name"], args=call["args"]),
+                    thought_signature=b"skip_thought_signature_validator"))
             if parts:
                 contents.append(types.Content(role="model", parts=parts))
         elif m["role"] == "tool":
@@ -327,8 +403,8 @@ def _gemini(model: str, system: str, messages: list[dict], tools: list[dict]) ->
 
 def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
             provider: str = "openai", effort: str | None = None) -> dict:
-    """OpenAI-compatible Chat Completions: OpenAI itself, or OpenRouter."""
-    import httpx
+    """OpenAI-compatible Chat Completions: OpenRouter, Groq, xAI, Ollama, custom endpoints."""
+    from mint.agents import catalog
 
     out = [{"role": "system", "content": system}]
     for m in messages:
@@ -340,7 +416,7 @@ def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
                 entry["tool_calls"] = [{"id": c["id"], "type": "function",
                                         "function": {"name": c["name"], "arguments": json.dumps(c["args"])}}
                                        for c in m["tool_calls"]]
-            if m.get("_reasoning_details"):
+            if m.get("_reasoning_details") and m.get("_via", f"{provider}/{model}") == f"{provider}/{model}":
                 # Reasoning models continue their thinking across tool calls only
                 # if their reasoning blocks come back exactly as they were sent.
                 entry["reasoning_details"] = m["_reasoning_details"]
@@ -351,21 +427,27 @@ def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
     if tools:
         body["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                                                            "parameters": t["parameters"]}} for t in tools]
-    if effort in EFFORTS:
+    style = catalog.EFFORT_STYLE.get(provider, "")
+    if effort in EFFORTS and style == "reasoning":
         body["reasoning"] = {"effort": effort}
-    env, default = BASES[provider]
-    base = os.environ.get(env, default).rstrip("/")
-    headers = {"Authorization": f"Bearer {os.environ[KEYS[provider]]}"}
+    elif effort in EFFORTS and style == "reasoning_effort" and "gpt-oss" in model:
+        body["reasoning_effort"] = "low" if effort == "none" else effort
+    base = catalog.base_url(provider)
+    key = catalog.key(provider)
+    headers = {"Authorization": f"Bearer {key or 'none'}"}
     if provider == "openrouter":
         headers.update({"HTTP-Referer": "https://github.com/savka777/jev-use", "X-Title": "Mint"})
-    response = _client().post(f"{base}/chat/completions", json=body, timeout=180, headers=headers)
+    try:
+        response = _client().post(f"{base}/chat/completions", json=body, timeout=180, headers=headers)
+    except Exception as error:
+        raise RuntimeError(f"unreachable: {type(error).__name__} {str(error)[:160]}") from error
     data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
     if response.status_code in (401, 403):
         message = (data.get("error") or {}).get("message", response.text[:200]) if isinstance(data, dict) else ""
-        problem = (f"{provider} refused the API key ({response.status_code}: {message}). The user must make a "
-                   f"new key{' at openrouter.ai/keys' if provider == 'openrouter' else ''} and put it in .env as "
-                   f"{KEYS[provider]}, then restart Mint.")
-        BAD_KEYS[provider] = (os.environ.get(KEYS[provider], ""), problem)
+        label = catalog.all_providers().get(provider, {}).get("label", provider)
+        problem = (f"{label} refused the API key ({response.status_code}: {str(message)[:160]}). The user must make "
+                   "a new key and add it in Settings ▸ Models & agents.")
+        BAD_KEYS[provider] = (key, problem)
         raise KeyProblem(problem)
     if _no_credit(response.status_code, data):
         raise KeyProblem(_flag_no_credit(provider, data))      # retrying cannot help
@@ -380,7 +462,7 @@ def _openai(model: str, system: str, messages: list[dict], tools: list[dict],
             args = {}
         calls.append({"id": call["id"], "name": call["function"]["name"], "args": args})
     usage = data.get("usage") or {}
-    _count(body.get("model"), usage.get("prompt_tokens"), usage.get("completion_tokens"))
+    _count(f"{provider}/{body.get('model')}", usage.get("prompt_tokens"), usage.get("completion_tokens"))
     return {"text": (message.get("content") or "").strip(), "tool_calls": calls,
             "_reasoning_details": message.get("reasoning_details"),
             "usage": {"reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
@@ -395,15 +477,22 @@ def _responses(model: str, system: str, messages: list[dict], tools: list[dict],
     reasoning between tool calls without sending it back ourselves."""
     import httpx
 
-    last = max((i for i, m in enumerate(messages) if m["role"] == "assistant" and m.get("_response_id")), default=None)
+    mine = f"openai/{model}"
+    last = max((i for i, m in enumerate(messages) if m["role"] == "assistant" and m.get("_response_id")
+                and m.get("_via", mine) == mine), default=None)
     items = []
     for m in (messages[last + 1:] if last is not None else messages):
         if m["role"] == "user":
             items.append({"role": "user", "content": m["content"]})
         elif m["role"] == "tool":
-            items.append({"type": "function_call_output", "call_id": m["tool_call_id"], "output": m["content"]})
-        elif m["role"] == "assistant" and m.get("content"):
-            items.append({"role": "assistant", "content": m["content"]})
+            items.append({"type": "function_call_output", "call_id": str(m["tool_call_id"]), "output": str(m["content"])})
+        elif m["role"] == "assistant":
+            # Another model's turn (a run that fell back): its text and calls, so each output has its call.
+            if m.get("content"):
+                items.append({"role": "assistant", "content": m["content"]})
+            for call in m.get("tool_calls") or []:
+                items.append({"type": "function_call", "call_id": str(call["id"]), "name": call["name"],
+                              "arguments": json.dumps(call.get("args") or {})})
     body = {"model": model, "instructions": system, "input": items}
     if last is not None:
         body["previous_response_id"] = messages[last]["_response_id"]

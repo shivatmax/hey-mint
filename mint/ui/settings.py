@@ -67,13 +67,15 @@ LANGUAGES = [("auto", "Same as I speak (automatic)"), ("English", "English"), ("
              ("Vietnamese", "Vietnamese"), ("Thai", "Thai")]
 SCREENSHOTS = [("both", "A file and the clipboard"), ("clipboard", "The clipboard only"), ("file", "A file only")]
 KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/apikey"),
-        ("OPENAI_API_KEY", "OpenAI", "Optional - background agents (GPT-6 Luna) and Codex"),
+        ("OPENAI_API_KEY", "OpenAI", "Optional - background agents and Codex. Every other model provider "
+                                     "(Claude, Groq, Grok, Ollama…) is in Models & agents."),
         ("TYPESAFE_API_KEY", "TypeSafe (Jev)", "Optional - surer clicking and typing in any app")]
 PAGES = [("general", "General", "gearshape"), ("voice", "Voice & wake word", "waveform"),
          ("speaking", "Speaking", "person.wave.2"), ("audio", "Audio", "speaker.wave.2"),
          ("looks", "Appearance", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
          ("apple_shortcuts", "Apple Shortcuts", "square.stack.3d.up"),
-         ("accounts", "Accounts & keys", "key"), ("brain", "Skills & Memory", "brain"),
+         ("accounts", "Accounts & keys", "key"), ("models", "Models & agents", "cpu"),
+         ("brain", "Skills & Memory", "brain"),
          ("storage", "Storage & Privacy", "lock.shield"), ("usage", "Usage", "chart.bar"),
          ("help", "Updates & Help", "questionmark.circle")]
 
@@ -1034,6 +1036,10 @@ class SettingsWindow:
             from mint.app import telegram
             telegram.refresh()
         self.refresh()
+
+    def _page_models(self, page) -> None:
+        from mint.ui import settings_models
+        settings_models.page(self, page)
 
     def _page_brain(self, page) -> None:
         """Skills & Memory: counts here; seeing and editing them is its own, bigger window."""

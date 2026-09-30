@@ -8,6 +8,7 @@ really does.
 
 Run: <runtime python> guide/make_scenes.py            (about 8 minutes; keep the screen quiet)
      ONLY=talk,marks <runtime python> guide/make_scenes.py
+     NOTCH=1 <runtime python> guide/make_scenes.py   (notch mode: the notch and notch-hover scenes)
 Then: <runtime python> guide/encode_scenes.py
 """
 import os
@@ -819,16 +820,131 @@ def image_card_scene(p):
                                                                             None)
 
 
+# --- Notch mode (mint/ui/notch.py): Mint in the camera notch. A run of its own (NOTCH=1): the HUD is
+# built once, as the orb or as the notch.
+
+NOTCH = bool(os.environ.get("NOTCH"))
+NOTCH_PREFS = {"notch_mode": True, "mic": True, "voice": True}
+
+
+def _talk_level(seconds):
+    """A voice-like level for the sound bars."""
+    import math as _m
+    end = time.time() + seconds
+    return lambda: min(0.9, 0.25 + 0.35 * abs(_m.sin(time.time() * 5.1)) * abs(_m.sin(time.time() * 1.7))) \
+        if time.time() < end else 0.0
+
+
+def _speak_bars(p, seconds):
+    level = _talk_level(seconds)
+    while (v := level()) > 0:
+        p.set_level(v); time.sleep(1 / 20)
+    p.set_level(0.0)
+
+
+@scene("notch", 22)
+def notch_talk(p):
+    time.sleep(1.4)
+    threading.Thread(target=_speak_bars, args=(p, 2.4), daemon=True).start()
+    say(p, "user_said", "what's on my calendar today?", gap=0.16)
+    time.sleep(0.5); p.set_state("thinking"); time.sleep(1.1)
+    p.set_state("working", phrase("calendar_events", {})); p.activity_start("calendar_events", {})
+    for i, label in enumerate(("Step 1/3: read the calendar", "Step 2/3: check the invites", "Step 3/3: sum it up")):
+        p.progress(i, 3, label); time.sleep(1.2)
+    p.progress(3, 3, "✓ done"); p.activity_end("calendar_events", True); time.sleep(0.5); p.progress(0, 0)
+    p.set_state("speaking")
+    threading.Thread(target=_speak_bars, args=(p, 3.6), daemon=True).start()
+    say(p, "assistant_said", "Three meetings. The design review at eleven is the big one.", gap=0.2)
+    time.sleep(1.6); p.set_state("awake"); time.sleep(4.5)
+
+
+@scene("notch-hover", 13)
+def notch_hover(p):
+    from mint.ui import notch
+    time.sleep(1.2)
+    F["mouse"] = (notch.notch.cx + 10, notch.notch.top - 12)          # the pointer over the notch
+    time.sleep(3.4)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(1.4)
+    p.set_state("sleeping"); time.sleep(2.4)
+    NOTCH_PREFS["mic"] = False; p.set_state("paused"); time.sleep(2.4)
+    NOTCH_PREFS["mic"] = True; p.set_state("awake"); time.sleep(1.6)
+
+
+def _notch_demo():
+    """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
+    never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
+    from mint.ui import notch
+    from mint.core import prefs
+    real_get, real_set = prefs.get, prefs.set
+    prefs.get = lambda key: NOTCH_PREFS[key] if key in NOTCH_PREFS else real_get(key)
+    prefs.set = lambda key, value: None if key in NOTCH_PREFS else real_set(key, value)
+    notch._watching[0] = True
+    # The recording makes Mint visible to capture; the eye button shows what a user sees (hidden).
+    import AppKit
+    from mint.ui import sharing
+    sharing.visible = lambda: False
+    sharing._desired = lambda: AppKit.NSWindowSharingReadOnly
+    F["mouse"] = (200.0, 300.0)
+
+    class _Event:                             # the notch's hover follows this pointer, not the real one
+        @staticmethod
+        def mouseLocation():
+            import AppKit as _AK
+            return _AK.NSMakePoint(*F["mouse"])
+
+    class _AppKitProxy:
+        NSEvent = _Event
+
+        def __getattr__(self, name):
+            import AppKit as _AK
+            return getattr(_AK, name)
+    notch.AppKit = _AppKitProxy()
+
+
+def _menu_bar_cover():
+    """A plain menu bar over the real one (its menus and status icons stay out of the clips).
+    Under the notch's black shape (main menu + 3), over the status icons."""
+    import AppKit
+    import Quartz
+    from mint.ui import gfx
+    frame = AppKit.NSScreen.screens()[0].frame()
+    SW, SH, bar = frame.size.width, frame.size.height, 30       # 2 points over the real bar's bottom edge
+    w = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        AppKit.NSMakeRect(0, SH - bar, SW, bar), AppKit.NSWindowStyleMaskBorderless, AppKit.NSBackingStoreBuffered, False)
+    w.setLevel_(Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 2)
+    w.setHasShadow_(False)
+    w.setIgnoresMouseEvents_(True)
+    w.setSharingType_(AppKit.NSWindowSharingReadOnly)
+    w.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                             | AppKit.NSWindowCollectionBehaviorStationary)
+    v = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, SW, bar))
+    v.setWantsLayer_(True)
+    g = Quartz.CAGradientLayer.layer()               # the backdrop's own gradient, so the strip lines up
+    g.setFrame_(Quartz.CGRectMake(0, bar - SH, SW, SH))
+    g.setColors_([gfx.cg((0.86, 0.92, 0.95)), gfx.cg((0.91, 0.89, 0.98)), gfx.cg((0.97, 0.90, 0.93))])
+    g.setStartPoint_(Quartz.CGPointMake(0, 0)); g.setEndPoint_(Quartz.CGPointMake(1, 1))
+    v.layer().addSublayer_(g)
+    tint = Quartz.CALayer.layer()
+    tint.setFrame_(Quartz.CGRectMake(0, 0, SW, bar))
+    tint.setBackgroundColor_(gfx.cg((1, 1, 1), 0.35))
+    v.layer().addSublayer_(tint)
+    w.setContentView_(v)
+    w.orderFrontRegardless()
+    return w
+
+
 def tour(p):
     try:
         time.sleep(1.8)
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
-        for step in (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+        steps = (notch_talk, notch_hover) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
-                     clipboard_scene, clipboard_window_scene, image_card_scene):
+                     clipboard_scene, clipboard_window_scene, image_card_scene)
+        for step in steps:
             step(p)
         print("  [done]", flush=True)
     except Exception:
@@ -849,11 +965,16 @@ def _demo_prefs():
 
 def main():
     _demo_prefs()
+    if NOTCH:
+        _notch_demo()
     presence = ui.Presence(hands_free=True, show_hud=True)
     presence.on("quit", lambda: os._exit(0))
 
     def build():
-        ms.backdrop()
+        back = ms.backdrop()
+        if NOTCH:
+            back.contentView().subviews()[0].setHidden_(True)      # no document card under the notch
+            _menu_bar_cover()
         presence.build()
         threading.Thread(target=tour, args=(presence,), daemon=True).start()
     ui.run_cocoa(build)

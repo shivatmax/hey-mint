@@ -13,8 +13,9 @@
 //   while Mint runs, the Ear costs ~8 MB, as the plain launcher did.
 //
 // Exit codes from Mint: 0 = quit (the Ear quits too), 75 = unloaded (the Ear
-// takes over), anything else = it crashed (logged; the Ear takes over, so the
-// next "Hey Mint" starts it fresh).
+// takes over), 76 = restart now (the display mode changed: orb <-> notch),
+// anything else = it crashed (logged; the Ear takes over, so the next
+// "Hey Mint" starts it fresh).
 
 import AppKit
 import Foundation
@@ -29,6 +30,7 @@ enum Bundled {
     static let arguments = info["MintArguments"] as? [String] ?? ["--hands-free"]
 }
 let unloadedCode: Int32 = 75
+let restartCode: Int32 = 76
 
 final class Controller: NSObject, NSApplicationDelegate {
     lazy var ui = EarUI(root: Bundled.root)
@@ -136,6 +138,12 @@ final class Controller: NSObject, NSApplicationDelegate {
         if quitting || (status == 0 && reason == .exit) {
             stopListener()
             NSApp.terminate(nil)
+            return
+        }
+        if status == restartCode && reason == .exit {
+            // Asked for: the display mode changed (orb <-> notch). Straight back, whatever the unload setting.
+            Log.write("[ear] Mint restarting (display mode changed)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.launch(reason: "launch") }
             return
         }
         let unloading = ((Settings.read()["unload_after_minutes"] as? NSNumber)?.doubleValue ?? 0) > 0

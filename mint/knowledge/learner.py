@@ -221,7 +221,8 @@ instead of this one's specifics). Name exact on-screen labels that worked. Put w
 the user's corrections in notes. "update" when a saved skill already covers this kind of task (even with different specifics). "skip" if the
 work did not succeed at all and nothing was learned, or it is a one-off with no reusable path.
 Never include passwords, keys, card numbers or private message content."""
-        client = genai.Client(api_key=os.environ[config.API_KEY_ENV])
+        from mint.core import gemini_keys
+        client = gemini_keys.client()
         for model in MODELS:
             try:
                 reply = client.models.generate_content(

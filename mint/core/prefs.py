@@ -64,6 +64,7 @@ DEFAULTS: dict = {
     "cute_agents": True,        # sub-agents as critters from a toy box (critters.py)
     "cute_effects": True,       # a small flourish per action, paw prints on clicks (cute_fx.py)
     "auto_emotions": True,      # the orb shows feelings on its own in conversation (moods.py)
+    "notch_mode": False,        # Mint lives in the camera notch like a Dynamic Island (notch.py)
     "word_animation": True,
     "voice": True,
     "mic": True,

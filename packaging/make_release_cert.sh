@@ -67,8 +67,8 @@ printf '%s' "$PASSWORD" > "$WORK/pass"
 rm -f "$WORK/key.pem"
 SHA1="$("$OPENSSL" x509 -in "$OUT/hey-mint-release.cer.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
 base64 -i "$OUT/hey-mint-release.p12" | tr -d '\n' > "$OUT/MACOS_CERT_P12.base64.txt"
-printf '%s\n' "$PASSWORD" > "$OUT/MACOS_CERT_PASSWORD.txt"
-printf '%s\n' "$SHA1" > "$OUT/MACOS_SIGN_IDENTITY.txt"
+printf '%s' "$PASSWORD" > "$OUT/MACOS_CERT_PASSWORD.txt"   # no newline: it is pasted into password fields
+printf '%s' "$SHA1" > "$OUT/MACOS_SIGN_IDENTITY.txt"
 
 echo "Checking that macOS imports it and signs with it (a throwaway keychain)…"
 security create-keychain -p "$PASSWORD" "$KEYCHAIN"

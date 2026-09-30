@@ -238,5 +238,9 @@ def trim(messages: list[dict], budget: int = 120_000, keep: int = 6) -> None:
         if len(content) > 1200:
             messages[i]["content"] = content[:1000] + f"\n…(older result shortened; {len(content)} chars)"
             total -= len(content) - 1100
+            # Claude rejects thinking blocks once the history before them was edited ("preserved
+            # thinking"): the Claude turns after this result go back in the plain form from now on.
+            for later in messages[i + 1:]:
+                later.pop("_anthropic", None)
             if total <= budget:
                 break

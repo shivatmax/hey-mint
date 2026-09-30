@@ -774,10 +774,65 @@ a fresh session from it), "clear the chat", "start a new session".
 
 ## 11. Sub-agents
 
-Named background agents with their own colour, model and tools (`agents.json`):
+Named background agents with their own colour, models and tools (`agents.json`):
 **Astra** (research, sourced briefs), **Luna** (code, RL environments), **Sage**
-(long documents), **Codex** (builds sites and apps with OpenAI Codex).
-Astra, Luna and Sage all run on OpenAI's GPT-6 Luna (`OPENAI_API_KEY`); no agent uses OpenRouter.
+(long documents), **Codex** (builds sites and apps with OpenAI Codex). They start on OpenAI's
+GPT-6 Luna; you can give any agent other models, and make your own agents.
+
+### Models, providers and backups (Settings ▸ Models & agents)
+
+| Provider | Key | Models offered (plus the live list once the key works) |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | GPT-6 Luna, GPT-6 Sol, GPT-6.1 Sol, GPT-6 Astra, GPT-5.6 Luna / Sol / Terra |
+| Anthropic | `ANTHROPIC_API_KEY` | Claude Opus 5.5, Sonnet 5.5, Haiku 4.5, Fable 5.1 (official SDK) |
+| Google Gemini | `GEMINI_API_KEY` (+ `GEMINI_API_KEY_2`) | Gemini 3.5 / 3.6 / 3.7 Flash, 3.1 Pro, Flash-Lite |
+| OpenRouter | `OPENROUTER_API_KEY` | any of its models, e.g. `openrouter/deepseek/deepseek-r2` |
+| Groq | `GROQ_API_KEY` | GPT-OSS 120B / 20B, Llama 3.3 70B, Llama 3.1 8B, Qwen |
+| xAI Grok | `XAI_API_KEY` | Grok 4.7, 4.6, 4.5, 4.20 |
+| Ollama | none (its address) | whatever you pulled: `ollama pull llama3.2` |
+| Your own | optional | any OpenAI-compatible `/v1` endpoint (LM Studio, vLLM, a gateway) |
+
+- **Keys:** add, change, remove and **Test** each key on the page (Test checks it and counts its
+  models). Keys go to `.env` (mode 600); only their last four characters are ever shown.
+- **Model names:** models are written `provider/model` (as LiteLLM does), e.g.
+  `anthropic/claude-sonnet-5-5`, `groq/llama-3.3-70b-versatile`, `ollama/llama3.2:3b`.
+- **Each agent:** a model plus two backups (**Edit…**), thinking none / low / medium, and
+  whether it can use the web or make PDFs. **Add an agent…** makes your own; your own agents
+  can be removed, the built-in ones only edited.
+- **Backups for every agent:** up to three models tried after an agent's own. Then Gemini
+  3.5 Flash and Flash-Lite as the last resort (a switch).
+- **When a model can't answer,** the next one in the chain takes over, even mid-run with the
+  conversation carried across:
+  - rate limit (429): that model rests 5 minutes, an hour for a daily quota;
+  - overloaded (5xx): it rests 30 seconds;
+  - unknown model: it rests an hour;
+  - refused key or no credits: that provider is skipped until the key changes;
+  - a model that can't use tools;
+  - a Claude refusal.
+
+  The agent's first update names the switch ("openai/gpt-6-luna did not answer (…);
+  gemini/gemini-3.5-flash took over").
+- **Claude details:**
+  - thinking blocks go back unchanged when the same Claude model continues;
+  - effort follows the agent's thinking level (low / medium);
+  - Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 have Anthropic's server-side refusal fallback on
+    (`fallbacks: "default"`).
+- **By voice:** "create an agent called Nova that writes launch copy, on Claude Sonnet with
+  GPT-6 Sol as backup" (`create_agent` with `model` / `backups`, names understood: Opus, Sonnet,
+  Haiku, Fable, GPT-6 Sol, GPT-5.6 Terra, Luna, Grok, Groq, Llama, Gemini Pro, "ollama <name>").
+
+### Two Gemini keys
+
+Add **Key 2** under Gemini and each key covers for the other. By default the voice runs on key 1
+and everything else (memory, summaries, pointing at the screen, Gemini agents) on key 2. The
+other setting is key 1 for everything, with key 2 as backup.
+
+- **Background calls:** a key that answers 429 / quota is rested for that model (90 s, an
+  hour for a daily quota), and the same call is retried at once on the other key.
+- **The voice:** a rate-limited or refused key makes Mint reconnect on the other key, same
+  model; only when both are limited does it fall back to the backup Live model.
+
+`mint/core/gemini_keys.py`; checks in `bench/providers_bench.py`.
 
 | Say | Tool |
 |---|---|
@@ -788,6 +843,8 @@ Astra, Luna and Sage all run on OpenAI's GPT-6 Luna (`OPENAI_API_KEY`); no agent
 | (an agent asks a question; you answer) | `answer_agent` |
 | "stop Astra" | `stop_agent` |
 | "create an agent called Nova that writes tweets, make it pink" | `create_agent` |
+| "make Nova use Claude Sonnet, with Grok as backup" | `create_agent` (model, backups) |
+| "which agents do I have?" | `list_agents` (each with its models) |
 
 Each agent is a small orb that pops out of Mint's, works beside it, and flies back
 when done.
@@ -955,9 +1012,10 @@ each description.
 | `notify` | title, message | Show a macOS notification. |
 | `system_action` | action | Lock the screen, sleep the display, switch dark mode, or mute. |
 | `calendar_events` | days | The user's calendar events from today onwards. |
-| `create_reminder` | title, in_minutes, when | Create a reminder in the Reminders app, optionally due at a time. |
-| `create_note` | title, body | Create a note in the Notes app. |
-| `compose_email` | to, subject, body | Open a pre-filled email draft in the user's mail app for them to review and send. |
+| `create_reminder` | title, in_minutes, when, list, notes, create_list | Create a reminder in the Reminders app, optionally due at a time, in the list the user names. |
+| `create_event` | title, start, end, minutes, calendar, location, notes, allow_overlap, create_calendar | Add an event to the Calendar app (instant, EventKit). |
+| `create_note` | title, body, folder, create_folder | Create a note in the Notes app, in the folder the user names. |
+| `compose_email` | to, subject, body, app | Make a pre-filled email draft for the user to review and send. |
 | `list_emails` | count | List the newest messages in the macOS MAIL APP's inbox. |
 | `read_email` | number | Read one message from the macOS Mail app's inbox in full (see list_emails). |
 | `open_chrome` | account, url | Open Google Chrome as one particular account (Chrome profile), optionally at a URL. |
@@ -969,7 +1027,7 @@ each description.
 | `export_doc_pdf` | open_after | Export the open Google Doc itself as a PDF, exactly as Docs renders it, and open it. |
 | `plan_task` | goal, steps | Start a multi-step task: state the goal and the ordered steps BEFORE doing any of them. |
 | `step_done` | step, result, failed | Mark a step of the current task finished (or failed), with a one-line result saying what you checked (what the window, file or page showed). |
-| `create_pdf` | title, content, open_after | Write a nicely formatted PDF and open it. |
+| `create_pdf` | title, content, save_to, open_after | Write a nicely formatted PDF and open it. |
 | `run_routine` | name | Run one of the user's saved routines by name. |
 | `desktop` | goal | Drive the screen to do something that the instant tools cannot: click a specific button or link, type into a particular field, choose a menu item, pick a search result. |
 | `set_preference` | setting, value | Change how you (Mint) behave or look, when the user asks: 'don't speak, just chat' -> spoken_replies off; 'talk to me again' / 'speak' -> spoken_replies on; 'turn off the mic' -> microphone off (then they can only type); 'make it purple' -> theme; 'move to the bottom left' -> position; also the orb's face, the on-screen effects, word-by-word captions, whether you listen while you work, and the activity timeline ('remember what I work on' -> activity_timeline on; 'delete my timeline' -> activity_timeline clear), where Mint saves what it makes ('save everything in my Dropbox' -> storage_folder = that folder's path, e.g. |
@@ -994,46 +1052,63 @@ each description.
 | `list_memories` | group | List what is remembered, optionally one group. |
 | `memory_used` | minutes | Which remembered facts you were given in this conversation (and the fixed ones) - for 'why did you say that?', 'which memory did you use?', 'how do you know that?'. |
 | `show_skills_and_memory` | tab | Open the Skills & Memory window on screen, where the user can see and edit every skill and every remembered fact. |
-| `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - or, for things without words (an icon, a button, a picture), looks at a screenshot for a tight box around that one thing (about 4 s) - scrolling the window if needed, and draws a box, underline, highlight, circle or arrow around it, with an optional short note; your orb flies over beside it. |
+| `show_on_screen` | text, style, note, scroll, app | Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - or, for things without words (an icon, a button, a picture, a chart), looks at the screen for them - scrolling the window if needed, and draws a box, underline, highlight, circle or arrow around it, with an optional short note; your orb flies over beside it. |
 | `mark_area` | x, y, w, h, style, note | Mark a region with no text (an image, a chart, an icon) using 0-1000 coordinates of your latest look screenshot: x, y of its top-left corner, and its width and height. |
 | `clear_marks` |  | Remove the marks you drew on screen. |
 | `move_orb` | direction, amount, tricks | Move your orb on screen when the user asks: 'go a little down', 'move up', 'move left a lot', 'you are covering that' (direction away), 'go to the middle'. |
 | `screen_share_visibility` | visible | Show or hide Mint in screen sharing, recordings and screenshots. |
+| `display_mode` | mode | Switch how Mint looks on screen: 'orb' = the floating round orb (default); 'notch' = Mint lives in the MacBook's camera notch like the iPhone's Dynamic Island (it grows out of the notch to show words, tasks and controls). |
 | `express` | emotion, requested | Play an expression on your orb body. |
 | `set_voice` | voice, style | Change your speaking voice and/or style when the user asks ('use a deeper voice', 'sound more cheerful', 'talk slower', 'use Puck'). |
 | `list_agents` |  | List your sub-agents: name, what each is for, its model, and what each is doing now. |
-| `delegate_task` | agent, task, why, thinking, context, folder, helpers, attach_window | Hand a substantial task to a sub-agent, which works in the background while you keep talking. |
+| `delegate_task` | agent, task, why, thinking, context, folder, save_to, helpers, attach_window | Hand a substantial task to a sub-agent, which works in the background while you keep talking. |
 | `delegate_tasks` | tasks | Start several sub-agent tasks at once (in parallel), e.g. |
 | `agent_status` | agent | What your sub-agents are doing, or have finished, right now. |
 | `message_agent` | agent, message, thinking | Send new or changed instructions to a running sub-agent - when the user changes what they want mid-task ('tell Luna to use pytest', 'make it shorter'). |
 | `answer_agent` | agent, answer | Pass the user's answer to a sub-agent that asked a question. |
 | `stop_agent` | agent | Stop a running sub-agent, or 'all'. |
-| `create_agent` | name, role, instructions, thinking, web, color | Create (or update) a named sub-agent when the user asks for one: its name, what it is for, how it should work, and optionally which model. |
+| `create_agent` | name, role, instructions, thinking, model, backups, web, color | Create (or update) a named sub-agent when the user asks for one: its name, what it is for, how it should work, and optionally which model. |
 | `wait_until_done` | app, until_text, timeout_minutes | Wait until an app has FINISHED what it is doing before you use the result: ChatGPT (or any AI chat) still writing its answer, a page loading, something generating. |
 | `preview_site` | path | Show a web page or site that was built on this Mac (e.g. |
 | `edit_selection` | instruction, replace, action | Rewrite the text the user has selected, in any app, and replace it in place: more formal, friendlier, shorter, fix grammar, bullet points, translate, expand, as a reply... |
-| `make_spreadsheet` | source, pattern, what, columns, name | Read many documents (PDFs, Word, text, scans, photos of receipts) and put the same fields from each into one .xlsx spreadsheet, one row per document (or per item in a statement), then open it. |
+| `make_spreadsheet` | source, pattern, what, columns, name, save_to | Read many documents (PDFs, Word, text, scans, photos of receipts) and put the same fields from each into one .xlsx spreadsheet, one row per document (or per item in a statement), then open it. |
+| `edit_spreadsheet` | path, add_rows, set_cells, total, sheet | Change an existing Excel .xlsx file in place, without opening it: add rows at the bottom, set cells, add a Total row (=SUM of every number column, below the data; an existing Total row moves below new rows). |
 | `tidy` | action, folder, how | Organise a folder's loose files into sub-folders (by kind, topic, project or month) with a preview: plan (nothing moves), apply (after the user agrees), undo (put the last tidy-up back). |
 | `teach` | action, goal, title, narration | Learn a task by watching the user do it once, then save it as a skill Mint can follow later. |
 | `tutor` | action, task, app | Teach the user a task on screen instead of doing it: Mint plans the steps, points at each control with an arrow and a note, waits until the user has done it, then shows the next. |
-| `meeting` | action, title, which, show, everyone | Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint's Meetings folder. |
+| `meeting` | action, video, title, which, show, everyone | Record a meeting/call on this Mac without a bot (the user's microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint's Meetings folder. |
 | `briefing` | focus, news_topic | The user's day in one spoken summary: today's calendar, reminders due, the newest mail (what needs them), unfinished tasks, today's meetings, the weather and a few headlines. |
 | `shortcut` | action, name, input | Run one of the user's Apple Shortcuts by name (Home scenes and lights, Focus, music, their own automations), optionally with text input, and get its output; or list them. |
 | `find_screenshot` | query, open | Find screenshots by the text or things in them (an invoice number, an error, a booking, a chat), wherever they are saved. |
-| `translate_screen` | target, show | Translate the foreign text in the front window (any language or script, even in images) and pin each translation beside its text on screen for a minute. |
+| `translate_screen` | target, show | Translate the foreign text in the front window (any language or script, even in images) and show it in place: each paragraph covered in its own colours with the translation written over it, for a minute. |
 | `mail` | action, number, say, count | The Mail app's inbox, smarter: triage (sort the newest messages into needs a reply, to do, FYI, newsletters, promos, with one line each) and draft_reply (write a reply to message `number` in the user's own style, from what they say, and open it as a draft - never sent). |
-| `mac` | control, value, minutes, app, app2 | The Mac's own switches: brightness, keep_awake, focus (Do Not Disturb), window layouts (Rectangle or Accessibility), music, night_shift, wifi, show (desktop, Mission Control...), settings pages. |
-| `screen_record` | action, target, app, region, audio, mic, confirm, reveal | Record a video (.mp4) of the screen, one window or a part of the screen; a window or area is shown as a box first and recorded only after confirm. |
-| `track` | action, what, target, goal, which | Keep an eye on something and tell the user the moment it finishes: a download, a Claude Code session, a Terminal/iTerm command, an upload/render in a window, a file. |
+| `mac` | control, value, minutes, app, app2 | The Mac's own switches: brightness (up/down/0-100), keep_awake (on with minutes, off, status), focus (Do Not Disturb on/off), window (layout of the front window or of `app`: left_half, right_half, top_half, bottom_half, top_left/top_right/bottom_left/bottom_right, left_third, center_third, right_third, left_two_thirds, right_two_thirds, maximize, almost_maximize, center, restore, fullscreen, next_display, larger, smaller; split = `app` left and `app2` right), music (resume/pause/next/previous in Spotify or Music), night_shift (on/off), wifi (on/off/status), show (desktop, mission_control, launchpad, hide_others, minimize), settings (open a System Settings page: displays, sound, wifi, bluetooth, battery, notifications, focus, privacy, keyboard, trackpad, general, appearance, wallpaper, network, storage...). |
+| `screen_record` | action, target, app, region, audio, mic, confirm, reveal | Record a video (.mp4) of the screen, one window or a part of the screen, saved in Mint's Videos/Recordings folder. |
+| `track` | action, what, target, goal, which | Keep an eye on something and tell the user the moment it finishes, even hours later: a browser download, a Claude Code session finishing its turn (or waiting for approval), a reply in the ChatGPT app or a chat/session in the Claude app finishing, a command in Terminal or iTerm, an upload/render/export in any app's window (judged from the window against the goal), or a file appearing. |
+| `show_card` | title, subtitle, number, unit, items, icon, tint, more | Show an answer as a card that grows out of Mint's orb: a count as a big number, or a short list (files, emails, downloads, events, results) with icons. |
+| `dictation` | action, count, paste | The user's recent dictations (Wispr-style: hold a key, talk, the text is typed at the cursor). |
+| `edit_video` | instruction, source, extra, output, open | Edit a video file by instruction: trim/cut parts, remove silent parts, speed up or slow down, make it vertical (9:16) / square / 4:5, crop black bars, rotate or flip, resize (720p...), burn in captions (transcribed), mute or change volume, add background music, join clips, fade in/out, compress under a size, make a GIF of a part, or extract the audio (mp3/m4a/wav). |
+| `video_info` | source | A video's length, resolution, shape, frame rate, sound and file size. |
+| `ocr_copy` | source, path, lines, save_to | Read the text of the front window, the whole screen, an image or PDF (scans too), or a picture on the clipboard, with the Mac's own text recognition (any language), and copy it to the clipboard in reading order, paragraphs kept. |
+| `data_to_sheet` | source, path, what, name, save_to, data, open | Turn a table or list of data into an Excel .xlsx (numbers as numbers, dates as dates, a bold frozen header, one sheet per table) and open it: from the front window or screen, a PDF, image, Word, text or CSV file, a web page (its URL in path; fetched here, it does not need to be open), or what is on the clipboard (copied cells, text or a picture). |
+| `convert_document` | path, language, format, open, status | Convert a document (PDF, scanned PDF, Word, RTF, text, Markdown, HTML, image) into Word (docx), PDF, Markdown, text, HTML or RTF, keeping headings, lists, tables and paragraphs; optionally translate it into another language (Hindi and other scripts included). |
+| `notifications` | action, app, query, index, match, text, send, limit | The user's macOS notifications (Notification Center): what they missed, read them, filter by app or words, open one, dismiss one, clear them, or reply inline (Messages/Slack). |
+| `undo` | action, count, match | Undo what Mint itself did in the last 24 hours, newest first: switches (brightness, volume, mute, dark mode, Do Not Disturb, Night Shift, keep awake, Wi-Fi), window layouts, text Mint typed or rewrote, clipboard changes, files Mint moved/renamed/trashed/created/edited, tidy-ups, reminders and notes Mint created, Mint's own settings. |
+| `update` | action | Hey Mint's own updates. |
+| `agent_app` | app, action, prompt, name, chat, project, new, wait, timeout, count, what, page, more, session, view | Use the ChatGPT or Claude desktop app: see whether it is busy and which chat is open, read the latest reply or the last messages, list chats/projects/Claude Code sessions, open one, start a new chat, send a prompt (only when the user asked) and wait for the reply, or press Stop. |
+| `calculate` | expression, numbers | Exact arithmetic: an expression ('1200.50 + 85 + 310.49', 'round(49.99 * 0.79, 2)', '(3840 - 1200) / 4') or a list of numbers to total (gives total, average, min, max). |
+| `merge_folders` | folders, into, older_folder, remove_empty | Merge folders into one, flat (files in subfolders too): the newest copy of each file name stays, older copies go to an 'older' subfolder with their real names, emptied folders are removed. |
+| `make_image` | action, prompt, style, count, path, image | Make pictures with Apple's Image Playground (on-device Apple Intelligence) and work on the picture card that shows them: create from a description in a style, change the picture by description, save a copy, draw another, improve the prompt, copy, close the card, or open it in the Image Playground app. |
+| `make_shortcut` | action, description, plan_id, name | Make a new Apple Shortcut (Shortcuts app) from a plain description: plan the steps first and read them back, create only after the user agrees (they click 'Add Shortcut' once). |
 | `task` | action, steps, under, after, text, which | Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps `under` a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or 'where were we'), list (unfinished tasks), abandon. |
 | `recall_history` | question, when | Look back at what happened: past conversations, what Mint did and found, agents' results, tasks, automations and videos watched, by date. |
 | `automation` | action, name, trigger, time, days, every_minutes, between, folder, pattern, app, minutes_before, match, do, how, agent | Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events). |
 | `watch_video` | source, question, at, frames, fresh | Watch and understand a video in seconds: a YouTube / X / Vimeo / Loom / TikTok / Instagram link, a video or audio file, or - with no source - the video page in front, the video selected in Finder, or the newest screen recording. |
-| `screenshot` | what, target, size, copy, save, name, format | Take a screenshot and save it as a file (and copy it to the clipboard). |
-| `clipboard` | action, text, path, index | Manage the clipboard. |
+| `screenshot` | what, target, title, size, copy, save, name, path, format | Take a screenshot and save it as a file (and copy it to the clipboard). |
+| `clipboard` | action, text, path, index, count, kind, indexes, label | Manage the clipboard. |
 | `read_file` | path, start_line, max_chars | Read a file on this Mac: text, code, Markdown, CSV, JSON, PDF, Word/RTF/Pages-exported docs. |
 | `write_file` | path, content, mode, find | Create or change a text file (notes, code, Markdown, CSV, HTML...). |
-| `find_files` | query, folder, kind, content, limit | Find files and folders by name or content with Spotlight, newest first. |
+| `find_files` | query, folder, kind, content, days, modified_from, modified_to, sort, limit | Find files and folders by name or content with Spotlight, newest first. |
 | `file_action` | action, path, to | Do something with a file or folder: open (in its default app), reveal (in Finder), info, move / copy / rename (to `to`), make_folder, trash (moves it to the Trash - only when the user asked to delete it; it can be restored from there). |
 | `web_search` | query, max_results | Search the web and get titles, links and snippets - for facts, news, prices, docs, anything current. |
 | `read_url` | url, max_chars | Fetch a web page or text URL and get its readable text, without opening it on screen. |
@@ -1046,4 +1121,4 @@ each description.
 | `run_applescript` | script | Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting. |
 | `fix_hearing` | heard, meant, forget | Remember a word or name you misheard, so it is heard right from now on. |
 
-104 tools.
+125 tools.

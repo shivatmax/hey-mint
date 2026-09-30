@@ -247,6 +247,13 @@ def declarations() -> list[types.FunctionDeclaration]:
             "says 'be visible', 'show yourself on the screen share', 'I want to show them you'; "
             "visible=false for 'hide from the share', 'go invisible'.",
             {"visible": {**BOOL}}, ["visible"]),
+        _fn("display_mode",
+            "Switch how Mint looks on screen: 'orb' = the floating round orb (default); 'notch' = Mint "
+            "lives in the MacBook's camera notch like the iPhone's Dynamic Island (it grows out of the "
+            "notch to show words, tasks and controls). Use for 'go into the notch', 'dynamic island mode', "
+            "'be the notch', 'back to the orb', 'floating mode'. Mint restarts a few seconds later to "
+            "change its look: say one short sentence and stop.",
+            {"mode": {**STRING, "enum": ["orb", "notch"]}}, ["mode"]),
         _fn("express",
             "Play an expression on your orb body. ONLY when the user asks for one ('smile', "
             "'clap', 'dance', 'show me a heart', 'cry', 'wave'), or at a genuinely emotional moment "
@@ -463,8 +470,14 @@ def _screen_share_visibility(args: dict) -> str:
     return sharing.set_visible(bool(args.get("visible")))
 
 
+def _display_mode(args: dict) -> str:
+    from mint.ui import notch
+    return notch.set_mode(str(args.get("mode", "")))
+
+
 HANDLERS = {
     "screen_share_visibility": _screen_share_visibility,
+    "display_mode": _display_mode,
     "move_orb": _move_orb,
     "show_on_screen": _show_on_screen,
     "mark_area": _mark_area,

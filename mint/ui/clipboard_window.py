@@ -353,6 +353,14 @@ class ClipboardWindow:
         upper = cy > screen.origin.y + screen.size.height / 2
         x = cx + 26 - W if right else cx - 26
         y = cy + 26 - H if upper else cy - 26
+        try:
+            from mint.ui import notch
+            if notch.enabled() and getattr(notch.notch, "top", None):
+                # Dynamic Island mode: hang centred under the notch, not off a corner of it.
+                n = notch.notch
+                x, y = n.cx - W / 2, (n.top - getattr(n, "nh", 32)) - 10 - H
+        except Exception:
+            pass
         x = min(max(x, screen.origin.x + 8), screen.origin.x + screen.size.width - W - 8)
         y = min(max(y, screen.origin.y + 8), screen.origin.y + screen.size.height - H - 8)
         return AppKit.NSMakeRect(x, y, W, H), (cx, cy)

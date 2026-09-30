@@ -46,6 +46,14 @@ _PARALLEL = {"web_search", "fetch_url", "read_file", "list_files", "classify", "
 _EASY = ("rename", "reformat", "list", "copy", "translate", "summari", "fix typo", "hello", "print", "short")
 
 
+def _continuation(out: dict) -> dict:
+    """What the provider that wrote a turn needs to continue it exactly (providers.py): which model wrote it,
+    and its own state - Gemini's raw reply, Claude's content blocks, OpenAI's response id."""
+    return {"_via": out.get("_via"), "_gemini": out.get("_gemini") if out.get("provider") == "gemini" else None,
+            "_anthropic": out.get("_anthropic"), "_reasoning_details": out.get("_reasoning_details"),
+            "_response_id": out.get("_response_id")}
+
+
 def choose_effort(task: str, default: str = "low") -> str:
     """How hard the model should think, from the task: none for small and
     mechanical, medium for research/design/debugging/RL, low otherwise. The
@@ -435,15 +443,11 @@ class Hub:
                 if not out["tool_calls"]:
                     if run.inbox:                 # instructions arrived while it thought
                         run.messages.append({"role": "assistant", "content": out["text"] or "(ok)",
-                                             "_gemini": out.get("_gemini") if out.get("provider") == "gemini" else None,
-                                             "_reasoning_details": out.get("_reasoning_details"),
-                                     "_response_id": out.get("_response_id")})
+                                             **_continuation(out)})
                         continue
                     return await self._end(run, "done", out["text"] or "(no summary given)")
                 run.messages.append({"role": "assistant", "content": out["text"], "tool_calls": out["tool_calls"],
-                                     "_gemini": out.get("_gemini") if out.get("provider") == "gemini" else None,
-                                     "_reasoning_details": out.get("_reasoning_details"),
-                                     "_response_id": out.get("_response_id")})
+                                     **_continuation(out)})
                 calls = out["tool_calls"]
                 if len(calls) > 1 and all(c["name"] in _PARALLEL for c in calls):
                     # Independent lookups in one step run together (searches, page

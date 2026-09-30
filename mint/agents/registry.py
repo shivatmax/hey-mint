@@ -5,8 +5,10 @@ Each agent:
       "name": "Astra",
       "color": "#8B7CFF",
       "role": "research",                  one line, shown to Mint when it picks an agent
-      "provider": "openai",                every agent runs on GPT-6 Luna, straight from the OpenAI API
-      "models": ["openai/gpt-6-luna"],     (set "allow_other_models": true to use others)
+      "models": ["openai/gpt-6-luna", "anthropic/claude-sonnet-5-5"],   its model, then its own backups,
+                                           as "provider/model" (catalog.py); the backups set for every
+                                           agent follow ("use_backups": false turns them off)
+      "provider": "openai",                the first model's provider (kept for older code)
       "thinking": "none" | "low" | "medium",   the usual reasoning effort; Mint may pick per task
       "tools": ["web_search", "fetch_url", "write_file", ...],
       "instructions": "…",                 the agent's own system prompt
@@ -37,9 +39,10 @@ log = logging.getLogger("mint.agents")
 PATH = config.PROJECT_ROOT / "agents.json"
 WORK_ROOT = Path.home() / "Documents" / "Mint" / "agents"      # default; new agents use config.storage("Agents")
 
-# The user's choice: every sub-agent runs on OpenAI's GPT-6 Luna, straight from the
-# OpenAI API (OPENAI_API_KEY) - never OpenRouter. Its thinking is set per task.
+# The default for the built-in agents: OpenAI's GPT-6 Luna, straight from the OpenAI API. The user can
+# give any agent other models, and backups, in Settings ▸ Models & agents (or by asking Mint).
 ONLY_PROVIDER, ONLY_MODEL = "openai", "gpt-6-luna"
+DEFAULT_MODEL = "openai/gpt-6-luna"
 CODEX_MODEL = "gpt-6-luna"
 
 GEMINI_FAST = ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
@@ -51,7 +54,7 @@ DEFAULTS = [
         "color": "#8B7CFF",
         "role": "Research: searches the web, reads sources, and writes a sourced brief.",
         "provider": ONLY_PROVIDER,
-        "models": [ONLY_MODEL],
+        "models": [DEFAULT_MODEL],
         "thinking": "medium",
         "tools": ["web_search", "fetch_url", "write_file", "read_file", "list_files", "ask_user",
                   "report_progress"],
@@ -68,7 +71,7 @@ DEFAULTS = [
         "color": "#2EC4B6",
         "role": "Builder: RL environments and code - plans, writes files, and revises on request.",
         "provider": ONLY_PROVIDER,
-        "models": [ONLY_MODEL],
+        "models": [DEFAULT_MODEL],
         "thinking": "medium",
         "tools": ["write_file", "read_file", "list_files", "web_search", "fetch_url", "ask_user",
                   "report_progress"],
@@ -100,7 +103,7 @@ DEFAULTS = [
         "color": "#FFB547",
         "role": "Writer: long documents, reports and PDFs from notes or research.",
         "provider": ONLY_PROVIDER,
-        "models": [ONLY_MODEL],
+        "models": [DEFAULT_MODEL],
         "thinking": "low",
         "tools": ["write_file", "read_file", "list_files", "create_pdf", "ask_user", "report_progress"],
         "instructions": (
@@ -123,12 +126,11 @@ def _normal(agent: dict) -> dict:
         # Codex signs in with the user's ChatGPT account; OpenRouter ids do not apply.
         agent["provider"] = "codex"
         agent["models"] = [m.split("/", 1)[-1] for m in (agent.get("models") or [CODEX_MODEL])]
-    elif not agent.get("allow_other_models"):
-        # Only GPT-6 Luna from OpenAI, even for agents made before that choice (they said OpenRouter).
-        agent["provider"], agent["models"] = ONLY_PROVIDER, [ONLY_MODEL]
-        agent.pop("fallback", None)
-    agent.setdefault("provider", ONLY_PROVIDER)
-    agent.setdefault("models", [ONLY_MODEL])
+    else:
+        agent["models"] = normal_models(agent)
+        agent["provider"] = agent["models"][0].split("/", 1)[0]
+        agent.pop("fallback", None)                   # folded into "models"
+        agent.pop("allow_other_models", None)
     if agent.get("thinking") not in ("none", "low", "medium"):
         preset = next((d for d in DEFAULTS if d["name"].lower() == agent["name"].lower()), None)
         agent["thinking"] = preset["thinking"] if preset else "low"
@@ -142,6 +144,33 @@ def _normal(agent: dict) -> dict:
     slug = re.sub(r"[^a-z0-9]+", "-", agent["name"].lower()).strip("-") or "agent"
     agent.setdefault("workspace", str(config.storage("Agents") / slug))
     return agent
+
+
+def normal_models(agent: dict) -> list[str]:
+    """The agent's models as "provider/model", in order. Older agents.json files had "provider" + bare model
+    ids (and, before that, only GPT-6 Luna was allowed: agents made then said OpenRouter "openai/gpt-6-luna",
+    which is now the same model straight from OpenAI), plus an optional "fallback" block."""
+    from mint.agents import catalog
+    provider = str(agent.get("provider") or "")
+    legacy = not agent.get("models_v2")
+    refs = []
+    for raw in agent.get("models") or []:
+        raw = str(raw).strip()
+        if not raw:
+            continue
+        if legacy and not agent.get("allow_other_models"):
+            refs.append(DEFAULT_MODEL)       # the old rule: every agent on GPT-6 Luna from OpenAI
+            continue
+        head = raw.split("/", 1)[0]
+        if head in catalog.all_providers() and "/" in raw and not (legacy and provider == "openrouter"):
+            refs.append(raw)
+        else:
+            refs.append(catalog.join(provider or catalog.guess_provider(raw), raw))
+    fb = agent.get("fallback")
+    if isinstance(fb, dict) and agent.get("allow_other_models"):
+        refs += [catalog.join(fb.get("provider", "gemini"), m) for m in fb.get("models") or []]
+    out = list(dict.fromkeys(refs)) or [DEFAULT_MODEL]
+    return out
 
 
 def load() -> list[dict]:
@@ -189,7 +218,7 @@ def get(name: str) -> dict | None:
 
 
 def save(agent: dict) -> dict:
-    agent = _normal(agent)
+    agent = _normal(dict(agent, models_v2=True))
     agents = [a for a in load() if a["name"].lower() != agent["name"].lower()]
     agents.append({k: v for k, v in agent.items()})
     removed = [n for n in _removed() if n.lower() != agent["name"].lower()]

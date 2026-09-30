@@ -41,8 +41,9 @@ def _make_client():
         from google import genai
         from google.genai import types
         from mint.core import config
-        _client_cache = genai.Client(api_key=os.environ[config.API_KEY_ENV],
-                                     http_options=types.HttpOptions(timeout=180_000))
+        from mint.core import gemini_keys
+        # Fails over between the two Gemini keys by itself (gemini_keys.py).
+        _client_cache = gemini_keys.client(http_options=types.HttpOptions(timeout=180_000))
     return _client_cache
 
 

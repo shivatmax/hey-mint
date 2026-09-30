@@ -551,7 +551,8 @@ Conversation:
 {conversation[-8000:]}
 
 JSON only: {{"facts": [{{"text": "...", "group": "{'|'.join(GROUPS)}"}}]}}"""
-    client = genai.Client(api_key=os.environ[config.API_KEY_ENV])
+    from mint.core import gemini_keys
+    client = gemini_keys.client()
     for model in MODELS:
         try:
             reply = client.models.generate_content(

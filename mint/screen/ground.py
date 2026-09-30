@@ -164,9 +164,9 @@ def is_own(app) -> bool:
 def _client():
     from google import genai
     from google.genai import types
-    return genai.Client(api_key=os.environ[config.API_KEY_ENV],
-                        http_options=types.HttpOptions(timeout=12000,
-                                                       retry_options=types.HttpRetryOptions(attempts=1)))
+    from mint.core import gemini_keys
+    return gemini_keys.client(http_options=types.HttpOptions(timeout=12000,
+                                                             retry_options=types.HttpRetryOptions(attempts=1)))
 
 
 def _generate(contents, models=None, json_mode=True):
