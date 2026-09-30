@@ -9,10 +9,15 @@
 <section id="install" data-group="Start">
   <h2>Install</h2>
   <p class="lead">One download with everything inside: Python, libraries and models. Apple silicon Macs on macOS 14.2 or later.</p>
+  <h3>The one-line way (recommended)</h3>
+  <p>Open <b>Terminal</b> (Spotlight ▸ “Terminal”), paste this and press Return:</p>
+  <pre class="cmd"><code id="install-cmd">curl -fsSL hey-mint.pages.dev/install.sh | bash</code><button type="button" class="copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='Copied'">Copy</button></pre>
+  <p>It downloads the latest Hey Mint, checks it, puts it in Applications, <b>approves it with macOS</b> and opens it: no “can't be checked” box, nothing to find in System Settings. It is a short script you can <a href="install.sh">read first</a>. Why it is needed: Apple only lets apps skip that box if the developer pays it every year; Hey Mint is free and open source, so this script removes the “downloaded from the internet” mark from the copy it installs, the same thing <b>Open Anyway</b> does.</p>
+  <h3>Or download it</h3>
   <ol class="steps">
-    <li>Download <b>Hey-Mint-…-arm64.dmg</b> from <a href="{{download}}">the latest release</a> and drag Hey Mint into Applications.</li>
-    <li>Open it. The first time, macOS may say it can't check it: open <b>System Settings ▸ Privacy &amp; Security</b> and click <b>Open Anyway</b>.</li>
-    <li>Paste a free <a href="https://aistudio.google.com/apikey">Gemini API key</a>. Hold <kbd>⌥</kbd> while opening Mint to change keys later.</li>
+    <li>Download <b>Hey-Mint-…-arm64.dmg</b> from <a href="{{download}}">the latest release</a>, open it and drag Hey Mint into Applications.</li>
+    <li>Open it. The first time, macOS may say it can't check it: open <b>System Settings ▸ Privacy &amp; Security</b> and click <b>Open Anyway</b> (or use the one-line way above, which does that for you).</li>
+    <li>Paste a free <a href="https://aistudio.google.com/apikey">Gemini API key</a> (<kbd>⌘V</kbd> works in every field). Hold <kbd>⌥</kbd> while opening Mint to change keys later.</li>
     <li>The welcome window takes it from there: your name and what to call Mint, a voice, the permissions (each with why, and an Allow button), your shortcuts and a tour.</li>
   </ol>
   {{video onboarding | The welcome window: hello, your name, a voice, permissions, shortcuts, the tour, and you're set. Esc skips it; <b>Welcome tour…</b> in the menu bar brings it back.}}

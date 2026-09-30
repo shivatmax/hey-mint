@@ -401,6 +401,8 @@ def _edit_keys(app) -> None:
         holder.setSubmenu_(menu)
         main.addItem_(holder)
     app.setMainMenu_(main)
+    from mint.ui import pasteable
+    pasteable.install()                   # and the keys themselves, should the menu ever be missing
 
 
 def quit_app() -> None:

@@ -193,13 +193,30 @@ codesign --verify --deep --strict "$APP"
 codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /Designated requirement: /p'
 
 # --- the DMG --------------------------------------------------------------------------------
+# A window with the app, an arrow to Applications and what to do if macOS blocks the app (packaging/dmg/,
+# drawn by make_dmg_background.py; laid out by dmg_settings.py through dmgbuild, which writes the window's
+# .DS_Store itself, so no Finder is needed on the build Mac). If dmgbuild is unavailable, a plain DMG.
 DMG="$DIST/Hey-Mint-$VERSION-arm64.dmg"
 STAGE="$ROOT/build/dmg"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/Hey Mint.app"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -quiet -volname "Hey Mint" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+cat > "$STAGE/Get the install command.webloc" <<'WEBLOC'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>URL</key><string>https://hey-mint.pages.dev/docs#install</string></dict></plist>
+WEBLOC
+if [[ ! -x "$TOOLS/bin/dmgbuild" ]]; then "$TOOLS/bin/pip" install --quiet dmgbuild >/dev/null 2>&1 || true; fi
+if [[ -x "$TOOLS/bin/dmgbuild" ]] && "$TOOLS/bin/dmgbuild" -s "$ROOT/packaging/dmg_settings.py" \
+     -D app="$STAGE/Hey Mint.app" -D link="$STAGE/Get the install command.webloc" \
+     -D background="$ROOT/packaging/dmg/background.png" -D icon="$RES/Mint.icns" "Hey Mint" "$DMG" >/dev/null 2>&1; then
+  echo "DMG with the drag-to-Applications window."
+else
+  echo "dmgbuild failed or is missing: making a plain DMG." >&2
+  rm -f "$DMG"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -quiet -volname "Hey Mint" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+fi
 if [[ "$IDENTITY" != "-" ]]; then
   dmg_flags=(--force --sign "$IDENTITY")
   [[ -n "${SIGN_KEYCHAIN:-}" ]] && dmg_flags+=(--keychain "$SIGN_KEYCHAIN")

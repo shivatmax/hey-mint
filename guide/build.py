@@ -163,6 +163,11 @@ def main():
         page += TAIL.format(orb=ORB, repo=REPO, extra=extra)
         (HERE / f"{name}.html").write_text(page)
         written.append(name)
+    # The one-line installer (curl -fsSL hey-mint.pages.dev/install.sh | bash) is served from the site.
+    for candidate in (HERE.parent / "packaging" / "install.sh", HERE.parent.parent / "publish" / "overlay" / "packaging" / "install.sh"):
+        if candidate.exists():
+            (HERE / "install.sh").write_text(candidate.read_text())
+            break
     today = __import__("datetime").date.today().isoformat()
     urls = "".join(f"<url><loc>{SITE if p == 'index' else SITE + p}</loc><lastmod>{today}</lastmod></url>" for p in PAGES)
     (HERE / "sitemap.xml").write_text('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'

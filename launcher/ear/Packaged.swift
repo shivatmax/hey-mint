@@ -115,7 +115,7 @@ enum Packaged {
             for key in keys {
                 let label = NSTextField(labelWithString: key.label)
                 label.font = .boldSystemFont(ofSize: 12)
-                let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+                let field = PasteableSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
                 field.placeholderString = key.hint
                 field.stringValue = values[key.name] ?? ""
                 field.widthAnchor.constraint(equalToConstant: 320).isActive = true

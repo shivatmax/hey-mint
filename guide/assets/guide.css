@@ -443,3 +443,7 @@ q.inline{quotes:none;background:var(--caption);color:#F4F4F8;padding:2px 9px;bor
 @media (max-width:640px){.film{border-radius:18px}.film-play{top:86%;padding:6px 16px 6px 6px}.film-play .pb{width:34px;height:34px}}
 .plain{margin:6px 0 18px;padding-left:20px;max-width:68ch}
 .plain li{margin:5px 0}
+pre.cmd{display:flex;align-items:center;gap:14px;justify-content:space-between}
+pre.cmd code{font:inherit;white-space:nowrap;overflow:auto}
+pre.cmd .copy{flex:none;border:0;border-radius:9px;padding:7px 14px;background:var(--glow);color:var(--ink);font:600 13px var(--mono);cursor:pointer}
+pre.cmd .copy:hover{filter:brightness(1.08)}

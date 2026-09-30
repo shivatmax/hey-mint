@@ -293,6 +293,7 @@ if CommandLine.arguments.contains("--ear-helper") {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+EditMenu.install()                   // ⌘V and friends in every text field (the key prompt, below)
 if Packaged.isPackaged {
     do {
         try Packaged.prepare()

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.2 (2026-10-01)
+
+- **Paste works everywhere:** the first-run prompt for the Gemini (and other) keys is a native window of the
+  launcher, which had no Edit menu, so ⌘V did nothing there. It now has one, and its key fields paste on their
+  own (`launcher/ear/EditMenu.swift`). Every text field inside Mint also pastes, copies, cuts, selects all and undoes
+  even without the menu (`mint/ui/pasteable.py`).
+- **Install without the approval hunt:** `curl -fsSL https://hey-mint.pages.dev/install.sh | bash` downloads the
+  latest release, checks it, installs it, approves it with macOS (removes the download mark a free, un-notarized
+  app would otherwise be stopped by) and opens it (`packaging/install.sh`).
+- **A proper DMG window:** the app, a dashed arrow to Applications, what to do if macOS blocks the app and a link
+  to the install command (`packaging/dmg*`, built with dmgbuild, no Finder needed on the build Mac).
+
 ## 0.5.1 (2026-10-01)
 
 - **Notch you control:** hovering only shows the small row of controls; a click on the notch opens the full notch

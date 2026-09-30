@@ -128,11 +128,25 @@ Optional extras, each unlocking one thing:
 | The [ChatGPT app](https://openai.com/chatgpt/desktop/) (it brings Codex) | The agent that builds websites and code projects |
 | TypeSafe key (asked for on first launch) | Jev: the `desktop` tool (multi-step clicking and typing in any app, by the engine built into Mint) and surer picks of which button, skill or memory is meant |
 
+**The one-line way (recommended).** Open Terminal, paste this and press Return:
+
+```bash
+curl -fsSL https://hey-mint.pages.dev/install.sh | bash
+```
+
+It downloads the latest release, checks its checksum, installs Hey Mint in Applications, approves it with macOS
+and opens it: no "cannot check for malware" box and nothing to find in System Settings. (The script is
+[`packaging/install.sh`](packaging/install.sh), short enough to read first. Release builds are not notarized by
+Apple, which costs a yearly fee; the script removes the "downloaded from the internet" mark from the copy it
+installs, exactly what **Open Anyway** does.)
+
+**Or by hand.**
+
 1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest)
    (Apple silicon Macs, macOS 14.2 or later). Everything it needs is inside: no Python, Homebrew or Xcode.
 2. Open the DMG and drag **Hey Mint** into **Applications**, then open it.
 3. First time only: if macOS says it cannot check the app for malware, open **System Settings ▸ Privacy &
-   Security** and click **Open Anyway**. (Release builds are not notarized by Apple yet.)
+   Security** and click **Open Anyway**.
 4. Paste your free [Gemini API key](https://aistudio.google.com/apikey); the OpenAI and Jev keys are optional.
    Hold <kbd>⌥</kbd> while opening Hey Mint to change keys later.
 5. The welcome window takes it from there (about two minutes, Esc skips): your name and what to call Mint, a
