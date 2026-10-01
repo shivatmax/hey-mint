@@ -705,6 +705,10 @@ class Mint:
         """Send a typed request, as if spoken. Used by the terminal, `mint --say`, and timers."""
         if not text.strip():
             return
+        from mint.core import guard
+        if guard.current() is not None and guard.heard(text):
+            self.ui.user_said(text, new_turn=True)     # "yes" / "no" to the guard's open question: that's all it was
+            return
         self._last_active = time.monotonic()
         self._ever_awake = True
         self._hush = False
@@ -932,6 +936,9 @@ class Mint:
                     new_turn = False
                 chunk = hearing.apply(chunk)          # mishearings the user has corrected
                 self._heard += chunk
+                from mint.core import guard
+                if guard.current() is not None:
+                    guard.heard(self._heard)          # "yes" / "no" to the guard's open question
                 if _foreign(self._heard):
                     new_turn = False          # neither English nor Hindi: not shown
                 try:
@@ -1502,6 +1509,10 @@ class Mint:
         if not refused:
             from mint.app import live
             refused = telegram.send_guard(name, args, live.request() or "")    # no sending unless asked, ever
+        if refused:
+            return refused, None
+        from mint.core import guard
+        refused = await guard.check(name, args)      # deletes, overwrites, risky commands: the user's yes first
         if refused:
             return refused, None
         telegram.on_event("tool_start", {"name": name, "args": args})

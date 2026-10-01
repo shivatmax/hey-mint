@@ -697,7 +697,7 @@ class Notch:
         found = []
         if chat_open and getattr(self.hud.chat, "window", None) is not None:
             found.append(("chat", self.hud.chat.window))
-        for module, attr in (("mint.ui.clipboard_window", "window"), ("mint.ui.image_card", "card")):
+        for module, attr in (("mint.ui.clipboard_window", "window"), ("mint.ui.image_card", "card"), ("mint.core.guard", "card")):
             owner = getattr(sys.modules.get(module), attr, None)
             panel = getattr(owner, "panel", None)
             if panel is not None and panel.isVisible() and panel.alphaValue() > 0.3:

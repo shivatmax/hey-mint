@@ -45,11 +45,17 @@ SETTINGS = os.path.expanduser("~/.claude/settings.json")
 MARK = "mint-agent-hook"                     # how Mint's own entries are recognised in settings.json
 WAIT = 590                                   # seconds an approval stays answerable from the notch
 EVENTS = (("PermissionRequest", WAIT + 10), ("Notification", 5), ("UserPromptSubmit", 5), ("Stop", 5),
-          ("SessionStart", 5), ("SessionEnd", 5))
+          ("SessionStart", 5), ("SessionEnd", 5), ("PreToolUse", 5))
+MATCHERS = {"PreToolUse": "Bash"}            # the guard looks at shell commands only (cheap: no other tool runs it)
 
 _pending: dict = {}           # approval id -> {"conn", "session", "suggestions", "created"}
 _lock = threading.Lock()
 _started = False
+
+
+def _guard_patterns():
+    from mint.core.guard import _SHELL
+    return _SHELL
 
 
 # --- the hook script (runs inside Claude Code's hook, under any python3 it finds) ---------------------
@@ -57,9 +63,29 @@ _started = False
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
 # Mint's Claude Code hook. Forwards the event to Mint over a local socket; for a permission request it
 # waits for your click in the notch and prints the decision. Never blocks: no Mint, no answer, no output.
-import json, os, socket, subprocess, sys
+import json, os, re, socket, subprocess, sys
 
 SOCK = os.path.expanduser("~/Library/Application Support/Mint/agents.sock")
+SETTINGS = os.path.expanduser("~/Library/Application Support/Mint/settings.json")
+GUARD = %(GUARD)s
+
+
+def guard(payload):
+    """Mint's guard (PreToolUse, Bash): a command that deletes or changes things makes Claude Code ask you first,
+    even where you allowed it. Local and instant: Mint itself isn't asked."""
+    try:
+        level = (json.load(open(SETTINGS)).get("guard") or "all")
+    except Exception:
+        level = "all"
+    if level == "off":
+        return
+    command = str((payload.get("tool_input") or {}).get("command") or "")
+    for pattern, why, kind in GUARD:
+        if (level == "all" or kind != "change") and re.search(pattern, command, re.I | re.M):
+            sys.stdout.write(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "ask",
+                "permissionDecisionReason": "Mint's guard: this command " + why + ". It needs your OK."}}) + "\n")
+            return
 
 
 def main():
@@ -67,9 +93,12 @@ def main():
         payload = json.loads(sys.stdin.buffer.read() or b"{}")
     except Exception:
         return
+    event = payload.get("hook_event_name", "")
+    if event == "PreToolUse":
+        guard(payload)
+        return
     if not os.path.exists(SOCK):
         return
-    event = payload.get("hook_event_name", "")
     env = os.environ
     payload["term_program"] = env.get("TERM_PROGRAM", "")
     payload["bundle_id"] = env.get("__CFBundleIdentifier", "")
@@ -131,7 +160,7 @@ try:
 except Exception:
     pass
 sys.exit(0)
-''' % {"WAIT": WAIT}
+''' % {"WAIT": WAIT, "GUARD": repr([list(x) for x in _guard_patterns()])}
 
 # The command Claude Code runs: /bin/sh, so a missing python never shows an error; Mint's own Python
 # first (always there with Mint), then the system's only if developer tools are installed (a bare
@@ -367,8 +396,10 @@ def _merged(settings: dict, add: bool) -> dict:
                 del hooks[event]
     if add:
         for event, timeout in EVENTS:
-            hooks.setdefault(event, []).append(
-                {"hooks": [{"type": "command", "command": _command(), "timeout": timeout}]})
+            group = {"hooks": [{"type": "command", "command": _command(), "timeout": timeout}]}
+            if event in MATCHERS:
+                group = {"matcher": MATCHERS[event], **group}
+            hooks.setdefault(event, []).append(group)
     if hooks:
         out["hooks"] = hooks
     else:

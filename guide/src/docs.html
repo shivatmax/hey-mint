@@ -105,6 +105,16 @@ open ~/Applications/Mint.app</pre>
   <p class="note">What Mint reads from the logs stays on your Mac and is only shown to you; nothing in a session is ever taken as an instruction. Only your click on Allow approves anything - Mint never approves by itself, not even if you ask it by voice.</p>
 </section>
 
+<section id="guard" data-group="Using Mint">
+  <h2>The guard: nothing deleted without your yes</h2>
+  <p class="lead">Before Mint deletes, overwrites, moves or changes anything - or runs a command that could - it stops, shows you exactly what, and waits for your yes.</p>
+  {{video notch-guard 700 | “Delete last year's invoices”: Mint lists the three files it would move to the Trash and waits; “yes”, and only then are they moved.}}
+  <p><strong>What it asks about:</strong> moving files to the Trash, overwriting a file that exists, moving or renaming files, merging or tidying folders, deleting notes, reminders, events, skills, memories or automations, clearing notifications or the clipboard, changing calendar events, scripts and shell commands that delete, overwrite, force-push, use sudo or change system settings, ⌘⌫, clicking a <em>Delete</em> or <em>Empty Trash</em> button, turning Wi-Fi or Bluetooth off. Opening, reading, creating new files and everyday clicks don't ask.</p>
+  <p><strong>How you answer:</strong> the card under the notch (or by the orb) says what will happen - the files with their sizes, or the command - with <em>Don't</em> and <em>Yes, do it</em>, and a bar counting down 90 seconds. Say “yes” or “no”, type it, or click. When the request came from your phone, or you're away from the Mac, the same question comes on Telegram with ✅ Yes / ❌ No. No answer means no; “stop” means no.</p>
+  <p><strong>Helpers and Claude Code too.</strong> Mint's helper agents ask the same way before a risky shell command or writing over one of your files. With Claude Code connected (Claude mode), a destructive command - <code>rm</code>, <code>git reset --hard</code>, <code>push --force</code>, <code>sudo</code> - makes Claude Code ask you first even where you had allowed it, and that question reaches the notch and Telegram.</p>
+  <p><strong>Settings ▸ General ▸ Ask before deleting or changing:</strong> deleting, changes and system commands (default); only deleting and system commands; or never. Every question and answer is written to <code>~/Library/Application Support/Mint/guard.log</code>.</p>
+</section>
+
 <section id="doing" data-group="Using Mint">
   <h2>Apps, clicking and typing</h2>
   <p class="lead">Mint reads every control in the window, presses the one you meant like a person would, and checks something changed. Menus and app scripting come first; the pointer moves only when nothing else can do it.</p>

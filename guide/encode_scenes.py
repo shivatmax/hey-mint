@@ -59,6 +59,7 @@ CUTS = {
     "notch-words":     ("notch-words", 370, 0, 700, 230, 0, None),
     "notch-search":    ("notch-search", 370, 0, 700, 230, 0, None),
     "notch-agents":    ("notch-agents", 370, 0, 700, 272, 0, None),
+    "notch-guard":     ("notch-guard", 370, 0, 700, 230, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -112,7 +113,7 @@ PROBES = [(40, 60), (1400, 60), (40, 840), (1000, 120), (1180, 300), (140, 400)]
 SKIP_PROBES = {"image-card": {(1180, 300)},
                # the open notch (640 wide, ~200 tall) covers (1000, 120)
                **{name: {(1000, 120)} for name in ("notch-home", "notch-music", "notch-words", "notch-search",
-                                                         "notch-agents")}}
+                                                         "notch-agents", "notch-guard")}}
 
 
 def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:

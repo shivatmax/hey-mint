@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.4 (2026-10-01)
+
+- **The guard: nothing deleted or changed without your yes.** Before Mint trashes, overwrites, moves or renames
+  files, deletes notes / reminders / events / skills / memories, clears notifications, runs a script or command that
+  deletes, overwrites, force-pushes, uses sudo or changes system settings, presses ⌘⌫ or clicks "Delete", it shows
+  exactly what (files with sizes, the command) on a card under the notch or by the orb and waits: say or type
+  "yes" / "no", or click. From the phone or while you're away the question comes on Telegram with ✅ / ❌. No answer
+  in 90 s (5 min on the phone) means no. Helper agents ask the same way, and with Claude Code connected a
+  destructive shell command makes Claude Code ask first even where it was allowed (PreToolUse hook). Settings ▸
+  General ▸ Ask before deleting or changing (all / deleting only / never); a log in guard.log (`mint/core/guard.py`).
+
 ## 0.5.3 (2026-10-01)
 
 - **Claude mode: coding agents in the notch.** Claude Code and Codex sessions show live in the notch, read from

@@ -71,6 +71,12 @@ SCHEMAS = {
 }
 
 
+def _agent_name() -> str:
+    import threading
+    name = threading.current_thread().name
+    return "A helper agent" if not name or name.startswith(("asyncio", "Thread", "ThreadPool")) else name
+
+
 def schemas(names: list[str]) -> list[dict]:
     return [{"name": n, **SCHEMAS[n]} for n in names if n in SCHEMAS]
 
@@ -135,6 +141,12 @@ def run(name: str, args: dict, workspace: Path, team_root: Path | None = None, d
             from mint.tools import video
             return video.watch_for_agent(str(args.get("source", "")), str(args.get("question", "")), workspace)
         if name == "write_file":
+            path = str(args.get("path") or "")
+            if os.path.isabs(os.path.expanduser(path)):
+                from mint.core import guard              # writing over an existing file outside the workspace: ask
+                refused = guard.check_sync("write_file", {"path": path, "mode": "overwrite"}, _agent_name())
+                if refused:
+                    return refused
             return _write(args, workspace, destination)
         if name == "read_file":
             try:
@@ -171,6 +183,12 @@ def run(name: str, args: dict, workspace: Path, team_root: Path | None = None, d
                 return f"None of the options fits (confidence {pick.confidence:.2f})."
             return f"{options[int(pick.id)]} (confidence {pick.confidence:.2f})"
         if name == "run_command":
+            from mint.core import guard
+            why, kind = guard.shell_danger(str(args.get("command") or ""))
+            if why and guard.wanted(guard.Danger(kind, "x")):
+                lines = [ln for ln in str(args["command"]).splitlines()[:8]]
+                if not guard.ask(guard.Danger(kind, f"run a command that {why}", lines, mono=True), _agent_name()):
+                    return "NOT RUN: the user didn't allow this command. Nothing was changed; don't try another way."
             done = subprocess.run(str(args["command"]), shell=True, cwd=workspace, capture_output=True,
                                   text=True, timeout=60)
             out = (done.stdout + ("\n" + done.stderr if done.stderr else ""))[-6000:]

@@ -80,6 +80,8 @@ DEFAULTS: dict = {
     "agent_open_on_done": True, # a finished agent's summary shows in the notch for a few seconds
     "agent_compact": False,     # the Agents tab minimized to one line (the minimize button in the pane)
     "agent_telegram": "away",   # coding agents message you on Telegram: away (from the Mac) / always / off
+    # The guard (guard.py): ask before deleting / changing / risky commands. all / delete / off.
+    "guard": "all",
     "word_animation": True,
     "voice": True,
     "mic": True,

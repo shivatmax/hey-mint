@@ -244,6 +244,21 @@ def _attr(parts) -> AppKit.NSAttributedString:
     return out
 
 
+def _button_like(parent, title, act, primary=False):
+    """A pill button (Mint's look) calling act.fire_."""
+    b = MintAgentButton.buttonWithTitle_target_action_(title, act, "fire:")
+    b.setBordered_(False)
+    b.setWantsLayer_(True)
+    ink = _ns((0.05, 0.05, 0.06)) if primary else _white(0.92)
+    b.setAttributedTitle_(_attr([(title, _font(12, AppKit.NSFontWeightSemibold), ink, None)]))
+    b.layer().setBackgroundColor_(_white(0.96).CGColor() if primary else _white(0.1).CGColor())
+    size = b.fittingSize()
+    b.setFrameSize_(AppKit.NSMakeSize(size.width + 24, 26))
+    b.layer().setCornerRadius_(13)
+    parent.addSubview_(b)
+    return b
+
+
 def _spinner(size, rgb, width=1.8):
     ring = Quartz.CAShapeLayer.layer()
     ring.setBounds_(Quartz.CGRectMake(0, 0, size, size))

@@ -1183,6 +1183,37 @@ def notch_agents_scene(p):
     time.sleep(4.5)
 
 
+@scene("notch-guard", 14)
+def notch_guard_scene(p):
+    """The guard: Mint is asked to delete old invoices; before anything moves it shows exactly what and waits for a
+    yes (here, said out loud)."""
+    from mint.core import guard
+    guard._telegram_ask = lambda pending: None
+    guard._from_phone = lambda: False
+    guard._away = lambda: False
+    guard._audit = lambda *a: None
+    time.sleep(1.2)
+    say(p, "user_said", "delete last year's invoices", gap=0.12)
+    p.set_state("thinking")
+    time.sleep(1.2)
+    danger = guard.Danger("delete", "move 3 files to the Trash",
+                          ["~/Documents/Invoices/2025-10 Acme.pdf (84.2 KB)",
+                           "~/Documents/Invoices/2025-11 Acme.pdf (91.0 KB)",
+                           "~/Documents/Invoices/2025-12 Northwind.pdf (77.5 KB)"])
+    result = {}
+    asker = threading.Thread(target=lambda: result.update(ok=guard.ask(danger, timeout=60)), daemon=True)
+    asker.start()
+    time.sleep(4.2)
+    say(p, "user_said", "yes", gap=0.1)
+    guard.heard("yes")
+    asker.join(3)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Moved the three invoices to the Trash.", gap=0.12)
+    time.sleep(1.6)
+    p.set_state("awake")
+    time.sleep(1.8)
+
+
 def _notch_demo():
     """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
     never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
@@ -1257,7 +1288,7 @@ def tour(p):
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_agents_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_agents_scene, notch_guard_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,

@@ -903,6 +903,9 @@ class Bridge:
 
         if name == "noop":
             return "Already done.", None, ""
+        if name == "gd":                        # the guard's question: yes / no
+            from mint.core import guard
+            return guard.telegram_plan(arg)
         if name in ("ag", "agto", "agopen"):
             from mint.app import telegram_agents
             return telegram_agents.plan(self, name, arg, message)

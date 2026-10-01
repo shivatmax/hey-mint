@@ -58,6 +58,8 @@ VOICE_FILTERS = [("all", "All 30 voices"), ("female", "Female voices"), ("male",
 UNLOAD = [(0, "Never (recommended)"), (5, "After 5 minutes asleep"), (10, "After 10 minutes asleep"),
           (20, "After 20 minutes asleep"), (30, "After 30 minutes asleep"), (60, "After an hour asleep")]
 AGENT_MODES = [("auto", "Auto (while they work)"), ("on", "Always on"), ("off", "Off")]
+GUARD_LEVELS = [("all", "Deleting, changes and system commands"), ("delete", "Only deleting and system commands"),
+                ("off", "Never ask")]
 AGENT_TELEGRAM = [("away", "When I'm away from the Mac"), ("always", "Always"), ("off", "Never")]
 POSITIONS = [("top-right", "Top right"), ("top-left", "Top left"), ("top-center", "Top centre"),
              ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"), ("custom", "Where I dragged it")]
@@ -370,6 +372,9 @@ class SettingsWindow:
                          "Say “stop” any time to cut it off.")
         self._row_switch(page, "share_visible", "Visible in screen sharing",
                          "Shows in Meet, Zoom and screenshots. Off hides Mint from them (the eye button does the same).")
+        self._row_popup(page, "guard", "Ask before deleting or changing", GUARD_LEVELS,
+                        "Mint (and its helpers, and Claude Code when connected) explains and waits for your yes - "
+                        "at the Mac or on Telegram.", w=230)
         self._row_popup(page, "unload_after_minutes", "Free memory when asleep", UNLOAD, w=220,
                         hint="Unloads (~270 MB freed); a small listener (~35 MB) keeps the orb, ⌘J and the wake "
                              "word. Waking takes about a second longer.")
