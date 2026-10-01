@@ -130,18 +130,27 @@ class _OrbView(AppKit.NSView):
         dx, dy = now.x - self.start.x, now.y - self.start.y
         if not self.dragged and math.hypot(dx, dy) < 4:
             return
+        if not self.dragged:                    # held above the notch (and its drop zone), not under them
+            self.window().setLevel_(ORB_HELD_LEVEL)
         self.dragged = True
         self.window().setFrameOrigin_(AppKit.NSMakePoint(self.origin.x + dx, self.origin.y + dy))
         self.owner._orb_moved(final=False)
+        self.owner._dock_hint()
 
     def mouseUp_(self, event):
         if getattr(self, "dragged", False):
             self.owner._orb_moved(final=True)
+            self.owner._maybe_dock()
+            window = self.window()
+            AppHelper.callLater(1.2, lambda: window.setLevel_(AppKit.NSStatusWindowLevel))
         else:
             self.owner._orb_clicked()
 
     def rightMouseDown_(self, event):
         self.owner._orb_menu(self)
+
+
+ORB_HELD_LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 6   # over the notch (main menu + 3)
 
 
 class _Ticker(AppKit.NSObject):
@@ -305,6 +314,78 @@ class HUD:
         y = min(max(y, screen.origin.y + 4), screen.origin.y + screen.size.height - height - 4)
         self._bubble.setFrame_display_(AppKit.NSMakeRect(x, y, width, height), True)
         self._bubble.invalidateShadow()          # the shadow follows the rounded glass, not a square
+
+    DOCK_RADIUS = 190.0                 # let go this close to the notch and Mint flies in (a magnet)
+
+    def _notch_distance(self):
+        """How far the orb is from the notch (None when docking doesn't apply: already in it, or in notch mode)."""
+        try:
+            from mint.ui import notch
+            if notch.enabled() or notch.active():
+                return None
+            _, cx, top, _, nh, _ = notch.geometry()
+            ox, oy = self.orb_center()
+            return math.hypot(ox - cx, oy - (top - nh / 2))
+        except Exception:
+            return None
+
+    def _near_notch(self) -> bool:
+        dist = self._notch_distance()
+        return dist is not None and dist < self.DOCK_RADIUS
+
+    def _squeeze(self, scale: float, animated: bool = False) -> None:
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(not animated)
+        if animated:
+            Quartz.CATransaction.setAnimationDuration_(0.2)
+        self.orb.body.setValue_forKeyPath_(scale, "transform.scale")
+        Quartz.CATransaction.commit()
+
+    def _dock_hint(self) -> None:
+        """Dragging the orb toward the notch: the closer it gets, the more the notch swells open (a drop
+        target) and the smaller the orb gets, as if it were being drawn in."""
+        from mint.ui import notch
+        dist = self._notch_distance()
+        near = dist is not None and dist < self.DOCK_RADIUS
+        t = 0.0 if not near else max(0.0, min(1.0, (self.DOCK_RADIUS - dist) / (self.DOCK_RADIUS - 40.0)))
+        t = round(t * 4) / 4                       # in quarter steps: the notch's own spring does the in-between
+        if near and not getattr(self, "_docking", False):
+            self.orb.hop()
+        if (near, t) != getattr(self, "_dock_state", (False, 0.0)):
+            self._dock_state = (near, t)
+            self._squeeze(1.0 - 0.38 * t, animated=True)
+            notch.notch.dock_zone(near, t)
+        self._docking = near
+
+    def _maybe_dock(self) -> None:
+        from mint.ui import notch
+        self._docking = False
+        self._dock_state = (False, 0.0)
+        if not self._near_notch():
+            self._squeeze(1.0, animated=True)
+            notch.notch.dock_zone(False)
+            return
+        # Let go over the notch: the orb jiggles like jelly while it is drawn up to the notch, the notch
+        # bulges and settles, then the flight into the notch takes over.
+        body = self.orb.body
+        jiggle = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.scale")
+        jiggle.setValues_([0.62, 0.34, 0.74, 0.44, 0.62, 0.5, 0.56])
+        jiggle.setDuration_(0.5)
+        body.addAnimation_forKey_(jiggle, "dock-jiggle")
+        _, cx, top, _, nh, _ = notch.geometry()
+        window = self._orb_window
+        size = window.frame().size
+        AppKit.NSAnimationContext.beginGrouping()
+        AppKit.NSAnimationContext.currentContext().setDuration_(0.45)
+        window.animator().setFrameOrigin_(AppKit.NSMakePoint(cx - size.width / 2, top - nh - size.height * 0.5))
+        AppKit.NSAnimationContext.endGrouping()
+        notch.notch.dock_jiggle()
+
+        def fly():
+            self._squeeze(1.0)
+            body.removeAnimationForKey_("dock-jiggle")
+            prefs.set("notch_mode", True)        # the settings switch plays the flight into the notch
+        AppHelper.callLater(0.5, fly)
 
     def _orb_moved(self, final: bool) -> None:
         if self.chat.is_open:

@@ -74,6 +74,12 @@ DEFAULTS: dict = {
     "notch_calendar": True,     # notch mode: the week and today's events in the open notch
     "notch_battery": True,      # notch mode: battery badge, and a peek when plugged in or unplugged
     "notch_search": True,       # notch mode: Spotlight in the notch - files and apps, grids, drag out
+    # Claude mode (notch_agents): Claude Code and Codex sessions live in the notch. auto / on / off.
+    "agent_mode": "auto",
+    "agent_approvals": True,    # an agent's permission request or question opens the notch on it
+    "agent_open_on_done": True, # a finished agent's summary shows in the notch for a few seconds
+    "agent_compact": False,     # the Agents tab minimized to one line (the minimize button in the pane)
+    "agent_telegram": "away",   # coding agents message you on Telegram: away (from the Mac) / always / off
     "word_animation": True,
     "voice": True,
     "mic": True,

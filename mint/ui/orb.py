@@ -629,7 +629,15 @@ class Orb:
         self._body_keys("transform.translation.x", [0, -5, 5, -4, 4, -2, 0], 0.42)
 
     def hop(self) -> None:
-        self._body_keys("transform.translation.y", [0, 7, -2, 2, 0], 0.5, [0, 0.35, 0.65, 0.85, 1])
+        """A little jump with squash and stretch: it crouches, stretches tall on the way up, squashes wide as
+        it lands and wobbles back (additive, so it rides on the breathing and hover scale)."""
+        self._body_keys("transform.translation.y", [0, -1.5, 7, -2, 2, 0], 0.56, [0, 0.12, 0.42, 0.68, 0.86, 1])
+        if prefs.get("notch_playful") is False:
+            return
+        self._body_keys("transform.scale.y", [0, -0.08, 0.09, 0.0, -0.09, 0.03, 0],
+                        0.56, [0, 0.12, 0.3, 0.5, 0.68, 0.84, 1])
+        self._body_keys("transform.scale.x", [0, 0.08, -0.07, 0.0, 0.1, -0.03, 0],
+                        0.56, [0, 0.12, 0.3, 0.5, 0.68, 0.84, 1])
 
     def boot(self) -> None:
         self._spring(self.core, 0.45, 1.0, damping=7, stiffness=200, key="boot")

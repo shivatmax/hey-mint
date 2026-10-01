@@ -57,6 +57,8 @@ STYLES = [("", "Natural (no style)"), ("warm and calm", "Warm and calm"),
 VOICE_FILTERS = [("all", "All 30 voices"), ("female", "Female voices"), ("male", "Male voices")]
 UNLOAD = [(0, "Never (recommended)"), (5, "After 5 minutes asleep"), (10, "After 10 minutes asleep"),
           (20, "After 20 minutes asleep"), (30, "After 30 minutes asleep"), (60, "After an hour asleep")]
+AGENT_MODES = [("auto", "Auto (while they work)"), ("on", "Always on"), ("off", "Off")]
+AGENT_TELEGRAM = [("away", "When I'm away from the Mac"), ("always", "Always"), ("off", "Never")]
 POSITIONS = [("top-right", "Top right"), ("top-left", "Top left"), ("top-center", "Top centre"),
              ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"), ("custom", "Where I dragged it")]
 LANGUAGES = [("auto", "Same as I speak (automatic)"), ("English", "English"), ("Hindi", "Hindi"),
@@ -702,6 +704,21 @@ class SettingsWindow:
         self._row_switch(page, "notch_battery", "Battery", "The charge in the open notch, and a peek when you plug in or unplug.")
         self._row_switch(page, "notch_search", "Search in the notch", "Find files and apps from the notch; what Mint finds shows there too.")
         page.end()
+        page.section("Claude mode (coding agents)")
+        self._row_popup(page, "agent_mode", "Claude Code and Codex", AGENT_MODES,
+                        "Auto: the notch shows a session while it works. On: the Agents tab even when idle.", w=200)
+        self._row_switch(page, "agent_approvals", "Open when an agent needs you",
+                         "A permission request or a question opens the notch on it.")
+        self._row_switch(page, "agent_open_on_done", "Show the summary when it finishes",
+                         "The notch opens for a few seconds on what it did.")
+        self._row_popup(page, "agent_telegram", "Message me on Telegram", AGENT_TELEGRAM,
+                        "When an agent needs you or finishes: Allow / Deny there, or reply to tell it what to do.",
+                        w=200)
+        self._agent_hooks_row = self._row_buttons(
+            page, "Approve from the notch", [(self._hooks_title(), 150, self._toggle_hooks)],
+            "Allow, Always or Deny Claude Code's permission requests from the notch (adds a hook to "
+            "~/.claude/settings.json; a backup is kept). The terminal still asks too.")
+        page.end()
 
     def _page_shortcuts(self, page) -> None:
         name = prefs.name()
@@ -1253,6 +1270,32 @@ class SettingsWindow:
         self._row_buttons(page, "Accounts, aliases and routines", [("Edit…", 110, self._edit_custom_file)],
                           hint="Your own routines, spoken aliases and extra accounts.")
         page.end()
+
+    def _hooks_title(self) -> str:
+        try:
+            from mint.tools import agent_hooks
+            return "Disconnect" if agent_hooks.installed() else "Connect Claude Code"
+        except Exception:
+            return "Connect Claude Code"
+
+    def _toggle_hooks(self) -> None:
+        from mint.tools import agent_hooks
+        connected = agent_hooks.installed()
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Stop answering Claude Code from the notch?" if connected
+                              else "Answer Claude Code from the notch?")
+        alert.setInformativeText_(agent_hooks.preview(not connected))
+        alert.addButtonWithTitle_("Disconnect" if connected else "Connect")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        said = agent_hooks.uninstall() if connected else agent_hooks.install()
+        for button in getattr(self, "_agent_hooks_row", None) or []:
+            button.setTitle_(self._hooks_title())
+        note = AppKit.NSAlert.alloc().init()
+        note.setMessageText_("Claude Code")
+        note.setInformativeText_(said)
+        note.runModal()
 
     def _edit_settings_file(self) -> None:
         prefs.write_full()

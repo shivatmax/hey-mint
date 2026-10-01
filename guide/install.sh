@@ -73,11 +73,12 @@ mkdir -p "$DEST_DIR"
 DEST="$DEST_DIR/$NAME.app"
 
 # A running copy is asked to quit first (its settings, voice and memory live in ~/Library and stay).
-if pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1; then
-  note "$NAME is running: asking it to quit…"
+running() { ps -axo comm= | grep -Fx "$DEST/Contents/MacOS/Mint" >/dev/null; }
+if running; then
+  note "${NAME} is running: asking it to quit…"
   osascript -e "tell application \"$NAME\" to quit" >/dev/null 2>&1 || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1 || break; sleep 1; done
-  pgrep -f "$DEST/Contents/MacOS/" >/dev/null 2>&1 && die "$NAME is still running. Quit it (menu bar icon ▸ Quit) and run this again."
+  for _ in 1 2 3 4 5 6 7 8 9 10; do running || break; sleep 1; done
+  running && die "$NAME is still running. Quit it (menu bar icon ▸ Quit) and run this again."
 fi
 
 note "Copying to ${DEST_DIR}…"

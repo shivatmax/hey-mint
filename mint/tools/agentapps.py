@@ -1195,11 +1195,13 @@ def new_chat(key: str, project: str = "", view: str = "") -> str:
 
 
 def ask(key: str, prompt: str, new: bool = False, project: str = "", chat: str = "", wait: bool = True,
-        timeout: float = 120.0, view: str = "") -> str:
+        timeout: float = 120.0, view: str = "", confirmed: bool = False) -> str:
+    """confirmed: the user typed this exact text for this session themselves (a reply to an agent alert on
+    Telegram, agent_remote) - no need to find a "send" in a spoken request."""
     prompt = (prompt or "").strip()
     if not prompt:
         return "What should I send? Nothing was typed."
-    if not _user_asked_to_send():
+    if not confirmed and not _user_asked_to_send():
         return ("Not sent: the user's request didn't ask to send anything. Read the prompt back and ask whether "
                 f"to send it to {APPS[key]['name']}.")
     from mint.knowledge.skills import has_secret

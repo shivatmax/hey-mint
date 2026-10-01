@@ -92,7 +92,7 @@ MAX_TRIES = 5               # wrong codes per person before they are ignored
 MAX_ALL_TRIES = 20          # wrong codes in all before the code is replaced
 KEEP_BUTTONS = 40           # "Run again" and alert buttons remembered (older ones say they expired)
 
-PREFS = {"telegram_enabled": False, "telegram_read_only": False, "telegram_notify": True}
+PREFS = {"telegram_enabled": False, "telegram_read_only": False, "telegram_notify": True, "agent_telegram": "away"}
 
 SPINNER = "◐◓◑◒"
 
@@ -106,6 +106,7 @@ COMMANDS = [("status", "What Mint is doing now"), ("screenshot", "A picture of t
             ("paste", "Put text on the Mac's clipboard: /paste text"), ("clipboard", "My last copies"),
             ("trackers", "What Mint is watching for me"), ("undo", "What Mint can undo"),
             ("chatgpt", "Is the ChatGPT app busy or done?"), ("claude", "Claude Code sessions"),
+            ("agents", "Claude Code and Codex: what they do, talk to them"),
             ("keyboard", "Show or hide the quick buttons"), ("help", "Everything I can do")]
 STRANGER_COMMANDS = [("start", "Pair this chat with Mint on your Mac")]
 
@@ -139,6 +140,10 @@ HELP = ("🌿 <b>Mint on your phone</b>\n"
         "/trackers · what Mint is watching for me\n"
         "/undo · what Mint can undo\n"
         "/chatgpt · /claude · is the ChatGPT app or Claude Code busy or done\n\n"
+        "<b>Your coding agents</b>\n"
+        "/agents · your Claude Code and Codex sessions; 💬 tells one what to do\n"
+        "While you're away they message you here: ✅ Allow / ⛔ Deny a permission, or ↩️ reply to one of their "
+        "messages (<i>push</i>) and I type it into that session\n\n"
         "<b>Files</b>\n"
         "📎 Send a file or photo: with a caption (<i>summarise this</i>) I do it; without one I save it in "
         "<i>From phone</i> and offer what fits (up to 20 MB)\n"
@@ -478,6 +483,9 @@ class Bridge:
         self._ids = itertools.count(1)
         self._threads: list[threading.Thread] = []
         self._state = self._load()
+        self.agent_msgs: dict = {}          # coding agents (telegram_agents): message id -> session
+        self.agent_btns: dict = {}
+        self.agent_follow: dict = {}
 
     # settings and state -----------------------------------------------------------------------
 
@@ -725,6 +733,10 @@ class Bridge:
         if text.startswith("/"):
             self._command(text, message, age)
             return
+        if message.get("reply_to_message"):
+            from mint.app import telegram_agents
+            if telegram_agents.on_reply(self, message, text, age):
+                return                          # a reply to a coding agent: typed into that session
         if self.paused():
             self.reply(PAUSED_NOTE)
             self.audit("paused", text, "not run")
@@ -823,6 +835,9 @@ class Bridge:
             _later(self.show_info, info[word])     # reads the Mac (AX, files): off the poller
         elif word == "/files":
             _later(self.show_files)
+        elif word == "/agents":
+            from mint.app import telegram_agents
+            _later(telegram_agents.command, self)
         elif age > STALE:
             self.reply(f"{word} came while the Mac was asleep or offline ({_took(age)} ago), so I didn't do it.")
         elif word == "/clip":
@@ -888,6 +903,9 @@ class Bridge:
 
         if name == "noop":
             return "Already done.", None, ""
+        if name in ("ag", "agto", "agopen"):
+            from mint.app import telegram_agents
+            return telegram_agents.plan(self, name, arg, message)
         if name == "stop":
             return "⏹ Stopping…", then(self.stop, refresh), ""
         if name == "pause":
@@ -2850,6 +2868,11 @@ def start(mint=None) -> None:
     if mint is not None:
         bridge.host = SessionHost(mint)
     bridge.start()
+    try:
+        from mint.app import telegram_agents
+        telegram_agents.attach(bridge)      # Claude Code / Codex: alerts here, answers from here
+    except Exception:
+        log.debug("telegram agents", exc_info=True)
     try:
         from mint.core import prefs
         prefs.on_change(lambda key, _value: refresh() if key.startswith("telegram_") else None)

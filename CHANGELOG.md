@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.5.3 (2026-10-01)
+
+- **Claude mode: coding agents in the notch.** Claude Code and Codex sessions show live in the notch, read from
+  their own session logs (nothing to install): the project, each step (Read, Edit, Run...) with a spinner, tick or
+  cross, the lines read, the diff written (red out, green in), the command and its output, the question it asks,
+  and its final answer. The wing shows Claude's sparkle while it works, an amber pulse when it waits for you and a
+  green tick when it is done; the notch opens by itself when an agent needs you or finishes. ‹ › switches sessions,
+  ↗ opens the session's own Terminal/iTerm tab, VS Code or app. Orb mode gets the same view as a card by the orb.
+  Voice: "Claude mode", "what is Claude Code doing?" (`mint/tools/agent_watch.py`, `mint/ui/notch_agents.py`).
+- **Approve Claude Code from the notch (opt-in).** Settings ▸ Appearance ▸ Claude mode ▸ Connect Claude Code adds
+  one hook to `~/.claude/settings.json` (shows the change first, keeps a backup, removes only its own entries on
+  Disconnect). Permission requests open the notch with Allow, Always allow (Claude Code's own suggested rule) and
+  Deny; the terminal still asks too and the first answer wins, so Claude Code never waits on Mint
+  (`mint/tools/agent_hooks.py`).
+- **Control your agents from your phone.** While you're away, Claude Code and Codex message you on Telegram when
+  they need you or finish: Allow / Always / Deny a permission there, or reply to their message ("push") and Mint
+  types it into that session - its Terminal or iTerm tab (by tty, no focus change) or the Claude / Codex app.
+  /agents lists them. By voice or chat: "tell Claude in korus to push" (`mint/tools/agent_remote.py`,
+  `mint/app/telegram_agents.py`; Settings ▸ Claude mode ▸ Message me on Telegram: away / always / never).
+- **Claude mode, small or full:** a minimize button folds the Agents tab into one line (live clock, current step,
+  Allow / Deny inline, a dot per step); it opens small by itself. The app you're in (Claude, a terminal, VS Code,
+  Codex) shows its session first, even idle ones from the last hours; Codex threads show their names; stopped
+  servers get a grey mark instead of a red failure; the face carries the app's icon.
+- **Livelier motion:** the notch opens on a gentle spring and folds back quicker; content grows in a beat after
+  the shape and fades out instead of vanishing; the small row's buttons pop in one after another; Mint's hop
+  squashes and stretches. (Off with "Playful motion".)
+- **Notch:** resting on the small row's plain part opens the full notch; a folded notch closes sooner; pulling the
+  little Mint out of the notch carries the orb with the pointer; dragging the orb near the notch opens a drop zone
+  (it squeezes, swells and jiggles in). Fixed: a flight into the notch interrupted by a mouse press left a black
+  shape and the orb stuck under the notch; "100%" was cut off in the battery wing.
+
 ## 0.5.2 (2026-10-01)
 
 - **Paste works everywhere:** the first-run prompt for the Gemini (and other) keys is a native window of the

@@ -293,7 +293,15 @@ class Motion:
         """The user grabbed the orb (or a new command came): drop the flight where it is."""
         self._token += 1
         self._away = False
+        then, self._then = self._then, None
         self._stop()
+        # A flight into or out of the notch can't be left half done (the notch stayed black and the orb
+        # stuck under it, with Mint thinking it was still moving): the swap finishes where the orb is.
+        if then is not None and getattr(then, "__name__", "") in ("_arrive", "_gone"):
+            try:
+                then()
+            except Exception:
+                logging.getLogger("mint.ui.motion").debug("finishing a cancelled flight", exc_info=True)
 
     def _frame(self) -> None:
         hud = _hud()

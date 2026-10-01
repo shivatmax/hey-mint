@@ -516,7 +516,7 @@ class Badge:
         self.text = _label(size, AppKit.NSFontWeightSemibold, digits=True)
         glyph_h = round(max(9.0, min(12.0, self.h * 0.5)))
         self.glyph = _NotchBatGlyph.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, round(glyph_h * 2.15), glyph_h))
-        self.w = 34 + 4 + self.glyph.frame().size.width
+        self.w = 42 + 4 + self.glyph.frame().size.width
         view = _NotchBatBadge.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, self.w, self.h))
         view.setWantsLayer_(True)
         view.layer().setMasksToBounds_(True)
@@ -525,8 +525,8 @@ class Badge:
         view.addSubview_(self.glyph)
         self.text.setAlignment_(AppKit.NSTextAlignmentRight)
         line = round(size * 1.3)
-        self.text.setFrame_(AppKit.NSMakeRect(0, round((self.h - line) / 2), 34, line))
-        self.glyph.setFrameOrigin_(AppKit.NSMakePoint(38, round((self.h - glyph_h) / 2)))
+        self.text.setFrame_(AppKit.NSMakeRect(0, round((self.h - line) / 2), 42, line))
+        self.glyph.setFrameOrigin_(AppKit.NSMakePoint(46, round((self.h - glyph_h) / 2)))
         self.view = view
 
     def update(self, info: dict | None = None) -> None:

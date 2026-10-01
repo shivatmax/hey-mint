@@ -855,6 +855,8 @@ def image_card_scene(p):
 
 NOTCH = bool(os.environ.get("NOTCH"))
 NOTCH_PREFS = {"notch_mode": True, "mic": True, "voice": True}
+if os.environ.get("AGENTS_MINI"):
+    NOTCH_PREFS["agent_compact"] = True       # the Agents tab minimized to one line
 
 
 def _talk_level(seconds):
@@ -1087,6 +1089,100 @@ def notch_switch(p):
     time.sleep(4.6)
 
 
+def _agents_demo():
+    """Claude mode with made-up sessions only: the scene process never reads this Mac's real Claude Code or
+    Codex logs (no real project or prompt can reach a public clip) and never opens the approval socket the
+    real Mint owns. Returns (put, emit): put(sessions) replaces what the pane sees; emit(kind, session)
+    plays an event (started / waiting / finished) as the watcher would."""
+    import copy
+    from mint.tools import agent_hooks
+    from mint.tools import agent_watch
+    from mint.ui import notch_agents
+    agent_watch.watcher.start = lambda: None
+    notch_agents._hooked = True
+    agent_hooks.decide = lambda key, decision: True
+    agent_hooks.rule_for = lambda key: "Bash(npm test:*)"
+    agent_hooks.installed = lambda: True
+    shown = {"items": []}
+    agent_watch.sessions = lambda: copy.deepcopy(shown["items"])
+    agent_watch.watcher.sessions = agent_watch.sessions
+
+    def put(items):
+        shown["items"] = list(items)
+        AppHelper.callAfter(notch_agents._changed)
+
+    def emit(kind, session):
+        AppHelper.callAfter(notch_agents._event, kind, copy.deepcopy(session))
+    return put, emit
+
+
+@scene("notch-agents", 25)
+def notch_agents_scene(p):
+    """Claude mode: a Claude Code session in the notch - it reads, writes a diff, asks to run the tests (Allow
+    from the notch), they pass, and it's done."""
+    from mint.ui import notch
+    from mint.tools.agent_watch import Session, Step
+    put, emit = AGENTS
+    now = time.time()
+    s = Session(key="claude:demo", app="claude", id="demo", cwd="/srv/code/korus", where="cli",
+                state="thinking", since=now, updated=now, turn_started=now,
+                prompt="Use the 2026 TVA rate and round totals to the cent")
+    other = Session(key="codex:demo", app="codex", id="demo2", cwd="/srv/code/atlas", state="done",
+                    since=now - 300, updated=now - 300, summary="Renamed the API client and fixed its imports.")
+    code = [(" ", 10, "import { Item } from './types'"), (" ", 11, ""), (" ", 12, "const TVA = 0.196"),
+            (" ", 13, ""), (" ", 14, "export function total(items: Item[]) {"),
+            (" ", 15, "  const sum = items.reduce((s, i) => s + i.price, 0)"), (" ", 16, "  return sum * (1 + TVA)"),
+            (" ", 17, "}")]
+    diff = [(" ", 11, ""), ("-", 12, "const TVA = 0.196"), ("+", 12, "const TVA = 0.20   // 2026"), (" ", 13, ""),
+            (" ", 14, "export function total(items: Item[]) {"),
+            (" ", 15, "  const sum = items.reduce((s, i) => s + i.price, 0)"),
+            ("-", 16, "  return sum * (1 + TVA)"), ("+", 16, "  return Math.round(sum * (1 + TVA) * 100) / 100"),
+            (" ", 17, "}")]
+    path = "/srv/code/korus/src/invoice.ts"
+
+    def step(n, verb, target, status, detail):
+        return Step(id=f"t{n}", verb=verb, target=target, status=status, started=time.time(), detail=detail)
+    time.sleep(1.0)
+    put([s, other]); emit("started", s)
+    time.sleep(1.6)                                             # the wing: Claude's sparkle turning
+    s.state = "working"
+    s.steps = [step(1, "Read", "invoice.ts", "run", {"kind": "code", "file": "invoice.ts", "path": path, "lines": []})]
+    s.turn_steps = 1
+    put([s, other])
+    F["mouse"] = (notch.notch.cx + 120, notch.notch.top - 120)    # the pointer comes to the open notch
+    AppHelper.callAfter(notch.notch._agents_open)
+    time.sleep(1.4)
+    s.steps[0].status, s.steps[0].detail["lines"] = "ok", code
+    put([s, other]); time.sleep(1.8)
+    s.steps.append(step(2, "Edit", "invoice.ts", "run", {"kind": "diff", "file": "invoice.ts", "path": path,
+                                                          "lines": diff}))
+    s.turn_steps = 2
+    put([s, other]); time.sleep(2.2)
+    s.steps[1].status = "ok"
+    s.steps.append(step(3, "Run", "Run the tests", "run", {"kind": "bash", "cmd": "npm test", "out": [], "ok": None}))
+    s.turn_steps, s.state = 3, "waiting"
+    s.approval = {"id": "a1", "tool": "Bash", "verb": "Run", "target": "Run the tests",
+                  "detail": {"kind": "bash", "cmd": "npm test"}, "always": True}
+    put([s, other]); emit("waiting", s)
+    time.sleep(2.6)
+    from mint.ui import notch_agents
+    AppHelper.callAfter(lambda: notch_agents._panes[0]._decide("allow"))        # Allow, from the notch
+    time.sleep(0.25)
+    s.approval, s.state = None, "working"
+    put([s, other]); time.sleep(1.4)
+    s.steps[2].status = "ok"
+    s.steps[2].detail = {"kind": "bash", "cmd": "npm test", "ok": True,
+                         "out": ["PASS  tests/invoice.test.ts", "  ✓ applies the 2026 TVA rate (3 ms)",
+                                 "  ✓ rounds totals to the cent (1 ms)", "Tests:  48 passed, 48 total"]}
+    put([s, other]); time.sleep(2.0)
+    s.state, s.since = "done", time.time()
+    s.summary = "Switched TVA to the 2026 rate (20%) and rounded every total to the cent. All 48 tests pass."
+    put([s, other]); emit("finished", s)
+    time.sleep(3.6)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(4.5)
+
+
 def _notch_demo():
     """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
     never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
@@ -1161,7 +1257,7 @@ def tour(p):
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_agents_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
@@ -1187,6 +1283,8 @@ def _demo_prefs():
 
 def main():
     _demo_prefs()
+    global AGENTS
+    AGENTS = _agents_demo()                   # (always: no scene ever shows this Mac's real agent sessions)
     if NOTCH:
         _notch_demo()
     presence = ui.Presence(hands_free=True, show_hud=True)
