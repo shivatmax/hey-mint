@@ -332,7 +332,11 @@ def declarations() -> list[types.FunctionDeclaration]:
             {"x": {"type": types.Type.NUMBER, "description": "0-1000 from the left edge."},
              "y": {"type": types.Type.NUMBER, "description": "0-1000 from the top edge."},
              "button": {**STRING, "description": "left (default) or right."},
-             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."}},
+             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."},
+             "target": {**STRING, "description":
+                        "ALWAYS give the visible text or name of what you mean to click ('Uninstall', "
+                        "'Search Extensions in Marketplace'). Pointing is often 30-80 px off; Mint finds "
+                        "that text near your point and clicks its centre, or says what is really there."}},
             ["x", "y"]),
     ]
 
@@ -416,7 +420,8 @@ _SYNC = {
     "create_pdf": lambda a: documents.create_pdf(a["title"], a["content"], a.get("open_after", True) is not False,
                                                  str(a.get("save_to") or "")),
     "click_at": lambda a: vision.click_at(
-        float(a["x"]), float(a["y"]), a.get("button", "left"), bool(a.get("double", False))),
+        float(a["x"]), float(a["y"]), a.get("button", "left"), bool(a.get("double", False)),
+        str(a.get("target") or "")),
 }
 
 
@@ -463,8 +468,7 @@ def _ui_act(args: dict) -> str:
         import AppKit
         from mint.screen import axkit
         wanted = str(args["app"]).lower()
-        app = next((a for a in AppKit.NSWorkspace.sharedWorkspace().runningApplications()
-                    if (a.localizedName() or "").lower() == wanted), None)
+        app = ground.running_app(str(args["app"]))      # "Visual Studio Code" runs as "Code"
         from mint.core import prefs
         if wanted in ("mint", "jarvis", prefs.name().lower()):
             return ground.own_act(str(args.get("action", "click")), str(args.get("target", "")),

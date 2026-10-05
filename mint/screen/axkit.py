@@ -95,6 +95,98 @@ def focused_window(pid: int):
     return attr(app, "AXFocusedWindow") or next(iter(attr(app, "AXWindows") or []), None)
 
 
+# --- asking about a screen point without asking Mint itself ------------------------------------
+#
+# AXUIElementCopyElementAtPosition on the system-wide element is answered by whichever app owns the
+# window under the point. When that app is Mint, HIServices does not send a message: it calls
+# AppKit's accessibility code IN PROCESS, on the calling thread. From teach's worker thread that
+# raced the main thread inside AppKit and Mint died with SIGSEGV (1 Oct 21:09, crash report
+# Python-2026-10-01-211001: teach-worker in _AXUIElementCopyElementAtPositionIncludeIgnored ->
+# AppKit CopyElementAtPosition, main thread in objc_msgSend from the same AppKit routine). The same
+# goes for the system-wide AXFocusedUIElement when Mint has the keyboard. So: never ask when the
+# point (or the keyboard) belongs to Mint.
+
+def _main_height() -> float:
+    import Quartz
+    return float(Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()).size.height)
+
+
+def own_window_at(x: float, y: float) -> bool:
+    """Would a click at this Quartz point (top-left origin) land in one of Mint's own windows?
+    Mint's click-through overlays (effects, glow, the folded notch) don't count: the window
+    server skips windows that ignore the mouse, exactly as a real click does."""
+    import os
+
+    import Quartz
+    me = os.getpid()
+    try:
+        number = AppKit.NSWindow.windowNumberAtPoint_belowWindowWithWindowNumber_(
+            AppKit.NSMakePoint(float(x), _main_height() - float(y)), 0)
+        if not number:
+            return False
+        info = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionIncludingWindow, number) or []
+        return any(int(w.get("kCGWindowOwnerPID", 0)) == me for w in info)
+    except Exception:
+        log.debug("own_window_at", exc_info=True)
+    # Could not ask the window server: any small Mint window (not a full-screen overlay) at the
+    # point counts, which errs on the side of not asking.
+    try:
+        screen = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()).size
+        for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly,
+                                                   Quartz.kCGNullWindowID) or []:
+            if int(w.get("kCGWindowOwnerPID", 0)) != me:
+                continue
+            b = w.get("kCGWindowBounds") or {}
+            if b.get("Width", 0) >= screen.width and b.get("Height", 0) >= screen.height - 2:
+                continue
+            if b and b["X"] <= x <= b["X"] + b["Width"] and b["Y"] <= y <= b["Y"] + b["Height"]:
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def element_at(x: float, y: float):
+    """The accessibility element at a Quartz screen point, or None - and None, without asking,
+    when the point is on one of Mint's own windows (see above). Safe from any thread."""
+    if own_window_at(x, y):
+        return None
+    try:
+        err, element = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(),
+                                                           float(x), float(y), None)
+    except Exception:
+        return None
+    return element if err == 0 else None
+
+
+def focused_element(pid: int | None = None):
+    """The focused control of app `pid` (default: the frontmost app) - never Mint's own, which
+    could only be read in process. Safe from any thread."""
+    import os
+    if not pid:
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        pid = int(front.processIdentifier()) if front is not None else 0
+    if not pid or pid == os.getpid():
+        return None
+    return attr(AX.AXUIElementCreateApplication(pid), "AXFocusedUIElement")
+
+
+# Where Mint itself last clicked (click_text, click_at, ui_act): typing right after a click into a
+# box that Accessibility can't see (Electron/Monaco inputs are 1x1 hidden textareas) goes there.
+_last_click: dict = {}
+
+
+def note_click(pid: int | None, x: float, y: float, label: str = "") -> None:
+    _last_click.update(pid=int(pid or 0), x=float(x), y=float(y), label=label, at=time.monotonic())
+
+
+def recent_click(pid: int | None, seconds: float = 30.0) -> dict | None:
+    """Mint's last click, if it was in app `pid` within `seconds`."""
+    if not _last_click or not pid or _last_click.get("pid") != int(pid):
+        return None
+    return dict(_last_click) if time.monotonic() - _last_click["at"] <= seconds else None
+
+
 def walk(element, limit: int = 4000, depth: int = 60):
     """Every element under `element`, breadth first, up to `limit`."""
     queue, seen = [(element, 0)], 0
@@ -109,6 +201,14 @@ def walk(element, limit: int = 4000, depth: int = 60):
 
 
 _INPUT_ROLES = {"AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"}
+
+
+def is_editable(element) -> bool:
+    """Takes typing: a text input of any size (Electron's are 1x1 hidden textareas) or anything
+    inside an editable web area."""
+    if element is None:
+        return False
+    return attr(element, "AXRole") in _INPUT_ROLES or attr(element, "AXEditableAncestor") is not None
 
 
 def text_inputs(window) -> list[dict]:

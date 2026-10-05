@@ -173,8 +173,12 @@ final class EarUI: NSObject {
         if handler == nil {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
             let me = Unmanaged.passUnretained(self).toOpaque()
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, data in
-                guard let data else { return noErr }
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, data in
+                // Only our own ⌘J: the watchdog's ⌃⌥⌘M goes through the same event (Watchdog.swift).
+                var id = EventHotKeyID()
+                let got = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                            nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+                guard got == noErr, id.signature == OSType(0x4D45_4152), let data else { return OSStatus(eventNotHandledErr) }
                 let ui = Unmanaged<EarUI>.fromOpaque(data).takeUnretainedValue()
                 DispatchQueue.main.async { ui.onOpen?("console") }
                 return noErr

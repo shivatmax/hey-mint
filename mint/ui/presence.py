@@ -215,6 +215,9 @@ class Presence:
             self._row(menu, "Open log", "log")
         self._row(menu, "Report a problem…", "report:open")
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        from mint.app import power
+        if power.can_restart():
+            self._row(menu, f"Restart {prefs.name()}", "power:restart")
         self._row(menu, f"Quit {prefs.name()}", "quit", key="q")
 
     def _menu_action(self, action: str) -> None:
@@ -240,6 +243,9 @@ class Presence:
         elif kind == "brain":
             from mint.ui import brain as brain_window
             brain_window.open_window(value or "skills")
+        elif action == "power:restart":
+            from mint.app import power
+            power.restart("menu")
         else:
             self.fire(action)
 

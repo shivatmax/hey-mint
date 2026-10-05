@@ -103,8 +103,12 @@ _SCRIPT = [
     (r"\b(restart|shut down|log out)\b", "restarts, shuts down or logs out", "system"),
 ]
 
-_LABEL = re.compile(r"\b(delete|remove|erase|empty trash|move to (the )?trash|discard|uninstall|reset|wipe|"
-                    r"clear (all|history|data)|format|deactivate|close account|revoke)\b", re.I)
+# "format" only for disks (VS Code's "Format Document" just re-indents, and undoes); "reset" not for
+# views ("Reset Zoom", "Reset Layout", "Reset Filters").
+_LABEL = re.compile(r"\b(delete|remove|erase|empty trash|move to (the )?trash|discard|uninstall|"
+                    r"reset(?! (zoom|view|layout|filters?|search|sort(ing)?)\b)|wipe|"
+                    r"clear (all|history|data)|format (the |this )?(disk|drive|volume|card|partition)|deactivate|"
+                    r"close account|revoke)\b", re.I)
 _KEYS = {"cmd+delete": "moves the selection to the Trash (Finder) or deletes it",
          "cmd+backspace": "moves the selection to the Trash (Finder) or deletes it",
          "cmd+shift+delete": "empties the Trash", "cmd+shift+backspace": "empties the Trash",
@@ -234,7 +238,7 @@ def assess(name: str, args: dict) -> Danger | None:
         for keys, why in _KEYS.items():
             if sorted(keys.split("+")) == sorted(combo.split("+")):
                 return Danger("delete", f"press {keys.replace('cmd', '⌘').replace('+', '')}, which {why}", [])
-    if name in ("ui_act", "click_text", "menu", "browser", "pointer"):
+    if name in ("ui_act", "click_text", "menu", "browser", "pointer", "click_at"):
         if name == "browser" and action not in ("click",):
             return None
         if name == "ui_act" and action not in ("click", "double_click", ""):

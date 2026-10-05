@@ -17,6 +17,7 @@ import numpy as np
 import threading
 import datetime as dt
 import logging
+import json
 import os
 import sys
 import time
@@ -26,6 +27,7 @@ from google import genai
 from google.genai import types
 
 from mint.core import config
+from mint.voice import listening
 from mint.tools import everyday as skills
 from mint.tools import registry as tools
 from mint.voice.audio import Audio
@@ -139,6 +141,48 @@ def _named(declared: list, name: str) -> list:
 _OPENERS = {"open_app", "open_url", "open_folder", "open_chrome", "open_slack"}
 
 
+
+# Apps where Return after typing sends a message: there, the same words twice within two minutes are a duplicate
+# message. Elsewhere it's a search or a command typed again (VS Code's extension search was blocked 4 times).
+_MESSAGING = ("slack", "messages", "whatsapp", "telegram", "discord", "mail", "teams", "zoom", "signal",
+              "claude", "chatgpt", "codex", "messenger", "wechat", "line", "skype", "outlook", "spark",
+              "chrome", "safari", "arc", "brave", "firefox", "edge", "opera", "vivaldi", "comet")
+
+
+def _is_messaging(name: str, bundle: str) -> bool:
+    import re as _re
+    words = set(_re.findall(r"[a-z]+", f"{name} {bundle}".lower()))
+    return bool(words & set(_MESSAGING)) or "mobilesms" in words
+
+
+def _messaging_front() -> bool:
+    try:
+        import AppKit
+        app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        return _is_messaging(app.localizedName() or "", app.bundleIdentifier() or "") if app else True
+    except Exception:
+        return True
+
+TRACE = os.path.expanduser("~/Library/Logs/Mint/tools.log")
+TRACE_MAX = 4_000_000        # bytes; the older half is dropped past this
+
+
+def _trace(name: str, args: dict, result: str) -> None:
+    """Every tool call with its arguments and its whole result, in ~/Library/Logs/Mint/tools.log: mint.log keeps
+    one short line per call, which hid what Mint actually saw (a VS Code run looked like 4 controls)."""
+    try:
+        if os.path.exists(TRACE) and os.path.getsize(TRACE) > TRACE_MAX:
+            with open(TRACE, "rb") as fh:
+                fh.seek(TRACE_MAX // 2)
+                keep = fh.read()
+            with open(TRACE, "wb") as fh:
+                fh.write(keep[keep.find(b"\n====") + 1:])
+        shown = json.dumps(args, ensure_ascii=False, default=str)[:600]
+        with open(TRACE, "a", encoding="utf-8") as fh:
+            fh.write(f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} {name} {shown}\n{str(result)[:8000]}\n")
+    except Exception:
+        log.debug("tool trace failed", exc_info=True)
+
 class _NoUI:
     """Stand-in when there is no menu bar or HUD."""
 
@@ -228,15 +272,33 @@ class Mint:
         # --- voice lock and who-was-that-for ---------------------------------
         self._gate = None               # voicelock.Gate while the lock is on
         self.enroller = None            # enroll.Enroller while training the voice
-        self._expect_command = True     # the first thing said after waking is for Mint
-        self._addr_candidate = False    # this turn should be checked: for Mint or not?
-        self._addr_task: asyncio.Task | None = None
+        # Was it meant for Mint? (listening.py) Every voice turn gets a verdict - act or
+        # ignore - before Mint's reply is played or a tool runs; a turn the wake word
+        # opened is trusted more than a follow-up.
+        self._next_kind = "follow"      # the next voice turn: asked / wake / follow (listening.quick)
+        self._kind = "follow"
+        self._voice_turn = False        # this turn has the user's speech in it
+        self._verdict: str | None = None    # "act" / "ignore" for that speech; None: not decided yet
+        self._verdict_ready: asyncio.Event | None = None
+        self._check_task: asyncio.Task | None = None
+        self._held: list[bytes] = []    # Mint's reply audio, held until the verdict
+        self._held_words: list[str] = []
+        self._seg = 0                   # where in _heard the speech being judged starts
+        self._mid_turn = False          # that speech came in a turn already under way
+        self._mute = False              # Mint's spoken reaction to speech that was not for it: dropped
+        self._dropping = False          # the rest of an ignored utterance: not kept
+        self._guard_said = False        # the words answered the guard's question
+        self._last_chunk_at = 0.0
+        self._turn_began = 0.0
         self._suppress_turn = False     # the user was talking to someone else
         self._last_said = ""
         self._turn_levels: list[float] = []
         self._ignored_at = 0.0
         self._pending_text: list[str] = []   # typed while reconnecting; sent once connected
         self._server_at = 0.0                 # the last real message from the server (the answer watchdog)
+        self._spoke_at = 0.0                  # when the user's last words sent to Gemini ended (the voice watch)
+        self._voice_watch_task = None
+        self._deaf_voice = 0
         self._unanswered = ""                # the last typed request, until the server answers it
         self._wake_cut = 0                  # bytes of an unsure wake's held audio that are the phrase
         self._woke_at = 0.0                 # when the wake word last woke Mint
@@ -248,6 +310,11 @@ class Mint:
         self._last_active = time.monotonic()
         self._ever_awake = False
         self._pending_wake = 0.0        # when an unsure "Hey Mint" is being checked
+        # How long Mint keeps listening without the wake word (listening.Window): a few
+        # seconds after it is done, not a quiet clock that any sound restarts.
+        from mint.voice import listening
+        self._window = listening.Window(listening.follow_up_seconds(), min(sleep_after, listening.WAKE_GRACE))
+        self._tools_at = 0.0                # when the last tool batch ended
         self._goodbye_done = False
         # Not every sound needs an answer ("hmm", "okay"), and a goodbye gets one
         # short line, not three (see _filler_turn and _hush).
@@ -345,7 +412,12 @@ class Mint:
         self._hush = False
         self._farewell_bytes = -1
         self._woke_at = time.monotonic() if reason.startswith("wake word") else 0.0
-        self._expect_command = True
+        # The first thing said after the wake word is for Mint unless it is a stray scrap; after
+        # Mint woke itself (an agent's news) it is a follow-up; a shortcut or the menu is on purpose.
+        self._next_kind = "wake" if reason.startswith("wake word") else "follow" if reason == "agent" else "asked"
+        from mint.voice import listening
+        self._window.follow_up = listening.follow_up_seconds()
+        self._window.woke(time.monotonic())
         self._suppress_turn = False
         if reason != "shortcut":
             # Opening the console keeps the last exchange on screen to read.
@@ -369,6 +441,7 @@ class Mint:
             return
         self.asleep = True
         self._last_active = time.monotonic()
+        self._next_kind = "follow"          # words that still arrive were not opened by a wake
         if self._wake is not None:
             self._wake.reset()
         if self._gate is not None:
@@ -542,6 +615,7 @@ class Mint:
                 self._preroll.add(pcm)
                 if self._wake.heard(pcm) and self._wake_is_user():
                     self._heard_during_work = True
+                    self._next_kind = "wake"
                     self._print("[wake word while working - listening]")
                     tail = self._after_wake_phrase(self._preroll.drain())
                     if tail:
@@ -557,6 +631,9 @@ class Mint:
             out, event = self._gate.feed(pcm, level)
             if event:
                 self._gate_event(event)
+            # Only the user's voice (or speech still being checked) holds the window open.
+            self._window.sound(time.monotonic(), self._gate.state in ("pending", "open")
+                               and level > self._gate.speech_threshold())
             if self._gate.state == "open" and level > self._gate.speech_threshold():
                 self._last_voice = time.monotonic()
                 self._turn_levels.append(level)
@@ -568,6 +645,7 @@ class Mint:
             return
         if level > 0.012:
             self._last_voice = time.monotonic()
+        self._window.sound(time.monotonic(), level > max(0.012, self._noise_floor * 4))
         self._barge_in_check(level)
         try:
             self.out_queue.put_nowait(pcm)
@@ -584,15 +662,62 @@ class Mint:
         if duck:
             duck(False)
         if event.startswith("open"):
+            self._users_words = not event.endswith("end")
             if self.audio.playing and not self.half_duplex:
                 self._flush_playback()
                 self._print(f"[you interrupted - listening] (voice {self._gate.last_score:.2f})")
                 self._state("awake")
+            if event.endswith("end"):
+                self._voice_sent(time.monotonic())
+        elif event == "end" and not self.asleep and getattr(self, "_users_words", False):
+            self._users_words = False
+            self._voice_sent(time.monotonic())        # the user's verified words just finished
         elif event.startswith("closed"):
+            self._users_words = False
+            self._window.other_voice()
             now = time.monotonic()
             if now - self._ignored_at > 4:
                 self._print(f"[ignored another voice] (voice {self._gate.last_score:.2f})")
             self._ignored_at = now
+
+    def _voice_sent(self, now: float) -> None:
+        """The user finished saying something that went to Gemini: watch that something comes back."""
+        if self.loop is None or self.session is None:
+            return
+        self._spoke_at = now
+        if getattr(self, "_voice_watch_task", None) is None or self._voice_watch_task.done():
+            self._voice_watch_task = self.loop.create_task(self._voice_watch())
+
+    async def _voice_watch(self, wait: float = 10.0) -> None:
+        """Spoken words that get nothing at all back - not even their transcript - within `wait` seconds: the
+        session is deaf (5 Oct: gemini-3.8-live failing server-side; "Hey Mint" and a whole request went
+        unanswered and Mint just fell asleep). Reconnect fresh, move to the fallback model if it happens again,
+        and tell the user to say it again - nothing they said is lost silently."""
+        while True:
+            spoke = self._spoke_at
+            await asyncio.sleep(max(0.5, spoke + wait - time.monotonic()))
+            if self._spoke_at > spoke:
+                continue                       # they said more since: watch from the newest words
+            break
+        if self._server_at > spoke or self.session is None or self._busy or self.audio.playing:
+            self._deaf_voice = 0
+            return
+        self._deaf_voice = getattr(self, "_deaf_voice", 0) + 1
+        primary = config.MODEL
+        if self._deaf_voice >= 1 and config.MODEL != config.FALLBACK_MODEL:
+            config.MODEL = config.FALLBACK_MODEL
+            self._primary_task = asyncio.create_task(self._return_to_primary(primary))
+            self._print(f"[{primary} is not answering; using {config.FALLBACK_MODEL} for now]")
+        self._print(f"[no answer to your voice in {wait:.0f} s: reconnecting - say it again]")
+        try:
+            self.ui.assistant_said("Sorry, the voice service didn't answer. Say that again?")
+        except Exception:
+            pass
+        self._resume_handle = None
+        try:
+            await self.session.close()
+        except Exception:
+            log.debug("closing the deaf session", exc_info=True)
 
     async def _pending_wake_audio(self, pcm: bytes) -> None:
         """A "Hey Mint" the voice check was unsure of: decide on what follows."""
@@ -677,16 +802,28 @@ class Mint:
         self.ui.set_level(rms(pcm))
 
     async def _idle_watch(self) -> None:
-        """Fall asleep again after a quiet spell, unless work is in progress."""
+        """Fall asleep once the listening window has passed (listening.Window): a few seconds after
+        Mint is done, unless work is in progress, Mint is speaking, or the user's words are still
+        being judged. Talk that was not for Mint does not keep it open."""
         while True:
             await asyncio.sleep(0.5)
-            if self.asleep or self.paused or not self.hands_free or self._busy:
+            if self.asleep or self.paused or not self.hands_free:
                 continue
-            if self.audio.playing or not self.audio_in.empty():
-                self._last_voice = time.monotonic()
-                continue
-            if time.monotonic() - self._last_voice > self.sleep_after:
-                self.go_to_sleep(f"quiet for {self.sleep_after:.0f}s")
+            now = time.monotonic()
+            playing = self.audio.playing or not self.audio_in.empty()
+            if playing:
+                self._last_voice = now
+            # Words waiting for their verdict (bounded: a turn the model never answers ends too).
+            deciding = bool(self._held) or (self._verdict_pending()
+                                            and now - self._last_chunk_at < listening.JUDGE_WAIT)
+            idle_for = now - max(self._server_at, self._tools_at)
+            # A planned task with steps left is still work between tool batches (the model thinking, the
+            # autopilot nudging it on): on 5 Oct Mint fell asleep mid-task, 8 s into "install an extension".
+            from mint.app import tasks
+            planned = self.task is not None and tasks.current(self.task) is not None and idle_for < 90
+            if self._window.should_sleep(now, busy=self._busy or planned, playing=playing, deciding=deciding,
+                                         idle_for=idle_for):
+                self.go_to_sleep(self._window.why())
 
     # --- outbound --------------------------------------------------------------
 
@@ -740,7 +877,9 @@ class Mint:
             pass
         self._turn_open = True
         self._suppress_turn = False
-        self._addr_candidate = False
+        self._reset_verdict()
+        self._voice_turn = False              # typed on purpose: always answered (speech after it is judged)
+        self._window.handling()
         self._typed_turn = True               # typed on purpose: always answered
         self._filler_checked = True
         self._halted = False                  # a new request: tools may run again
@@ -790,6 +929,7 @@ class Mint:
                 "Nothing has been done for it yet. Do it now.)")
         if self.loop is not None and self.session is not None:
             self._turn_open = True
+            self._window.handling()
             self.loop.create_task(self.session.send_realtime_input(text=note))
 
     async def _answer_watch(self, text: str, sent_at: float, epoch: int, wait: float = 30.0) -> None:
@@ -893,78 +1033,34 @@ class Mint:
             if self._farewell_bytes > 24000 * 2 * 2:
                 self._hush = True
                 self._farewell_bytes = -1
-        if response.data and (self._suppress_turn or self._hush):
+        if response.data and (self._suppress_turn or self._hush or self._mute):
             pass                         # not for Mint, filler, or after goodbye: not played
+        elif response.data and self._verdict_pending():
+            # Was that for Mint? Nothing is said until it is known (about 0.4 s, follow-ups only).
+            self._held.append(response.data)
         elif response.data:
-            self._last_voice = time.monotonic()
-            if not self.voice_on:
-                # Silent: the words still arrive as a transcript and are shown.
-                if not self._silent_reply:
-                    self._silent_reply = True
-                    self._state("speaking")
-            else:
-                self.audio_in.put_nowait(response.data)
-                if self.half_duplex and not self.text_mode:
-                    # No echo cancellation: an open mic would hear Mint and it
-                    # would interrupt itself. `--barge-in` turns this off.
-                    self.audio.muted = True
-                self._state("speaking")
+            self._play_reply(response.data)
 
         server = response.server_content
         if server is not None:
             if server.input_transcription and server.input_transcription.text:
-                from mint.voice import hearing
-                chunk = server.input_transcription.text
-                if time.monotonic() - self._last_stop > 2.5:
-                    self._halted = False      # the user is talking again (not the "stop" itself): tools may run
-                if not self._turn_open:
-                    self._heard = self._said = ""
-                    self.ui.new_exchange()
-                    self._turn_open = True
-                    self._stop_armed = True
-                    self._begin_user_turn()
-                    new_turn = True
-                    if self._woke_at and time.monotonic() - self._woke_at < 30:
-                        # The first words after the wake word: a scrap of "Hey Mint"
-                        # the phrase cut missed ("payment"). The transcript can come
-                        # many seconds after the wake, once the sentence is done.
-                        self._woke_at = 0.0
-                        chunk, dropped = hearing.strip_wake(chunk)
-                        if dropped:
-                            log.info("dropped a wake-phrase scrap from the transcript")
-                else:
-                    new_turn = False
-                chunk = hearing.apply(chunk)          # mishearings the user has corrected
-                self._heard += chunk
-                from mint.core import guard
-                if guard.current() is not None:
-                    guard.heard(self._heard)          # "yes" / "no" to the guard's open question
-                if _foreign(self._heard):
-                    new_turn = False          # neither English nor Hindi: not shown
-                try:
-                    from mint.app import live
-                    live.heard(chunk, new_turn=new_turn)
-                except ImportError:
-                    pass
-                if not _foreign(self._heard) and chunk.strip():
-                    self.ui.user_said(chunk)
-                    self._instant_poke()
-                self._last_voice = time.monotonic()
-                from mint.app import control
-                from mint.core import prefs
-                if self._stop_armed and control.is_stop(self._heard, prefs.get("stop_words")):
-                    self._stop_armed = False
-                    await self.stop_everything("voice")
+                await self._on_heard(server.input_transcription.text)
 
             if (server.output_transcription and server.output_transcription.text and not self._suppress_turn
-                    and not self._hush):
-                self._said += server.output_transcription.text
-                self.ui.assistant_said(server.output_transcription.text)
+                    and not self._hush and not self._mute):
+                if self._verdict_pending():
+                    self._held_words.append(server.output_transcription.text)
+                else:
+                    self._said += server.output_transcription.text
+                    self.ui.assistant_said(server.output_transcription.text)
 
             if server.interrupted:
                 self._flush_playback()
 
             if server.turn_complete:
+                if self._verdict_pending() and self._heard[self._seg:].strip():
+                    self._start_addressee_check()
+                    await self._await_verdict(3.5)
                 self._halted = False
                 self._check_goodbye()
                 if self._farewell_bytes >= 0:
@@ -982,7 +1078,6 @@ class Mint:
                         from mint.knowledge import teach
                         if teach.recording():
                             teach.add_narration(self._heard)      # what the user says while showing Mint
-                        self._expect_command = False
                     if self._said.strip():
                         self._print(f"mint: {' '.join(self._said.split())}")
                         from mint.app import telegram
@@ -991,9 +1086,15 @@ class Mint:
                         self._last_said = self._said
                 finished_said = "" if self._suppress_turn else self._said
                 self._check_empty_done(finished_said)
+                if (not self._suppress_turn or self._verdict == "act") and \
+                        not (self.audio.playing or not self.audio_in.empty()):
+                    # Mint is done (or its answer was only a "hmm"): the follow-up window starts.
+                    # Talk that was not for Mint opens nothing.
+                    self._window.finished(time.monotonic())
                 self._heard = self._said = ""
                 self._turn_open = False
                 self._turn_levels = []
+                self._reset_verdict()
                 if not self._suppress_turn and self.loop is not None:
                     # Autopilot: a request left half done carries on without "next" from the user.
                     self.loop.call_later(1.0, lambda said=finished_said, at=time.monotonic(): self.loop.create_task(
@@ -1009,6 +1110,7 @@ class Mint:
             asyncio.create_task(self._answer_all(response.tool_call, "STOPPED: the user said stop. Do nothing more, "
                                                                      "don't retry: just say 'Stopped.' and wait."))
         elif response.tool_call is not None:
+            self._mute = False               # the model moved on to work: its words are about that
             # In the background, so this loop keeps reading the server while a
             # tool runs: the user's words (and "stop") are heard mid-task.
             task = asyncio.create_task(self._run_tools(response.tool_call, self._stop_epoch))
@@ -1029,6 +1131,71 @@ class Mint:
                 if self._tool_task is not None and not self._tool_task.done():
                     self._tool_task.cancel()
                 self._batch = []
+
+    async def _on_heard(self, chunk: str) -> None:
+        """A piece of the transcript of what the microphone heard."""
+        from mint.app import control
+        from mint.core import guard
+        from mint.voice import hearing
+        from mint.core import prefs
+        now = time.monotonic()
+        if time.monotonic() - self._last_stop > 2.5:
+            self._halted = False      # the user is talking again (not the "stop" itself): tools may run
+        gap = now - self._last_chunk_at
+        self._last_chunk_at = now
+        if self._dropping and gap <= 1.0:
+            # More of an utterance that was not for Mint: not kept, not answered - but a
+            # "stop" or a yes/no for the guard said right after it still counts.
+            if guard.current() is not None:
+                guard.heard(chunk)
+            if control.is_stop(chunk, prefs.get("stop_words")):
+                await self.stop_everything("voice")
+            return
+        self._dropping = False
+        if self._turn_open and (not self._voice_turn or (gap > 1.0 and (
+                self._verdict == "ignore" or (self._verdict == "act"
+                                              and getattr(self, "_model_active_at", 0.0) > now - gap)))):
+            # New speech in a turn already under way (Mint is working or answering, or the
+            # turn was typed): judged on its own.
+            self._new_segment()
+        if not self._turn_open:
+            self._heard = self._said = ""
+            self.ui.new_exchange()
+            self._turn_open = True
+            self._stop_armed = True
+            self._begin_user_turn()
+            new_turn = True
+            if self._woke_at and time.monotonic() - self._woke_at < 30:
+                # The first words after the wake word: a scrap of "Hey Mint"
+                # the phrase cut missed ("payment"). The transcript can come
+                # many seconds after the wake, once the sentence is done.
+                self._woke_at = 0.0
+                chunk, dropped = hearing.strip_wake(chunk)
+                if dropped:
+                    log.info("dropped a wake-phrase scrap from the transcript")
+        else:
+            new_turn = False
+        chunk = hearing.apply(chunk)          # mishearings the user has corrected
+        self._heard += chunk
+        said = self._heard[self._seg:]        # the speech being judged (the whole turn, or new speech in it)
+        if guard.current() is not None and guard.heard(said):
+            self._guard_said = True           # "yes" / "no" to the guard's open question
+        if getattr(self, "_model_active_at", 0.0) >= self._turn_began and self._verdict_pending():
+            self._start_addressee_check()     # the model answered before these words came in
+        if _foreign(self._heard):
+            new_turn = False          # neither English nor Hindi: not shown
+        try:
+            from mint.app import live
+            live.heard(chunk, new_turn=new_turn)
+        except ImportError:
+            pass
+        if not _foreign(self._heard) and chunk.strip():
+            self.ui.user_said(chunk)
+            self._instant_poke()
+        self._last_voice = time.monotonic()
+        if self._stop_armed and control.is_stop(said, prefs.get("stop_words")):
+            self._stop_armed = False
+            await self.stop_everything("voice")
 
     async def compact(self, source: str = "button") -> str:
         """Like /compact: a Flash model summarises the conversation, and a new
@@ -1174,6 +1341,7 @@ class Mint:
         self._print(f"[autopilot: carrying on - {step or 'the rest of the request'}]")
         self._nudge_turn = True
         self._turn_open = True
+        self._window.handling()                # still working on the user's request: keep listening
         try:
             await self.session.send_realtime_input(text=note)
         except Exception:
@@ -1195,6 +1363,7 @@ class Mint:
         from mint.tools import desktop
         autopilot.stop()
         control.stop()                   # no more clicks or keys from any thread
+        self._held, self._held_words = [], []
         self._flush_playback()
         desktop.cancel_running()
         pending = list(self._batch)
@@ -1242,19 +1411,6 @@ class Mint:
 
     # --- was that meant for Mint? -------------------------------------------------
 
-    _ADDR_OPTIONS = {
-        "mint": "Said to Mint, the voice assistant: a request, a question, or a reply to it.",
-        "other": "Said to someone else in the room, on a call, or to nobody in particular.",
-    }
-    _ADDR_INSTRUCTIONS = (
-        "A voice assistant called Mint is listening in a room; the user is already talking with it. "
-        "They just said `request`. Decide who it was said to. `mint_said` is Mint's last reply; "
-        "`voice` says how loud it was compared with how they usually talk to Mint. Requests, questions "
-        "or commands an assistant could act on (open, check, send, what's, remind, stop, and yes/no or "
-        "follow-up answers to what Mint just said) are for Mint. Talk with another person "
-        "(addressing someone by name, chit-chat, a phone call, reading aloud, thinking aloud, other "
-        "languages spoken to people) is not.")
-
     # Said on their own, these need no answer. Noises always; acknowledgements
     # ("okay", "thanks", "acha") unless Mint has just asked something - then
     # they are the answer. In the logs "Okay." got "Is there anything else I
@@ -1264,7 +1420,7 @@ class Mint:
     _ACKS = {"okay", "ok", "okey", "k", "alright", "right", "yeah", "yep", "yup", "yes", "sure", "cool", "nice",
              "great", "fine", "good", "perfect", "awesome", "thanks", "thank", "you", "got", "it", "acha", "achha",
              "accha", "haan", "han", "ha", "theek", "thik", "hai", "ji", "so", "and", "well"}
-    _ASKS = re.compile(r"\?\s*$|\b(should i|shall i|do you want|want me to|would you like|which one|or should)\b", re.I)
+    _ASKS = listening.ASKS
 
     def _filler_turn(self) -> bool:
         """The user's words so far are only a sound or an acknowledgement that
@@ -1292,8 +1448,135 @@ class Mint:
         self._filler_checked = False
         self._filler_hit = False
         self._typed_turn = False
-        self._addr_task = None
-        self._addr_candidate = not self._expect_command and bool(prefs.get("addressee_check"))
+        self._reset_verdict()
+        self._voice_turn = True
+        self._kind, self._next_kind = self._next_kind, "follow"
+        if self.asleep and self._kind != "asked":
+            self._kind = "follow"             # words that came after the window closed: no wake behind them
+        if not prefs.get("addressee_check"):
+            self._decide("act", "rule")       # Settings: "Ignore talk meant for others" is off
+
+    def _new_segment(self) -> None:
+        """New speech in a turn already under way - while Mint works, answers, or carries out a
+        typed request. It gets its own verdict; if it was not for Mint, Mint's spoken reaction is
+        dropped (the work in progress carries on: it was the user's request)."""
+        self._reset_verdict()
+        self._voice_turn = True
+        self._mid_turn = True
+        self._seg = len(self._heard)
+        self._stop_armed = True
+        self._filler_checked = True
+        self._kind, self._next_kind = self._next_kind, "follow"
+        from mint.core import prefs
+        if not prefs.get("addressee_check"):
+            self._decide("act", "rule")
+
+    def _reset_verdict(self) -> None:
+        self._verdict = None
+        self._verdict_ready = asyncio.Event()
+        self._check_task = None
+        self._held, self._held_words = [], []
+        self._seg = 0
+        self._mid_turn = False
+        self._mute = False
+        self._dropping = False
+        self._guard_said = False
+        self._voice_turn = False
+        self._turn_began = time.monotonic()
+
+    def _verdict_pending(self) -> bool:
+        return self._voice_turn and self._verdict is None
+
+    async def _await_verdict(self, timeout: float) -> None:
+        """Wait for the verdict on the user's words; too slow, and listening.fallback decides."""
+        ready = self._verdict_ready
+        if ready is None or not self._verdict_pending():
+            return
+        try:
+            await asyncio.wait_for(ready.wait(), timeout)
+        except asyncio.TimeoutError:
+            pass
+        if self._verdict_pending() and ready is self._verdict_ready:
+            self._decide(listening.fallback(self._kind, self._heard[self._seg:], self._last_said), "too slow")
+
+    def _special(self, text: str) -> bool:
+        """Words that always get through: stop, a goodbye, a yes/no to the guard, an instant
+        command, and anything said while the user is showing Mint a skill or taking a lesson."""
+        from mint.app import control
+        from mint.core import prefs
+        if self._guard_said or _is_goodbye(text) or control.is_stop(text, prefs.get("stop_words")):
+            return True
+        try:
+            from mint.app import instant
+            if instant.enabled() and instant.match(text) is not None:
+                return True
+        except Exception:
+            log.debug("instant match failed", exc_info=True)
+        try:
+            from mint.knowledge import teach
+            from mint.ui import tutor
+            return bool(teach.recording() or tutor.active())
+        except Exception:
+            return False
+
+    def _play_reply(self, data: bytes) -> None:
+        """Mint's voice, to the speaker (or, silent, just the state)."""
+        self._last_voice = time.monotonic()
+        if not self.voice_on:
+            # Silent: the words still arrive as a transcript and are shown.
+            if not self._silent_reply:
+                self._silent_reply = True
+                self._state("speaking")
+            return
+        self.audio_in.put_nowait(data)
+        if self.half_duplex and not self.text_mode:
+            # No echo cancellation: an open mic would hear Mint and it
+            # would interrupt itself. `--barge-in` turns this off.
+            self.audio.muted = True
+        self._state("speaking")
+
+    def _decide(self, verdict: str, how: str = "", took: float = 0.0, text: str | None = None) -> None:
+        """Act on the user's words, or not. "act": what Mint said meanwhile plays, tools may run,
+        the window stays open. "ignore": nothing is said or done for them (a whole turn is
+        suppressed; new speech mid-turn only silences Mint's reaction), the window is not
+        extended."""
+        if not self._verdict_pending():
+            return
+        self._verdict = verdict
+        if self._verdict_ready is not None:
+            self._verdict_ready.set()
+        text = " ".join((text if text is not None else self._heard[self._seg:]).split())
+        self._window.judged(time.monotonic(), verdict in ("act", "wait"))
+        held, words = self._held, self._held_words
+        self._held, self._held_words = [], []
+        if verdict == "act":
+            if how and how != "rule":
+                log.info("for me (%s, %.2fs): %s", how, took, text[:80])
+            if not (self._suppress_turn or self._hush or self._mute):
+                for chunk in held:
+                    self._play_reply(chunk)
+                for word in words:
+                    self._said += word
+                    self.ui.assistant_said(word)
+            return
+        if verdict == "wait":
+            # Unfinished words ("I want to do", "ma'am"): nothing is said or done, and the window stays open for
+            # the rest - the model sees them with what follows, as one request.
+            self._window.judged(time.monotonic(), True)
+        if self._mid_turn:
+            self._mute = True
+            self._dropping = True
+            if verdict != "wait":
+                self._heard = self._heard[:self._seg]
+        else:
+            self._suppress_turn = True
+        self._flush_playback()
+        if verdict == "wait":
+            self._print(f"[waiting for the rest: {text[:80]}]")
+        else:
+            self._print(f"[not for me ({how}{f', {took:.1f}s' if took else ''}): {text[:80]}]")
+        if not self._busy:
+            self._state(self._idle_state())
 
     def _check_goodbye(self) -> None:
         """"Bye", said by the user, sends Mint to sleep - on the Mac, at once.
@@ -1312,27 +1595,29 @@ class Mint:
             self.go_to_sleep("you said bye")
 
     def _start_addressee_check(self) -> None:
+        """The model is answering: the user's words are in by now, so decide whether they were
+        meant for Mint (listening.quick; Jev when the rules cannot tell)."""
         self._check_goodbye()
-        if not self._suppress_turn and _foreign(self._heard):
+        said = self._heard[self._seg:]
+        if self._verdict_pending() and _foreign(said):
             # Neither English nor Hindi (Latin or Devanagari script): not the user.
-            self._suppress_turn = True
-            self._flush_playback()
-            self._print(f"[ignored: not English or Hindi: {self._heard[:60]}]")
+            self._decide("ignore", "not English or Hindi")
             return
-        if not self._addr_candidate or self._addr_task is not None or not self._heard.strip():
+        if not self._verdict_pending() or self._check_task is not None or not said.strip():
             return
-        self._addr_task = asyncio.create_task(self._check_addressee(self._heard, list(self._turn_levels)))
+        from mint.core import prefs
+        verdict = listening.quick(said, self._kind, self._last_said, prefs.name(), self._special(said))
+        if verdict is not None:
+            self._decide(verdict, "rule")
+            return
+        self._check_task = asyncio.create_task(
+            self._check_addressee(said, list(self._turn_levels), self._kind, self._verdict_ready))
         self._turn_levels = []
 
-    async def _check_addressee(self, heard: str, levels: list[float]) -> None:
-        from mint.app import control
-        from mint.core import jev
+    async def _check_addressee(self, heard: str, levels: list[float], kind: str, ready) -> None:
         from mint.core import prefs
         from mint.voice import voicelock
         text = " ".join(heard.split())
-        lowered = text.lower()
-        if prefs.name().lower() in lowered or control.is_stop(text, prefs.get("stop_words")) or len(text) < 3:
-            return
         voice = "normal"
         usual = voicelock.lock.level
         if usual and levels:
@@ -1342,19 +1627,21 @@ class Mint:
             elif ratio > 1.8:
                 voice = "louder than usual"
         started = time.monotonic()
-        pick = await asyncio.to_thread(
-            jev.choose, text, {k: v.replace("Mint", prefs.name()) for k, v in self._ADDR_OPTIONS.items()},
-            {"mint_said": self._last_said[-300:], "voice": voice}, 4.0,
-            self._ADDR_INSTRUCTIONS.replace("Mint", prefs.name()))
+        try:
+            pick = await asyncio.wait_for(asyncio.to_thread(
+                listening.ask_jev, text, kind, self._last_said, voice, prefs.name()), 3.5)
+        except (asyncio.TimeoutError, Exception):
+            pick = None
         took = time.monotonic() - started
+        if ready is not self._verdict_ready or not self._verdict_pending():
+            return                        # a newer turn, or decided meanwhile
         if pick is None:
-            return                        # Jev unreachable: assume it was for Mint
-        log.info("addressee %s p=%.2f c=%.2f in %.2fs: %s", pick.id, pick.probability, pick.confidence, took, text)
-        if pick.id == "other" and pick.confidence >= 0.6:
-            self._suppress_turn = True
-            self._flush_playback()
-            self._print(f"[not for me ({pick.confidence:.2f}, {took:.1f}s): {text[:80]}]")
-            self._state(self._idle_state())
+            self._decide(listening.fallback(kind, text, self._last_said), "no Jev", took, text)
+            return
+        option, probability, confidence = pick
+        log.info("addressee %s p=%.2f c=%.2f in %.2fs (%s): %s", option, probability, confidence, took, kind, text)
+        self._decide(listening.judge(kind, option, probability, self._last_said, text),
+                     f"{option or 'none'} {probability:.2f}", took, text)
 
     def _flush_playback(self) -> None:
         while not self.audio_in.empty():
@@ -1369,6 +1656,8 @@ class Mint:
         if self.half_duplex:
             self.audio.muted = False
         self._last_voice = time.monotonic()
+        if not self._turn_open:
+            self._window.finished(self._last_voice)   # Mint is done: the follow-up window starts
         if self._wake is not None:
             # Mint's own voice may have leaked into the wake model's window.
             self._wake.reset()
@@ -1415,10 +1704,11 @@ class Mint:
 
     async def _run_batch(self, tool_call) -> None:
         responses, images = [], []
-        if self._addr_task is not None and not self._addr_task.done():
+        if self._verdict_pending():
             # Nothing is done on the screen until it is clear the words were
-            # meant for Mint (about a second, only for follow-ups).
-            await asyncio.wait({self._addr_task}, timeout=4.5)
+            # meant for Mint (about 0.4 s, when the rules cannot tell).
+            self._start_addressee_check()
+            await self._await_verdict(4.5)
         if (self._suppress_turn or self._hush) and self.session is not None:
             await self.session.send_tool_response(function_responses=[
                 types.FunctionResponse(id=f.id, name=f.name, response={"result": (
@@ -1454,7 +1744,8 @@ class Mint:
                     # 3.8 sent the ChatGPT prompt again 4 s after it went (24 Sep).
                     sends = self.__dict__.setdefault("_recent_sends", {})
                     words = " ".join(str(args.get("text", "")).split()).lower()[:160]
-                    send_key = words if name in ("ui_act", "type_text") and args.get("press_return") and words else None
+                    send_key = words if name in ("ui_act", "type_text") and args.get("press_return") and words \
+                        and _messaging_front() else None
                     sent = sends.get(send_key) if send_key else None
                     if name in self._IDEMPOTENT and seen and time.monotonic() - seen[0] < 10:
                         result, image = (f"ALREADY DONE a moment ago, not repeated: {seen[1][:300]} "
@@ -1472,6 +1763,7 @@ class Mint:
                         if send_key:
                             sends[send_key] = (time.monotonic(), result)
                 self._print(f"[{name}] {result[:160]}")
+                _trace(name, args, result)
                 from mint.app import telegram
                 telegram.on_event("tool_end", {"name": name, "args": args, "result": result})
                 from mint.knowledge.conversation import memory
@@ -1488,6 +1780,7 @@ class Mint:
             return                       # stopped: stop_everything answers for the batch
         finally:
             self._busy = False
+            self._tools_at = time.monotonic()
         if control.stopped() or not self._batch:
             return
         self._batch = []
@@ -1987,7 +2280,9 @@ class Mint:
             self._resume_handle = None
         transient = any(word in lowered for word in (
             "1011", "internal", "unavailable", "timed out", "handshake", "503", "500", "overloaded", "1006"))
-        if attempt >= 4 and transient and config.MODEL != config.FALLBACK_MODEL:
+        # 5 Oct: gemini-3.8-live answered every turn - even a bare config with no tools - with "1011 Internal
+        # error" for minutes, and voice requests vanished. After one fresh-session retry, use the fallback.
+        if attempt >= 2 and transient and config.MODEL != config.FALLBACK_MODEL:
             print(f"  [{config.MODEL} is failing ({_short_error(message)}); using {config.FALLBACK_MODEL} "
                   "for now, back when it recovers]", flush=True)
             primary, config.MODEL = config.MODEL, config.FALLBACK_MODEL

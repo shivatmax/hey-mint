@@ -24,6 +24,27 @@ def open_app(name: str) -> str:
     """Launch or switch to an application by name."""
     done = subprocess.run(["open", "-a", name], capture_output=True, text=True, check=False)
     if done.returncode != 0:
+        # What macOS shows ("Code") or a spoken name ("VS Code") rather than the app's file name.
+        try:
+            from mint.tools import appfinder
+            real, _ = appfinder.resolve(name)
+        except Exception:
+            real = None
+        if real and real != name:
+            name = real
+            done = subprocess.run(["open", "-a", name], capture_output=True, text=True, check=False)
+    if done.returncode != 0:
+        from mint.screen import ground
+        from mint.knowledge import skills as skillbook
+        running = ground.running_app(name)
+        if running is not None and running.bundleIdentifier():
+            done = subprocess.run(["open", "-b", running.bundleIdentifier()], capture_output=True, text=True,
+                                  check=False)
+            name = running.localizedName() or name
+        elif skillbook.app_key(name) != name.lower():
+            done = subprocess.run(["open", "-a", skillbook.app_key(name)], capture_output=True, text=True,
+                                  check=False)
+    if done.returncode != 0:
         detail = (done.stderr or "").strip()
         return f"Could not open '{name}'. {detail or 'No application by that name.'}"
     # `open -a` launches the app, but macOS may leave the previous app in front

@@ -8,8 +8,9 @@
     Connect any app         "Integrate an app, e.g. Things": Plan it (read back here), then Create
     More                    not installed: Get… opens where to get it
 
-The page is built from a quick snapshot (bundle ids, permission states that never prompt); a fuller
-check (Mail's accounts, the scriptable-app scan) runs in the background and refreshes the page once.
+The page is built from a quick snapshot (bundle ids, permission states that never prompt), read off
+the main thread by `facts` (Settings shows "Loading…" until it is there); a fuller check (Mail's
+accounts, the scriptable-app scan) runs in the background and refreshes the page once.
 """
 
 from __future__ import annotations
@@ -81,7 +82,14 @@ def _refresh_keep(win, to: float | None = None) -> None:
         view.documentView().scrollPoint_(AppKit.NSMakePoint(0, y if to is None else to))
 
 
-def page(win, page) -> None:
+def facts(win) -> dict:
+    """Settings' reader thread: the snapshot (reused for 2 minutes, unless a connector was just removed)."""
+    state = win.__dict__.get("_connectors_ui") or {}
+    fresh = bool(state.pop("fresh", False))
+    return {"snap": connectors.snapshot(deep=False, max_age=0 if fresh else 120)}
+
+
+def page(win, page, facts: dict) -> None:
     from mint.ui.settings import _text_height
     name = prefs.name()
     state = win.__dict__.setdefault("_connectors_ui", {
@@ -116,7 +124,7 @@ def page(win, page) -> None:
             later(refresh)
         background(run, "connectors-deep")
 
-    snap = connectors.snapshot(deep=False, max_age=120)
+    snap = facts["snap"]
     deep_refresh()
 
     # --- one row -------------------------------------------------------------------------------------------
@@ -206,7 +214,7 @@ def page(win, page) -> None:
         if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
             return
         connectors.remove_custom(item["id"])
-        connectors.snapshot(deep=False)
+        state["fresh"] = True                        # the page's next read takes a new snapshot
         refresh()
 
     def make(words: str) -> None:

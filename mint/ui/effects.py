@@ -241,9 +241,11 @@ def focused_frame():
     try:
         import ApplicationServices as AX
 
-        system = AX.AXUIElementCreateSystemWide()
-        err, element = AX.AXUIElementCopyAttributeValue(system, "AXFocusedUIElement", None)
-        if err != 0 or element is None:
+        from mint.screen import axkit
+        # Never the system-wide focused element: when Mint itself has the keyboard, that is answered inside
+        # Mint, off the main thread, and AppKit's accessibility code crashed (the teach crash, 1 Oct).
+        element = axkit.focused_element()
+        if element is None:
             return None
         e1, pos = AX.AXUIElementCopyAttributeValue(element, "AXPosition", None)
         e2, size = AX.AXUIElementCopyAttributeValue(element, "AXSize", None)

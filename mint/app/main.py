@@ -600,6 +600,10 @@ def main() -> int:
             onboarding.onboarding.show()
         elif not fastinput.has_accessibility():
             fastinput.request_accessibility()
+        # Last: the main thread's heartbeat for Mint.app's watchdog (a hung Mint is restarted, its
+        # stack logged) - see ear.py.
+        from mint.app import ear
+        ear.start_heartbeat()
 
     try:
         ui.run_cocoa(build)

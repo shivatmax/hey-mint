@@ -20,6 +20,16 @@ open Slack" said while the app is starting is heard in full.
 
 This app answers READY (its orb and menu are up: the Ear hides its own) and
 STOP (its microphone runs: the Ear stops listening).
+
+The heartbeat: while this app runs, a timer on the MAIN thread writes
+"<pid> <count> <allow>" to $MINT_HEARTBEAT every 2 s. Mint is an accessory app
+(no Dock icon, not in Force Quit), so when its main thread hung nothing could
+stop it but restarting the Mac. Now the Ear watches the count: no change for
+10 s and it shows a "Mint isn't responding" menu-bar item (Restart / Quit);
+none for `allow` seconds (30) and it asks for every thread's stack (SIGUSR1,
+into mint.log), then stops this process and starts it again. In-process,
+`watch_main_thread` logs the main thread's stack once it has been stuck for
+10 s, so even a hang that clears up on its own says where it was.
 """
 
 from __future__ import annotations
@@ -127,6 +137,108 @@ def connect() -> Link | None:
     except OSError as error:
         log.info("no Mint Ear hand-over: %s", error)
         return None
+
+
+# --- the heartbeat: the Ear's watchdog -----------------------------------------------
+
+BEAT_EVERY = 2.0          # seconds between beats (a main-thread timer)
+ALLOW = 30                # no beat for this long: the Ear calls Mint hung (the default it is told)
+STUCK_LOG = 10.0          # the in-process watcher logs the main thread's stack after this long
+
+_beat = {"fd": None, "count": 0, "allow": ALLOW, "at": 0.0, "timer": None, "target": None}
+
+
+def _write_beat() -> None:
+    fd = _beat["fd"]
+    if fd is None:
+        return
+    line = f"{os.getpid()} {_beat['count']} {int(_beat['allow'])}\n".ljust(40).encode()
+    try:
+        os.pwrite(fd, line, 0)            # same bytes, same place: no new file, nothing to tidy
+    except OSError:
+        log.debug("heartbeat write failed", exc_info=True)
+
+
+def beat() -> None:
+    """Main thread (the timer): the main thread is alive."""
+    import time
+    _beat["count"] += 1
+    _beat["at"] = time.monotonic()
+    _write_beat()
+
+
+def grace(seconds: float) -> None:
+    """About to keep the main thread busy on purpose (quitting folds the conversation into memory):
+    let the Ear wait up to `seconds` before calling Mint hung. Any thread."""
+    _beat["allow"] = max(ALLOW, int(seconds))
+    _beat["count"] += 1
+    _write_beat()
+
+
+def start_heartbeat() -> bool:
+    """Main thread, at the end of start-up (the run loop starts next). The file is written only for
+    the Ear that asked for it ($MINT_HEARTBEAT, set by Mint.app); a run from a terminal has no
+    watchdog, only the stuck log. -> True when the Ear gets beats."""
+    import time
+    if _beat["timer"] is not None:
+        return _beat["fd"] is not None
+    path = os.environ.get("MINT_HEARTBEAT")
+    if path:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            _beat["fd"] = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+        except OSError as error:
+            log.warning("heartbeat: %s", error)
+    import AppKit
+
+    class _MintHeartbeat(AppKit.NSObject):
+        def tick_(self, _timer):
+            beat()
+
+    target = _MintHeartbeat.alloc().init()
+    timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
+        BEAT_EVERY, target, "tick:", None, True)
+    timer.setTolerance_(0.5)
+    # Common modes: it beats during a menu, a drag or an alert too - only a blocked main thread stops it.
+    AppKit.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, AppKit.NSRunLoopCommonModes)
+    _beat["timer"], _beat["target"] = timer, target
+    _beat["at"] = time.monotonic()
+    beat()
+    watch_main_thread()
+    if _beat["fd"] is not None:
+        log.info("heartbeat: %s every %.0f s", path, BEAT_EVERY)
+    return _beat["fd"] is not None
+
+
+def watch_main_thread() -> None:
+    """A small thread that notices when the main thread stops beating and writes its stack to the log
+    (once per stall, then once more when it recovers). The main thread often only looks hung - a
+    long call to another app, a lock - and the stack says which; a hard hang is the Ear's job."""
+    import sys
+    import time
+    import traceback
+
+    if _beat.get("watching"):
+        return
+    _beat["watching"] = True
+    main = threading.main_thread().ident
+
+    def run():
+        stalled_since = 0.0
+        while True:
+            time.sleep(BEAT_EVERY)
+            quiet = time.monotonic() - _beat["at"]
+            if quiet >= STUCK_LOG and not stalled_since:
+                stalled_since = _beat["at"]
+                frame = sys._current_frames().get(main)
+                stack = "".join(traceback.format_stack(frame)) if frame is not None else "  (no Python frame)\n"
+                log.warning("main thread stuck for %.0f s - the windows, menu and orb don't respond. "
+                            "It is here:\n%s", quiet, stack)
+                print(f"  [main thread stuck for {quiet:.0f} s - stack in the log]", flush=True)
+            elif stalled_since and _beat["at"] > stalled_since:
+                log.warning("main thread responding again after %.0f s", _beat["at"] - stalled_since)
+                stalled_since = 0.0
+    threading.Thread(target=run, daemon=True, name="mint-main-watch").start()
 
 
 # --- the orb, for the Ear to show while this app is unloaded ------------------------

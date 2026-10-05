@@ -296,7 +296,7 @@ def inventory(app=None, limit: int = 5000) -> dict:
     wbox = _box(wvals)
     title = _text(wvals.get("AXTitle"))
 
-    elements, dialogs, offscreen = [], [], []
+    elements, dialogs, offscreen, hidden = [], [], [], []
     # Depth-first, keeping the chain of ancestors' dialog-ness and label.
     stack = [(window, 0, None)]
     # A native menu that is open hangs off the app, not the window; while it is
@@ -329,6 +329,17 @@ def inventory(app=None, limit: int = 5000) -> dict:
         children = v.get("AXChildren") or []
         for child in reversed(list(children)):
             stack.append((child, depth + 1, dialog))
+        if node is not window and box is not None and (box[2] < 3 or box[3] < 3) and role in TEXT_INPUT \
+                and _inside(box, wbox):
+            # Electron/web editors (VS Code's search boxes, Monaco) type into a 1x1 hidden textarea under a
+            # drawn placeholder: keep it (named below from the text drawn over it), or nothing can be typed.
+            hidden.append({"role": role, "subrole": subrole, "kind": ROLE_WORDS.get(role, "text field"),
+                           "label": (_text(v.get("AXTitle")) or _text(v.get("AXDescription"))
+                                     or _text(v.get("AXPlaceholderValue")))[:90],
+                           "value": _text(v.get("AXValue"))[:80], "hint": "", "box": box,
+                           "enabled": v.get("AXEnabled") is not False, "focused": bool(v.get("AXFocused")),
+                           "interactive": True, "dialog": dialog, "ref": node, "depth": depth, "hidden": True})
+            continue
         if node is window or box is None or box[2] < 3 or box[3] < 3:
             continue
         if not _inside(box, wbox) and not (dialog and dialog.get("title") == "menu"):
@@ -361,6 +372,8 @@ def inventory(app=None, limit: int = 5000) -> dict:
             "interactive": interactive, "dialog": dialog, "ref": node, "depth": depth,
         })
 
+    _name_hidden(hidden, elements)
+    elements.extend(hidden)
     # The top-most open dialog is what the user can reach; everything behind is not.
     active_dialog = dialogs[-1] if dialogs else None
     for e in elements:
@@ -377,6 +390,7 @@ def inventory(app=None, limit: int = 5000) -> dict:
         keys.add(key)
         unique.append(e)
     unique.sort(key=lambda e: (round(e["box"][1] / 8), e["box"][0]))
+    _containers(unique)
     for i, e in enumerate(unique, 1):
         e["id"] = i
     return {"app": app.localizedName() or "", "pid": pid, "title": title, "window": wbox,
@@ -384,6 +398,44 @@ def inventory(app=None, limit: int = 5000) -> dict:
             "dialog_title": active_dialog["title"] if active_dialog else "",
             "dialog_soft": bool(active_dialog and active_dialog.get("soft")),
             "elements": unique, "walked": seen, "offscreen": offscreen}
+
+
+def _name_hidden(hidden: list, elements: list) -> None:
+    """A hidden input gets the name of the text drawn over or right beside it (its placeholder), and that
+    text's box, so a click lands where a person would click."""
+    for h in hidden:
+        hx, hy = h["box"][0], h["box"][1]
+        best, gap = None, 1e9
+        for e in elements:
+            if e["role"] != "AXStaticText" or not e["label"]:
+                continue
+            x, y, w, ht = e["box"]
+            d = abs(hy - (y + ht / 2)) + max(0.0, x - hx, hx - (x + w))
+            if d < gap:
+                best, gap = e, d
+        if best is not None and gap < 40:
+            h["label"] = h["label"] or best["label"]
+            h["box"] = best["box"]
+            h["placeholder"] = best["label"]
+
+
+def _containers(elements: list) -> None:
+    """e["within"]: the label of the smallest named group around an element (a list row's name for its
+    Install button), so the model can tell "Install" buttons apart and name one by its row."""
+    groups = [g for g in elements if g["role"] in ("AXGroup", "AXRow", "AXCell") and g["label"]]
+    for e in elements:
+        if e in groups or not e["interactive"]:
+            continue
+        x, y, w, h = e["box"]
+        cx, cy = x + w / 2, y + h / 2
+        best = None
+        for g in groups:
+            gx, gy, gw, gh = g["box"]
+            if gx <= cx <= gx + gw and gy <= cy <= gy + gh and gw * gh > w * h * 1.5:
+                if best is None or gw * gh < best["box"][2] * best["box"][3]:
+                    best = g
+        if best is not None and best["label"].lower() != e["label"].lower():
+            e["within"] = best["label"][:70]
 
 
 def _child_text(children, budget: int = 3) -> str:
@@ -427,6 +479,8 @@ def describe(e: dict, area=None) -> str:
         parts.append(f"(shows '{e['hint']}')")
     if e["value"]:
         parts.append(f"= '{e['value']}'")
+    if e.get("within"):
+        parts.append(f"in '{e['within'][:50]}'")
     extra = [_where(e["box"], area)]
     if e["in_dialog"]:
         extra.append("in the open dialog")
@@ -527,6 +581,10 @@ def choose_by_text(target: str, pool: list[dict], area=None) -> tuple[dict | Non
             s = 0.75 if len(core) > 3 else 0.4
         elif label in core and len(label) > 3:
             s = 0.55
+            rest = set(core.replace(label, " ").split()) - _FILLER
+            within = set(_words(e.get("within", "")))
+            if rest and within and rest <= within:
+                s = 1.0                  # "Install CSV Colorful Table": the Install button in that row
         else:
             return 0.0
         if e["interactive"]:
@@ -764,6 +822,15 @@ def ground(target: str, action: str = "click", inv: dict | None = None,
     """-> (element or None, inventory, how it was chosen)."""
     inv = inv or inventory()
     pool = candidates(inv, action)
+    if len(pool) < 3 and inv.get("pid"):
+        # Electron rebuilds its tree in bursts: VS Code listed 4 controls at 21:10:53 on 1 Oct and
+        # the search box 4 s later. Give a thin tree one more look before deciding.
+        app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(inv["pid"])
+        if app is not None and axkit.is_chromium_app(app):
+            time.sleep(0.6)
+            again = inventory(app)
+            if len(candidates(again, action)) > len(pool):
+                inv, pool = again, candidates(again, action)
     _debug(f"{inv['app']} '{inv['title'][:40]}': {len(inv['elements'])} elements, {len(pool)} candidates"
            + (f", dialog '{inv['dialog_title']}'" if inv["dialog"] else ""))
     if not pool:
@@ -866,6 +933,28 @@ def mouse_click(x: float, y: float, button: str = "left", double: bool = False, 
         time.sleep(0.045)
         _post(up, point, which, n + 1)
         time.sleep(0.06)
+    axkit.note_click(owner_at(x, y), x, y, label)
+
+
+def same_app(name: str, app) -> bool:
+    """Is `app` (an NSRunningApplication) the app called `name`? Its menu-bar name, its .app file name and the
+    usual other names all count: VS Code runs as "Code" but is "Visual Studio Code.app" and "VS Code"."""
+    from mint.knowledge.skills import app_key
+    if app is None or not name:
+        return False
+    names = [app.localizedName() or ""]
+    url = app.bundleURL()
+    if url is not None:
+        names.append(str(url.lastPathComponent() or "").removesuffix(".app"))
+    want = app_key(name)
+    return any(n and (n.lower() == name.lower() or app_key(n) == want) for n in names)
+
+
+def running_app(name: str):
+    """The running app called `name` (see same_app), or None."""
+    apps = list(AppKit.NSWorkspace.sharedWorkspace().runningApplications())
+    exact = next((a for a in apps if (a.localizedName() or "").lower() == (name or "").lower()), None)
+    return exact or next((a for a in apps if a.activationPolicy() == 0 and same_app(name, a)), None)
 
 
 def bring_forward(app_or_name, wait: float = 2.0) -> bool:
@@ -894,8 +983,7 @@ def bring_forward(app_or_name, wait: float = 2.0) -> bool:
         return front is not None and front.processIdentifier() == me.processIdentifier()
     if isinstance(app_or_name, str):
         name = app_or_name
-        app = next((a for a in ws.runningApplications()
-                    if (a.localizedName() or "").lower() == name.lower()), None)
+        app = running_app(name)
     else:
         app, name = app_or_name, app_or_name.localizedName() or ""
     pid = app.processIdentifier() if app is not None else None
@@ -1156,6 +1244,12 @@ def act(action: str, target: str, text: str = "", press_return: bool = False,
                 "another Space) and it could not be shown, so nothing was done.")
     before = inventory(app)
     chosen, inv, why = ground(target, "type" if action == "type" else "click", before)
+    if chosen is not None:
+        before = inv                    # ground may have taken a fresher look (Electron)
+    if chosen is None and not own:
+        by_text = _by_screen_text(action, target, text, press_return, inv)
+        if by_text:
+            return by_text
     if chosen is None:
         where = f" (a dialog '{inv['dialog_title']}' is open; only it can be used)" if inv["dialog"] else ""
         options = "; ".join(describe(e, inv["window"]) for e in candidates(inv, action)[:12])
@@ -1240,6 +1334,11 @@ def act(action: str, target: str, text: str = "", press_return: bool = False,
     took = time.monotonic() - started
     if not changed and chosen["role"] in TEXT_INPUT and axkit.attr(chosen["ref"], "AXFocused"):
         return f"Clicked into the {name} ({why}); it has the keyboard focus, ready to type. ({took:.1f}s)"
+    if not changed and not own and axkit.is_editable(axkit.focused_element(inv.get("pid"))):
+        # a placeholder or label of a web/Electron text box (VS Code's "Search Extensions in
+        # Marketplace" is static text over a hidden textarea): the click put the cursor in the box
+        return (f"Clicked the {name} ({why}); a text box now has the keyboard focus - type into it with "
+                f"type_text (no field= needed). ({took:.1f}s)")
     if not changed:
         confident = any(k in why for k in ("label match", "exact", "only text field")) or \
             bool(re.search(r"\((0\.(8[5-9]|9\d)|1\.0+) confident\)", why))
@@ -1256,10 +1355,49 @@ def act(action: str, target: str, text: str = "", press_return: bool = False,
     return f"Clicked the {name} ({why}): {changed}. ({took:.1f}s)"
 
 
-def summary(limit: int = 60) -> str:
-    """What is on screen now, as the model should see it: for ui_elements."""
+def _by_screen_text(action: str, target: str, text: str, press_return: bool, inv: dict) -> str:
+    """Accessibility doesn't list it, but its words are written on screen in the front window
+    (an Electron app's search box placeholder, a button VS Code didn't expose): click those words
+    where they are - and for `type`, type into what the click focused. '' when not applicable."""
+    if action not in ("click", "double_click", "type") or inv.get("dialog"):
+        return ""
+    from mint.screen import ocr
+    want = ocr._words(_core(target))
+    if not want:
+        return ""
+    try:
+        items, _ = ocr.read_screen()
+    except Exception:
+        return ""
+    front = ocr._front_window()
+    hits = [i for i in items if (front is None or ocr._inside(i, front)) and ocr._words(i["text"]) == want]
+    if len(hits) != 1:
+        return ""
+    clicked = ocr.click_text(hits[0]["text"], double=action == "double_click")
+    note = " (Accessibility did not list it; found by its text on screen)"
+    if action != "type":
+        return clicked + note
+    if clicked.startswith(("FAILED", "STOPPED", "Cannot")) and "keyboard focus" not in clicked:
+        return clicked + note
+    from mint.tools import everyday as skills
+    typed = skills.type_text(text, press_return)
+    return f"{clicked} Then: {typed}{note}"
+
+
+def summary(limit: int = 140) -> str:
+    """What is on screen now, as the model should see it: for ui_elements. Only things with a name (or a
+    text box), and not a row's own text repeated under it - a VS Code window listed 60 mostly unnamed
+    controls and its search results and Install buttons never made the list."""
     inv = inventory()
-    pool = candidates(inv, "click")
+    pool = [e for e in candidates(inv, "click") if e["label"] or e["role"] in TEXT_INPUT]
+    groups = [g for g in pool if g["role"] == "AXGroup" and len(g["label"]) > 12]
+
+    def repeated(e):
+        if e["role"] != "AXStaticText":
+            return False
+        low = e["label"].lower()
+        return any(low in g["label"].lower() and _overlap(g["box"], e["box"]) > 0.5 for g in groups if g is not e)
+    pool = [e for e in pool if not repeated(e)]
     head = f"{inv['app']} - '{inv['title'][:60]}'"
     if inv["dialog"]:
         head += f"; a dialog is open: '{inv['dialog_title']}' (only it can be used)"

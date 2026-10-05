@@ -757,6 +757,16 @@ def prepare_typing(field: str = "") -> str:
         target = max(candidates, key=fitness)
     else:
         if not inputs:
+            # Electron apps (VS Code's extension search, its quick open) take typing in a 1x1 hidden
+            # textarea that no box-sized search finds: on 1 Oct the click into the search box was
+            # right and typing was refused, so the model typed it letter by letter with press_key.
+            pid = front.processIdentifier()
+            if axkit.is_editable(axkit.focused_element(pid)):
+                return "(Typing into the box that has the keyboard focus.)"
+            recent = axkit.recent_click(pid, 30.0)
+            if recent is not None:
+                return (f"(Typing where the last click went ('{recent.get('label', '')[:40]}'): "
+                        f"{front.localizedName()} hides its text boxes from Accessibility.)")
             return (f"FAILED: there is no text box in the front window ({front.localizedName()}) to "
                     f"find '{field}' in. Open it first (e.g. click its button), then type.")
         wf = axkit.frame(window)

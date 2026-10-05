@@ -9,7 +9,8 @@
 
 Keys go to .env (mode 600) through catalog.write_key and are never shown - only their last four
 characters. Model menus are built from cached lists (catalog.cached_models); the live lists load in the
-background when the page opens, so the page never waits on the network.
+background when the page opens, so the page never waits on the network. What the page shows (keys,
+the saved settings, the agents) is read by `facts` on Settings' reader thread, not the main thread.
 """
 
 from __future__ import annotations
@@ -32,24 +33,34 @@ def _shown(value: str) -> str:
     return f"Set  ••••{value[-4:]}" if len(value) > 8 else ("Not set" if not value else "Set")
 
 
-def page(win, page) -> None:
+def facts() -> dict:
+    """Settings' reader thread: everything the page shows that lives in files, the environment or
+    another module's lock - and the background refresh of the model lists, every 5 minutes."""
     import time
+
+    from mint.core import gemini_keys
     if time.monotonic() - _refreshed[0] > 300:
         _refreshed[0] = time.monotonic()
         catalog.refresh_lists()
-    _gemini_section(win, page)
-    _providers_section(win, page)
-    _backups_section(win, page)
-    _agents_section(win, page)
+    return {"gemini_status": gemini_keys.status(), "gemini_keys": len(gemini_keys.keys()),
+            "keys": {provider: catalog.key(provider) for provider in KEYED}, "settings": catalog.settings(),
+            "custom": {cid: dict(spec, has_key=bool(catalog.key(cid)))
+                       for cid, spec in catalog.custom_providers().items()},
+            "agents": registry.load()}
+
+
+def page(win, page, facts: dict) -> None:
+    _gemini_section(win, page, facts)
+    _providers_section(win, page, facts)
+    _backups_section(win, page, facts)
+    _agents_section(win, page, facts)
 
 
 # --- Gemini ----------------------------------------------------------------------------------------
 
-def _gemini_section(win, page) -> None:
-    from mint.core import gemini_keys
-    from mint.core import prefs
+def _gemini_section(win, page, facts: dict) -> None:
     page.section("Gemini")
-    status = gemini_keys.status()
+    status = facts["gemini_status"]
     for env, title, hint in (("GEMINI_API_KEY", "Key 1", "Required - Mint's voice runs on it. Free at aistudio.google.com/apikey."),
                              ("GEMINI_API_KEY_2", "Key 2 (optional)",
                               "A second free key doubles the free limits: when one key is rate-limited, the other "
@@ -61,7 +72,7 @@ def _gemini_section(win, page) -> None:
         label.setAlignment_(AppKit.NSTextAlignmentRight)
         win._button(card, "Change…" if value else "Add…", x + 158, top + (h - 28) / 2, 92,
                     lambda e=env, t=f"Gemini {title}": _ask_key(win, e, t, required=e == "GEMINI_API_KEY"))
-    if len(gemini_keys.keys()) > 1:
+    if facts["gemini_keys"] > 1:
         win._row_popup(page, "gemini_key_mode", "Using two keys",
                        [("split", "Voice on key 1, the rest on key 2"), ("primary", "Key 1 first, key 2 as backup")],
                        hint="Either way each key covers for the other when it is rate-limited or refused.", w=280)
@@ -70,14 +81,14 @@ def _gemini_section(win, page) -> None:
 
 # --- providers ---------------------------------------------------------------------------------------
 
-def _providers_section(win, page) -> None:
+def _providers_section(win, page, facts: dict) -> None:
     page.section("Model providers for agents")
     page.text("Add a key for any provider you want your agents to use; Test checks the key and lists its models. "
               "Each agent picks its models below, with backups when one is rate-limited, out of credit or down.",
               size=12, alpha=0.7)
     for provider in KEYED:
         spec = catalog.PROVIDERS[provider]
-        value = catalog.key(provider)
+        value = facts["keys"].get(provider, "")
         card, top, x, h = page.row(spec["label"], spec["hint"], control_w=330)
         label = win._label(card, _shown(value), x, top + (h - 18) / 2, 130, size=12, alpha=0.7)
         label.setAlignment_(AppKit.NSTextAlignmentRight)
@@ -90,7 +101,7 @@ def _providers_section(win, page) -> None:
     # Ollama: an address, not a key.
     card, top, x, h = page.row("Ollama (on this Mac)", catalog.PROVIDERS["ollama"]["hint"], control_w=330)
     field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 24) / 2, 230, 24))
-    field.setStringValue_(catalog.settings().get("ollama_base") or "")
+    field.setStringValue_(facts["settings"].get("ollama_base") or "")
     field.setPlaceholderString_(catalog.PROVIDERS["ollama"]["base"])
     field.setBezelStyle_(AppKit.NSTextFieldRoundedBezel)
     field.setDelegate_(win.target)
@@ -101,13 +112,13 @@ def _providers_section(win, page) -> None:
     status = win._label(card, "", 16, top + h - 16, 400, h=14, size=10, alpha=0.6)
     win._button(card, "Test", x + 238, top + (h - 28) / 2, 92, lambda: (save(field), _test("ollama", status)))
 
-    for cid, spec in catalog.custom_providers().items():
+    for cid, spec in facts["custom"].items():
         card, top, x, h = page.row(spec["label"], f"OpenAI-compatible · {spec['base']}"
-                                   + (" · key set" if catalog.key(cid) else " · no key"), control_w=190)
+                                   + (" · key set" if spec["has_key"] else " · no key"), control_w=190)
         status = win._label(card, "", 16, top + h - 16, 400, h=14, size=10, alpha=0.6)
         win._button(card, "Test", x, top + (h - 28) / 2, 92, lambda c=cid, s=status: _test(c, s))
         win._button(card, "Remove", x + 98, top + (h - 28) / 2, 92,
-                    lambda c=cid: (_confirm(f"Remove the endpoint {catalog.custom_providers()[c]['label']}?",
+                    lambda c=cid, label=spec["label"]: (_confirm(f"Remove the endpoint {label}?",
                                             "Agents that use it move on to their backups.")
                                    and (catalog.remove_custom(c), win.refresh())))
     win._row_buttons(page, "Another OpenAI-compatible endpoint",
@@ -305,8 +316,8 @@ def _chosen(popup) -> str:
 
 # --- backups for every agent -------------------------------------------------------------------------
 
-def _backups_section(win, page) -> None:
-    data = catalog.settings()
+def _backups_section(win, page, facts: dict) -> None:
+    data = facts["settings"]
     chain = [str(m) for m in data.get("fallbacks", [])]
     page.section("Backups for every agent")
     shown = " → ".join(chain) if chain else "None of your own yet."
@@ -352,9 +363,9 @@ WEB_TOOLS = ["web_search", "fetch_url"]
 BASE_TOOLS = ["write_file", "read_file", "list_files", "ask_user", "report_progress"]
 
 
-def _agents_section(win, page) -> None:
+def _agents_section(win, page, facts: dict) -> None:
     page.section("Agents")
-    for agent in registry.load():
+    for agent in facts["agents"]:
         codex = agent.get("runner") == "codex"
         models = agent.get("models") or []
         detail = (f"{agent.get('role', '')}\n"

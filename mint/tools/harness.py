@@ -271,10 +271,8 @@ def _failed(result: str) -> bool:
 
 def _password_field() -> bool:
     try:
-        import ApplicationServices as AX
-
-        from mint.screen.axkit import attr
-        element = attr(AX.AXUIElementCreateSystemWide(), "AXFocusedUIElement")
+        from mint.screen.axkit import attr, focused_element
+        element = focused_element()          # the front app's; never Mint's own (read in process)
         return element is not None and attr(element, "AXSubrole") == "AXSecureTextField"
     except Exception:
         return False
@@ -344,11 +342,11 @@ _RISKY = {
     "submit": ("submit", "send", "post", "apply"),
     "post": ("post", "publish", "share", "tweet", "send"),
     "publish": ("publish", "post", "release"),
-    "delete": ("delete", "remove", "trash", "erase", "get rid", "clear", "clean"),
+    "delete": ("delete", "remove", "trash", "erase", "get rid", "clear", "clean", "uninstall"),
     "erase": ("erase", "delete", "wipe"),
     "empty": ("empty",),
     "trash": ("trash", "delete", "remove", "bin"),
-    "discard": ("discard", "delete", "throw away", "drop"),
+    "discard": ("discard", "delete", "throw away", "drop", "revert", "undo"),
     "quit": ("quit", "close", "exit", "shut", "kill"),
     "close": ("close", "quit", "exit"),
     "buy": ("buy", "purchase", "order", "checkout", "pay"),
@@ -359,7 +357,8 @@ _RISKY = {
     "log out": ("log out", "sign out", "logout"),
     "restart": ("restart", "reboot"),
     "shut down": ("shut down", "shutdown", "power off"),
-    "uninstall": ("uninstall", "remove"),
+    # "delete an extension" is how people say it; VS Code's button says Uninstall (1 Oct).
+    "uninstall": ("uninstall", "remove", "delete", "get rid"),
     "unsubscribe": ("unsubscribe",),
     "confirm": ("confirm", "yes", "go ahead"),
 }
@@ -2742,8 +2741,14 @@ def mouse_position() -> tuple[float, float]:
 
 def element_at(x: float, y: float):
     """(element, app) at a screen point (Quartz, top-left origin), skipping Mint's own overlays."""
-    AX = _ax()
     import AppKit
+
+    from mint.screen import axkit
+    if axkit.own_window_at(x, y):
+        # Never hit-test Mint itself: AppKit would answer in process, off the main thread (the
+        # 1 Oct teach crash). The point is on the orb, the notch or a card.
+        return None, AppKit.NSRunningApplication.currentApplication()
+    AX = _ax()
     err, element = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(), float(x), float(y), None)
     if err or element is None:
         return None, None
@@ -2752,9 +2757,11 @@ def element_at(x: float, y: float):
     return element, app
 
 
-def _deepest_at(element, x: float, y: float, limit: int = 600):
+def _deepest_at(element, x: float, y: float, limit: int = 600, seconds: float | None = None):
     """Chromium's hit test can stop at a big unlabelled group (the tab strip): look inside it for the
-    smallest labelled element that contains the point."""
+    smallest labelled element that contains the point. `seconds` caps the search (teach names every
+    click of a recording with it, and VS Code's window is thousands of nodes)."""
+    deadline = time.monotonic() + seconds if seconds else None
     best, best_area = None, float("inf")
     window = _attr(element, "AXWindow")
     if window is not None and _attr(element, "AXRole") != "AXWebArea":
@@ -2762,6 +2769,8 @@ def _deepest_at(element, x: float, y: float, limit: int = 600):
     queue, seen = deque([element]), 0
     limit = max(limit, 2500)
     while queue and seen < limit:
+        if deadline is not None and time.monotonic() > deadline:
+            break
         node = queue.popleft()
         seen += 1
         box = _frame(node)
@@ -2800,10 +2809,10 @@ def describe_point(x: float, y: float) -> str:
     except Exception as error:
         log.info("hit test failed: %s", error)
         return ""
-    if element is None:
-        return ""
     if app is not None and app.processIdentifier() == os.getpid():
         return "Mint's own orb or overlay"
+    if element is None:
+        return ""
     node = _meaningful(element)
     if not _label(node):
         node = _deepest_at(element, x, y) or node

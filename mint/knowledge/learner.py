@@ -100,10 +100,17 @@ class Learner:
         tools = [e for e in episode if e["role"] == "tool" and self._tool(e) not in _BOOKKEEPING]
         if any(self._tool(e) in {"create_skill", "update_skill"} for e in episode if e["role"] == "tool"):
             return ""                       # Mint already saved it by hand
+        users = [e["text"] for e in episode if e["role"] == "user"]
+        if any(re.match(r"\W*(stop|cancel|never ?mind|that'?s wrong|wrong)\b", u, re.I) for u in users) or \
+                any("STOPPED" in e["text"] for e in tools):
+            return ""                       # the user stopped it: what it did is not a way to do it
+        planned = [e for e in episode if e["role"] == "tool" and self._tool(e) == "plan_task"]
+        if planned and not any("All steps finished" in e["text"] for e in episode if e["role"] == "tool"):
+            return ""                       # the task never finished: nothing proven to learn (5 Oct: a stopped,
+                                            # flailing 23-step run was saved as "Install an extension in VS Code")
         failed = [i for i, e in enumerate(tools) if re.search(r"FAILED|Could not|NOT RUN|cannot", e["text"])]
         recovered = failed and any(i > failed[0] and not re.search(r"FAILED|Could not|cannot", e["text"])
                                    for i, e in enumerate(tools))
-        users = [e["text"] for e in episode if e["role"] == "user"]
         taught = len(users) > 1 and any(_TEACHING.search(u) for u in users[1:])
         asked = any(re.search(r"\b(save|make|create) (this|that|it|a skill)\b.*\bskill\b", u, re.I) for u in users)
         if asked:

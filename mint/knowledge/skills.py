@@ -229,12 +229,75 @@ def get(name: str, fuzzy: bool = True) -> dict | None:
     return skills[int(pick.id)] if pick is not None and pick.sure else None
 
 
+# One app, several names: what macOS calls it, what people say, what a skill was saved under.
+APP_ALIASES = {
+    "code": "visual studio code", "vs code": "visual studio code", "vscode": "visual studio code",
+    "visual studio code": "visual studio code", "claude": "claude", "claude code": "claude code",
+    "google chrome": "chrome", "chrome": "chrome", "microsoft word": "word", "microsoft excel": "excel",
+    "microsoft powerpoint": "powerpoint", "microsoft outlook": "outlook", "microsoft teams": "teams",
+    "chatgpt": "chatgpt", "chat gpt": "chatgpt", "iterm2": "iterm", "iterm": "iterm",
+}
+
+
+# Words some skills list under "apps" that are not apps a request would be "about".
+_NOT_APPS = {"system", "macos", "mac", "files", "file system", "clipboard", "connector", "video editor", "general",
+             "web", "browser", "terminal commands"}
+
+
+def app_key(name: str) -> str:
+    """'Code', 'VS Code', 'Visual Studio Code' -> 'visual studio code'."""
+    name = " ".join(re.findall(r"[a-z0-9]+", (name or "").lower().removesuffix(".app")))
+    return APP_ALIASES.get(name, name)
+
+
+def skill_apps(skill: dict) -> set[str]:
+    """The apps a skill is for (canonical names); empty for a general skill."""
+    raw = skill["meta"].get("apps", "") or ""
+    apps = {app_key(a) for a in re.split(r"[,;/]+", raw) if app_key(a)}
+    parts = skill["category"].split("/")
+    if len(parts) >= 2 and parts[0] in ("apps", "browser") and parts[1] != "general":
+        apps.add(app_key(parts[1].replace("-", " ")))
+    return apps
+
+
 def for_app(app_name: str) -> list[dict]:
-    wanted = app_name.lower().strip()
+    """Skills for this app. Whole names only: a substring match put 'Claude Code' skills on
+    VS Code (macOS calls it 'Code') - 1 Oct, 'Manage tasks in Data Labeling Portal' for
+    'download the Docker extension in VS Code'."""
+    wanted = app_key(app_name)
     if not wanted:
         return []
-    return [s for s in all_skills()
-            if wanted in (s["meta"].get("apps", "").lower()) or wanted in s["category"]]
+    return [s for s in all_skills() if wanted in skill_apps(s)]
+
+
+def mentioned_apps(text: str, skills: list[dict] | None = None) -> set[str]:
+    """Which of the apps that skills are saved for (or known aliases) the text names, as words."""
+    words = " " + " ".join(re.findall(r"[a-z0-9]+", (text or "").lower())) + " "
+    names = set(APP_ALIASES)
+    for skill in skills if skills is not None else all_skills():
+        names |= skill_apps(skill)
+        names |= {" ".join(re.findall(r"[a-z0-9]+", a.lower())) for a in
+                  re.split(r"[,;/]+", skill["meta"].get("apps", "") or "") if a.strip()}
+    found = {app_key(n) for n in names if n and n not in _NOT_APPS and f" {n} " in words}
+    # "claude code" mentioned is not also "code" (VS Code)
+    if "claude code" in found and not re.search(r"\b(vs ?code|visual studio)\b", words):
+        found.discard("visual studio code")
+    return found
+
+
+def app_conflict(skill: dict, task: str, app: str = "", skills: list[dict] | None = None,
+                 use_front: bool = True) -> str:
+    """Why `skill` is for another app than this task, or ''. A general skill (no apps) never
+    conflicts. The task's app is the one it names, else (use_front) the app in front."""
+    mine = skill_apps(skill)
+    if not mine:
+        return ""
+    named = mentioned_apps(task, skills)
+    target = named or ({app_key(app)} if use_front and app_key(app) else set())
+    if not target or mine & target:
+        return ""
+    return (f"it is for {', '.join(sorted(mine))}, and this task is about "
+            f"{', '.join(sorted(target))}")
 
 
 # --- choosing (Jev) ----------------------------------------------------------------------
@@ -263,15 +326,21 @@ def find(task: str, app: str = "") -> tuple[dict | None, str]:
     if pick is None:
         # Jev unreachable (it timed out now and then in testing): fall back to
         # word overlap, but only on a clear winner.
-        best, why = _lexical(task + " " + app, pool)
+        best, why = _lexical(task, [s for s in pool if not app_conflict(s, task, app, skills)])
         if best is not None:
             return best, why
         return None, "Could not reach Jev to choose a skill, and no skill clearly matches; carry on without one."
     if not pick.id:
         return None, f"No saved skill fits (Jev, {took:.1f}s)."
+    chosen = pool[int(pick.id)]
     if pick.confidence < 0.45:
-        return None, f"No saved skill clearly fits (best guess '{pool[int(pick.id)]['title']}' at {pick.confidence:.2f})."
-    return pool[int(pick.id)], f"Jev chose it ({pick.confidence:.2f} confident, {took:.1f}s)"
+        return None, f"No saved skill clearly fits (best guess '{chosen['title']}' at {pick.confidence:.2f})."
+    # The app the request names must be the skill's; the app merely in front counts only when Jev
+    # is not sure ("manage my labeling tasks" may well be asked with Chrome in front).
+    clash = app_conflict(chosen, task, app, skills, use_front=pick.confidence < 0.75)
+    if clash:
+        return None, f"No saved skill fits ('{chosen['title']}' came closest, but {clash})."
+    return chosen, f"Jev chose it ({pick.confidence:.2f} confident, {took:.1f}s)"
 
 
 def instructions_for(skill: dict) -> str:
@@ -420,15 +489,21 @@ _STOP = {"the", "a", "an", "in", "on", "to", "and", "of", "for", "my", "me", "it
 
 
 def _lexical(text: str, pool: list[dict]) -> tuple[dict | None, str]:
-    words = {w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _STOP and len(w) > 2}
+    """A clear winner by shared words - about the task, not the app: app names are not counted
+    (every VS Code skill shares 'code' with 'Claude Code', and 'extension' alone then decided it)."""
+    app_words = {w for s in pool for a in skill_apps(s) for w in a.split()} | {
+        w for a in APP_ALIASES for w in a.split()}
+    words = {w for w in re.findall(r"[a-z0-9]+", text.lower())
+             if w not in _STOP and len(w) > 2 and w not in app_words}
     if not words:
         return None, ""
     scored = []
     for skill in pool:
-        blob = " ".join([skill["title"], skill["meta"].get("when", ""), skill["meta"].get("apps", ""),
-                         skill["category"]]).lower()
+        blob = " ".join([skill["title"], skill["meta"].get("when", ""), skill["category"]]).lower()
         have = {w for w in re.findall(r"[a-z0-9]+", blob)}
         scored.append((len(words & have) / len(words), skill))
+    if not scored:
+        return None, ""
     scored.sort(key=lambda x: -x[0])
     top = scored[0]
     runner = scored[1][0] if len(scored) > 1 else 0.0

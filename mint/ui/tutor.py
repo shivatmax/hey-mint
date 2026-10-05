@@ -326,7 +326,7 @@ def _skill_text(task: str, app_name: str) -> tuple[str, str]:
         best, _ = skillbook._lexical(task, mine) if mine else (None, "")
         if best is None:
             best, _ = skillbook._lexical(task, general) if general else (None, "")
-        if best is None:
+        if best is None or skillbook.app_conflict(best, task, app_name, skills):
             return "", ""
         return best["name"], f"{best['title']}\n{best['body'][:1500]}"
     except Exception:
@@ -476,16 +476,14 @@ def _repair(lesson: dict, step: dict, why: str) -> dict | None:
 
 def _hit_is(element) -> bool:
     """Is `element` really drawn where it says (an open menu's item, not a closed one)?"""
-    AX = _ax()
+    from mint.screen.axkit import element_at
     box = _frame(element)
     if not box or box[2] < 3 or box[3] < 3:
         return False
-    try:
-        err, hit = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(),
-                                                       box[0] + box[2] / 2, box[1] + box[3] / 2, None)
-    except Exception:
-        return False
-    if err != 0 or hit is None:
+    # never the raw system-wide hit test: on Mint's own arrow or card it is answered in process,
+    # off the main thread (the teach crash of 1 Oct)
+    hit = element_at(box[0] + box[2] / 2, box[1] + box[3] / 2)
+    if hit is None:
         return False
     role, title = _attr(element, "AXRole"), _attr(element, "AXTitle")
     node = hit

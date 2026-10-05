@@ -17,6 +17,7 @@ changes apply at once, shortcuts included.
       "mic": true,                  false = microphone off; type instead
       "shortcuts": {"toggle": "cmd+j", "close": ""},
       "listen_while_working": true, still hears you mid-task
+      "follow_up_seconds": 6,       after a reply, listen this long for a follow-up; then the wake word again
       "timeline": false,            the activity timeline (timeline.py): app, window title, page address
       "storage_folder": "",         where Mint saves what it makes; "" = ~/Documents/Mint (config.storage)
       "meeting_offer": true,        when a call starts, offer to take notes (meetings.py)
@@ -111,6 +112,9 @@ DEFAULTS: dict = {
     "voice_lock": True,
     # Follow-ups are checked by Jev: said to Mint, or to someone else?
     "addressee_check": True,
+    # After Mint is done, it listens this many seconds for a follow-up, then needs the wake word
+    # again (listening.py). 0 = the wake word every time.
+    "follow_up_seconds": 6,
     # Extra words and names for Mint to expect (see vocab.py).
     "vocabulary": [],
     # The welcome window (onboarding.py) has been seen, finished or skipped.
@@ -214,13 +218,40 @@ def _save() -> None:
         log.warning("could not save settings: %s", error)
 
 
-def _notify(changes: list) -> None:
+_queue = None                  # the worker that tells listeners about main-thread changes (_notify)
+
+
+def _tell(changes: list) -> None:
     for key, value in changes:
         for listener in list(_listeners):
             try:
                 listener(key, value)
             except Exception:
                 log.exception("settings listener failed")
+
+
+def _notify(changes: list) -> None:
+    """Run the listeners. A change made on the main thread (a Settings switch, a menu click, a hand
+    edit picked up by the menu's poll) is passed on to one worker thread, in order: listeners do real
+    work - reload the wake word models, rebuild the audio engine, reconnect - and on the main thread
+    that froze every window until it finished, or for good if it waited on a busy thread. Listeners
+    already run on whichever thread changed the setting; the value itself is saved before this."""
+    if not changes or not _listeners:
+        return
+    if threading.current_thread() is not threading.main_thread():
+        _tell(changes)
+        return
+    global _queue
+    with _lock:
+        if _queue is None:
+            import queue
+            _queue = queue.Queue()
+
+            def work():
+                while True:
+                    _tell(_queue.get())
+            threading.Thread(target=work, daemon=True, name="mint-settings-changed").start()
+    _queue.put(list(changes))
 
 
 def set(key: str, value) -> None:   # noqa: A001 - mirrors get()

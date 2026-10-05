@@ -249,6 +249,11 @@ def _no_text_field() -> str | None:
     if focused is not None and (_ax(focused, "AXRole") in _EDITABLE_ROLES
                                 or _ax(focused, "AXEditableAncestor") is not None):
         return None
+    from mint.screen import axkit
+    if axkit.recent_click(front.processIdentifier(), 30.0) is not None:
+        # Mint just clicked into this app (click_text / click_at / ui_act): Electron apps hide the
+        # box that has the cursor from Accessibility, so trust the click; _verify_typed checks after.
+        return None
     window = _ax(app, "AXFocusedWindow")
     title = (_ax(window, "AXTitle") or "") if window is not None else ""
     return (f"FAILED: nothing was typed - no text field has focus in the front window "

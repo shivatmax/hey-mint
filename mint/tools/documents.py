@@ -59,6 +59,41 @@ def _find_web_area(window, limit: int = 400):
     return None
 
 
+TERMINALS = {"com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",
+             "com.github.wez.wezterm", "net.kovidgoyal.kitty", "org.alacritty", "co.zeit.hyper", "com.raphaelamorim.rio"}
+
+
+def terminal_tail(text: str, max_chars: int = 12000) -> str:
+    """The newest part of a terminal's text: its last lines (line breaks kept, blank runs squeezed), cut at a line
+    start. A terminal's text is its whole scrollback - on 5 Oct 1.1 million characters, read from the top, so the
+    output of the command Mint had just run never reached it."""
+    lines = [ln.rstrip() for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    out, size = [], 0
+    for line in reversed(lines):
+        if size + len(line) + 1 > max_chars:
+            break
+        if line or (out and out[-1]):
+            out.append(line)
+            size += len(line) + 1
+    return "\n".join(reversed(out))
+
+
+def _terminal_text(window) -> str:
+    """A terminal window's text area value (the scrollback), or ''."""
+    stack, seen = [window], 0
+    while stack and seen < 200:
+        node = stack.pop()
+        seen += 1
+        if _ax(node, "AXRole") == "AXTextArea":
+            value = _ax(node, "AXValue")
+            if isinstance(value, str) and value.strip():
+                return value
+        stack.extend(_ax(node, "AXChildren") or [])
+    return ""
+
+
 def read_window(max_chars: int = 12000, time_limit: float = 4.0, with_links: bool = False) -> str:
     """All the text in the front window, in reading order, through Accessibility.
 
@@ -93,6 +128,15 @@ def read_window(max_chars: int = 12000, time_limit: float = 4.0, with_links: boo
         time.sleep(0.4)
         window = _ax(app, "AXFocusedWindow") or window
     title = _ax(window, "AXTitle") or ""
+
+    if (front.bundleIdentifier() or "") in TERMINALS:
+        scrollback = _terminal_text(window)
+        if scrollback:
+            tail = terminal_tail(scrollback, max_chars)
+            print(f"  [read_window: terminal, last {tail.count(chr(10)) + 1} lines of {len(scrollback)} chars "
+                  f"from '{title[:60]}']", flush=True)
+            more = "the newest part; older output is above it" if len(tail) < len(scrollback.strip()) else "all of it"
+            return f"{front.localizedName()} - {title}\n(terminal - {more}; the last line is the prompt)\n\n{tail}"
 
     lines, seen, total = [], set(), 0
     stack = [window]

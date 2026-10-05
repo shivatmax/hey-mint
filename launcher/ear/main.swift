@@ -13,9 +13,14 @@
 //   while Mint runs, the Ear costs ~8 MB, as the plain launcher did.
 //
 // Exit codes from Mint: 0 = quit (the Ear quits too), 75 = unloaded (the Ear
-// takes over), 76 = restart now (the display mode changed: orb <-> notch),
-// anything else = it crashed (logged; the Ear takes over, so the next
-// "Hey Mint" starts it fresh).
+// takes over), 76 = restart now (the display mode changed: orb <-> notch, or
+// Restart Mint), anything else = it crashed (logged; the Ear takes over, so the
+// next "Hey Mint" starts it fresh).
+//
+// While Mint runs, the Ear also watches its heartbeat (Watchdog.swift): a Mint
+// whose main thread stopped responding gets a menu-bar item to restart it, its
+// stacks logged, and after ~40 s it is stopped and started again. ⌃⌥⌘M restarts
+// Mint from here at any time.
 
 import AppKit
 import Foundation
@@ -47,11 +52,18 @@ final class Controller: NSObject, NSApplicationDelegate {
     var restarts: [Date] = []
     var automationTimer: Timer?
     var automationTried: (due: Double, at: Date)?
+    let watchdog = Watchdog()
+    var restartAsked = false          // the user asked (menu, ⌃⌥⌘M): start Mint again whatever its exit
+    var hangStopped = false           // the watchdog stopped a hung Mint: start it again (with the crash cap)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
         ui.onOpen = { [weak self] what in self?.launch(reason: what) }
         ui.onQuit = { [weak self] in self?.quitAll() }
+        watchdog.onRestart = { [weak self] reason in self?.askRestart(reason: reason) }
+        watchdog.onQuit = { [weak self] in self?.quitAll() }
+        watchdog.onHung = { [weak self] _ in self?.stopHung() }
+        watchdog.registerHotKey()
         // `mint --say "…"` posts this. Unloaded (or still starting), Mint cannot
         // hear it: keep the text, start Mint, and post it again once Mint is up.
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("local.mint.say"), object: nil,
@@ -70,6 +82,12 @@ final class Controller: NSObject, NSApplicationDelegate {
                                                             queue: .main) { [weak self] note in
             guard let self, self.child == nil else { return }
             self.launch(reason: (note.object as? String) == "settings" ? "settings" : "console")
+        }
+        // Restart Mint from a script or a test, like ⌃⌥⌘M but without asking.
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("local.mint.restart"), object: nil,
+                                                            queue: .main) { [weak self] _ in
+            guard let self, let child = self.child, child.isRunning else { return }
+            self.restartMint(child, reason: "local.mint.restart")
         }
         // Mint's own "ready" (it posts it whether or not a listener handed over).
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("local.mint.ready"), object: nil,
@@ -115,6 +133,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         environment["MINT_EAR_SOCKET"] = Bundled.root + "/ear.sock"
         environment["MINT_EAR_REASON"] = reason
         environment["MINT_APP_PATH"] = Bundle.main.bundlePath      // for "start at login"
+        environment["MINT_HEARTBEAT"] = Watchdog.path              // mint/app/ear.py beats here (Watchdog.swift)
         process.environment = environment
         process.standardInput = FileHandle.nullDevice
         process.terminationHandler = { [weak self] done in
@@ -128,6 +147,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             return
         }
         child = process
+        watchdog.watch(pid: process.processIdentifier)
         prefsTimer?.invalidate()
         if reason != "launch" { Log.write("[ear] starting Mint (\(reason))") }
     }
@@ -135,6 +155,29 @@ final class Controller: NSObject, NSApplicationDelegate {
     func exited(_ status: Int32, _ reason: Process.TerminationReason) {
         child = nil
         launching = false
+        watchdog.stop()
+        if restartAsked && !quitting {
+            restartAsked = false
+            hangStopped = false
+            Log.write("[ear] Mint stopped (\(reason == .uncaughtSignal ? "signal" : "code") \(status)); starting it again")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.launch(reason: "launch") }
+            return
+        }
+        if hangStopped && !quitting {
+            // Stopped by the watchdog: start it again like after a crash, whatever the unload
+            // setting - a few times, then stop rather than loop.
+            hangStopped = false
+            restarts = restarts.filter { Date().timeIntervalSince($0) < 300 } + [Date()]
+            if restarts.count <= 3 {
+                Log.write("[ear] Mint was not responding; starting it again")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.launch(reason: "launch") }
+                return
+            }
+            Log.write("[ear] Mint keeps hanging; waiting for the wake word, ⌘J or the menu")
+            stopListener()
+            listen()
+            return
+        }
         if quitting || (status == 0 && reason == .exit) {
             stopListener()
             NSApp.terminate(nil)
@@ -142,7 +185,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
         if status == restartCode && reason == .exit {
             // Asked for: the display mode changed (orb <-> notch). Straight back, whatever the unload setting.
-            Log.write("[ear] Mint restarting (display mode changed)")
+            Log.write("[ear] Mint restarting (it asked: display mode changed, or Restart)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.launch(reason: "launch") }
             return
         }
@@ -171,7 +214,65 @@ final class Controller: NSObject, NSApplicationDelegate {
     func quitAll() {
         quitting = true
         stopListener()
-        if let child, child.isRunning { child.terminate() } else { NSApp.terminate(nil) }
+        guard let child, child.isRunning else { NSApp.terminate(nil); return }
+        let hung = watchdog.quietFor != nil
+        watchdog.stop()
+        child.terminate()
+        // A Mint that doesn't respond never gets to its SIGTERM handler: stop it for good. A healthy
+        // one is given time to fold the conversation into memory (it gives itself 15 s).
+        let pid = child.processIdentifier
+        DispatchQueue.main.asyncAfter(deadline: .now() + (hung ? 3 : 25)) {
+            if child.isRunning, child.processIdentifier == pid {
+                Log.write("[ear] Mint did not quit; stopping it (SIGKILL)")
+                kill(pid, SIGKILL)
+            }
+        }
+    }
+
+    /// Restart Mint (the watchdog's menu-bar item, ⌃⌥⌘M). Not running: start it. Responding: ask first.
+    func askRestart(reason: String) {
+        guard let child, child.isRunning else {
+            if !quitting { launch(reason: "console") }
+            return
+        }
+        let quiet = watchdog.quietFor
+        if quiet == nil || reason == "⌃⌥⌘M" {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Restart Mint?"
+            alert.informativeText = quiet.map { "Mint hasn't responded for \(Int($0)) seconds. Restarting stops it and starts it again." }
+                ?? "Mint is responding. Restarting stops everything it is doing and starts it again; the conversation is kept."
+            alert.addButton(withTitle: "Restart")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        guard let child = self.child, child.isRunning else { return }
+        restartMint(child, reason: reason)
+    }
+
+    func restartMint(_ child: Process, reason: String) {
+        let hung = watchdog.quietFor != nil
+        let pid = child.processIdentifier
+        Log.write("[ear] restarting Mint (\(reason)\(hung ? ", not responding" : ""))")
+        restartAsked = true
+        watchdog.stop()
+        if hung { kill(pid, SIGUSR1) }               // where it was stuck, into the log
+        DispatchQueue.main.asyncAfter(deadline: .now() + (hung ? 1 : 0)) {
+            if child.isRunning { child.terminate() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (hung ? 4 : 20)) {
+            if child.isRunning, child.processIdentifier == pid {
+                Log.write("[ear] Mint did not stop; stopping it (SIGKILL)")
+                kill(pid, SIGKILL)
+            }
+        }
+    }
+
+    /// The watchdog gave up on a hung Mint (its stacks are already in the log).
+    func stopHung() {
+        guard let child, child.isRunning else { return }
+        hangStopped = true
+        kill(child.processIdentifier, SIGKILL)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

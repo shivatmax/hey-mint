@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.5.5 (2026-10-05)
+
+- **Listens only when you mean it.** After a reply Mint keeps listening for a follow-up only a few seconds
+  (Settings ▸ General ▸ Keep listening after a reply, default 6 s), then waits for "Hey Mint" again; other voices
+  and background audio no longer keep it awake. Before answering or acting on words heard without the wake word,
+  a quick check (rules, then Jev) decides they are meant for Mint and ask something - talk with others, videos,
+  calls and stray phrases get no reply and no action; its own reply waits for that verdict (`mint/voice/listening.py`).
+- **Never stuck again:** Settings pages read their data off the main thread (Loading… / Try again instead of a
+  frozen window), settings changes notify on a worker. A watchdog in Mint.app restarts a frozen Mint by itself
+  (⚠ in the menu bar after ~10 s, its stacks to the log, restart after ~40 s), ⌃⌥⌘M or Settings ▸ Restart Mint
+  restart it any time, and Quit always works.
+- **Teach and clicks in apps like VS Code:** fixed a crash while teach recorded (Accessibility asked about Mint's
+  own windows off the main thread); clicks land on the centre of the target's own words, pointing snaps to the
+  named button nearby; clicking into a text box counts as success and typing works in Electron editors; skills are
+  matched to the right app (VS Code's "Code" no longer pulls in Claude Code skills); teach records what you click
+  even where Accessibility shows nothing. "Format Document" / "Reset Zoom" no longer trigger the guard.
+- **VS Code and other Electron apps, for real:** text boxes VS Code hides (a 1×1 input under a drawn placeholder)
+  are found and typed into; ui_elements lists named things only (up to 140) and says which row a button is in
+  ("button 'Install' in 'CSV Colorful Table…'"), and "Install CSV Colorful Table" picks that row's button; apps
+  are found under all their names ("Visual Studio Code" runs as "Code"); typing the same search again is no longer
+  blocked as a duplicate message (that rule is for messaging apps); Mint stays awake while its task has steps
+  left; a run you stopped or that never finished is never saved as a skill. Every tool call and its full result
+  is in ~/Library/Logs/Mint/tools.log.
+- **Knows when not to speak:** words that stop mid-sentence ("I want to do", "can you"), fillers and a stray word
+  right after "Hey Mint" get silence while Mint keeps listening for the rest - no more "your request got cut off" or
+  "could you repeat that".
+- **Rides out Gemini outages:** when the main voice model fails ("1011 Internal error"), Mint moves to the backup
+  model after one fresh retry (it used to take ~30 s), and spoken words that get nothing back within 10 s make it
+  reconnect on the backup and say so ("say that again") instead of silently falling asleep.
+- **Reads the Terminal properly:** a terminal is read from its newest lines (the command just run and its output, then
+  the prompt), not from the top of a scrollback that can be a million characters long.
+
 ## 0.5.4 (2026-10-01)
 
 - **The guard: nothing deleted or changed without your yes.** Before Mint trashes, overwrites, moves or renames

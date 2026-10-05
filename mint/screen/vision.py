@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 
 import mss
 import mss.tools
@@ -86,14 +87,77 @@ def display_count() -> int:
         return max(0, len(sct.monitors) - 1)
 
 
-def click_at(x: float, y: float, button: str = "left", double: bool = False) -> str:
+def to_point(x: float, y: float, area: dict) -> tuple[float, float]:
+    """0-1000 coordinates of a screenshot of `area` -> global screen points (Quartz, top-left).
+    The screenshot is scaled to at most MAX_EDGE px and Retina-doubled before that, but the
+    0-1000 convention is relative to the image, so only the area (in points) matters."""
+    return (area["left"] + x / 1000 * area["width"], area["top"] + y / 1000 * area["height"])
+
+
+SNAP_X, SNAP_Y = 160.0, 70.0    # how far from the model's point the named text may be (points)
+
+
+# describe_point naming a definite control (not a big unnamed area, which is all Electron shows)
+_SPECIFIC = re.compile(r"^the (button|link|checkbox|tab or option|tab|menu item|pop-up menu|menu button|text field) '")
+
+
+def _label_matches(label: str, target: str) -> bool:
+    from mint.screen.ocr import _words
+    have, want = set(_words(label).split()), set(_words(target).split())
+    return bool(want) and want <= have
+
+
+def snap(point: tuple[float, float], target: str, lines: list[dict] | None = None) -> tuple[tuple, str]:
+    """The point to click for `target` near where the model pointed: the centre of the nearest
+    text that says it (its own words, not its whole line), within SNAP_X x SNAP_Y points.
+    -> (point, what was found) - the model's own point and '' when nothing nearby says it.
+
+    Why: on 1 Oct the model saw VS Code's 'Uninstall' button, pointed 67 pt to its left and
+    clicked 'Disable' (then 'Enable', 'Disable', ...) five times; the button was right there."""
+    from mint.screen import ocr
+    px, py = point
+    if lines is None:
+        try:
+            lines = ocr.read_area(px - SNAP_X, py - SNAP_Y, 2 * SNAP_X, 2 * SNAP_Y)
+        except Exception:
+            return point, ""
+    want = ocr._words(target)
+    if not want:
+        return point, ""
+    best = None
+    for line in lines:
+        words = ocr._words(line["text"])
+        if words != want and (ocr.target_span(line["text"], target) is None
+                              or len(words.split()) > len(want.split()) + 3):
+            continue                   # a label or button, not the same word inside a sentence
+        box = ocr.target_box(line, target)
+        cx, cy = ocr.center(box)
+        if abs(cx - px) > SNAP_X or abs(cy - py) > SNAP_Y:
+            continue
+        # already on it: keep the model's point (it may mean a spot inside a wide control)
+        if ocr.contains(box, point, slack=3):
+            return point, line["text"]
+        distance = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+        if best is None or distance < best[0]:
+            best = (distance, (cx, cy), line["text"], box)
+    if best is None:
+        return point, ""
+    _, centre, text, box = best
+    if not ocr.contains(box, centre):
+        return point, ""
+    return centre, text
+
+
+def click_at(x: float, y: float, button: str = "left", double: bool = False, target: str = "") -> str:
     """Click a point on the latest screenshot.
 
     `x` and `y` are 0-1000 across the screenshot's width and height (1000 is
     the right or bottom edge), which is the convention Gemini is trained to
     point with. This is the fallback for apps whose controls are invisible to
     Accessibility - Slack exposed 19 controls and no channel list in testing -
-    where the desktop tool has nothing to choose from.
+    where the desktop tool has nothing to choose from. With `target` (what the
+    model means to click), the click goes to the centre of that text if it is
+    near the point: model pointing is tens of points off.
     """
     import time
 
@@ -109,8 +173,16 @@ def click_at(x: float, y: float, button: str = "left", double: bool = False) -> 
         return "x and y must be between 0 and 1000."
 
     area = _last_area
-    point = Quartz.CGPointMake(area["left"] + x / 1000 * area["width"],
-                               area["top"] + y / 1000 * area["height"])
+    pointed = to_point(x, y, area)
+    found = ""
+    if target:
+        (px, py), found = snap(pointed, target)
+    else:
+        px, py = pointed
+    # Self-check: the point is on the screen the screenshot showed.
+    if not (area["left"] <= px <= area["left"] + area["width"] and area["top"] <= py <= area["top"] + area["height"]):
+        return f"FAILED: ({int(px)}, {int(py)}) is outside the screenshot's screen area, so nothing was clicked."
+    point = Quartz.CGPointMake(px, py)
     down, up = {
         "left": (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp),
         "right": (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp),
@@ -121,12 +193,18 @@ def click_at(x: float, y: float, button: str = "left", double: bool = False) -> 
     # extension") instead of the same blind click four times.
     try:
         from mint.tools.harness import describe_point
-        target = describe_point(point.x, point.y)
+        what_there = describe_point(point.x, point.y)
     except Exception:
-        target = ""
+        what_there = ""
+    if target and not found and _SPECIFIC.match(what_there or "") and not _label_matches(what_there, target):
+        # Named something that is neither at the point nor written near it: don't click a
+        # neighbour (Disable for Uninstall); say what is really there.
+        return (f"NOT CLICKED: at ({int(px)}, {int(py)}) there is {what_there}, not '{target}', and no text "
+                f"'{target}' is within {int(SNAP_X)} points of it. Use ui_act or click_text with '{target}', or "
+                "look again and point at it.")
 
     from mint.ui.effects import fx
-    time.sleep(fx.click(point.x, point.y))
+    time.sleep(fx.click(point.x, point.y, (found or target)[:40]))
     from mint.app import control
     if control.stopped():
         return "STOPPED by the user before clicking; nothing was clicked."
@@ -140,7 +218,18 @@ def click_at(x: float, y: float, button: str = "left", double: bool = False) -> 
             Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, click + 1)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
             time.sleep(0.03)
+    try:
+        from mint.screen import axkit
+        from mint.screen import ground
+        axkit.note_click(ground.owner_at(px, py), px, py, found or target)
+    except Exception:
+        pass
     what = "Double-clicked" if double else ("Right-clicked" if button == "right" else "Clicked")
-    hit = f" - that is {target}" if target else ""
+    moved = ((px - pointed[0]) ** 2 + (py - pointed[1]) ** 2) ** 0.5
+    if found and moved >= 3:
+        hit = (f" - the text '{found[:40]}', {int(moved)} points from where you pointed "
+               f"({int(pointed[0])}, {int(pointed[1])})" + (f"; it is {what_there}" if what_there else ""))
+    else:
+        hit = f" - that is {what_there}" if what_there else ""
     return (f"{what} at ({int(point.x)}, {int(point.y)}) on screen{hit}. If that is not what you meant, don't "
             "click the same point again: use ui_act with its name, or look again and pick a different point.")

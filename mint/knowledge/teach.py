@@ -125,8 +125,8 @@ def _focus_secure(pid: int) -> bool | None:
     """Is the focused control of app `pid` a password field? Asked from the tap thread, so every
     Accessibility message has a short timeout of its own (a busy app must not stall the tap).
     None when it can't be told."""
-    if not pid:
-        return None
+    if not pid or pid == os.getpid():
+        return None                        # Mint's own window: AppKit would answer in process, off its thread
     try:
         import ApplicationServices as AX
         app = AX.AXUIElementCreateApplication(pid)
@@ -348,7 +348,7 @@ def describe_element(element, x: float | None = None, y: float | None = None) ->
     if not label and x is not None:
         try:                              # Chromium's hit test can stop at a big unnamed group
             from mint.tools.harness import _deepest_at, _label as ht_label
-            deeper = _deepest_at(element, x, y)
+            deeper = _deepest_at(element, x, y, seconds=0.6)
             if deeper is not None:
                 node, role = deeper, _attr(deeper, "AXRole") or role
                 label = _text(ht_label(deeper), 70)
@@ -387,6 +387,8 @@ def _front() -> tuple[int, str, str, str]:
         return 0, "", "", ""
     pid = app.processIdentifier()
     title = ""
+    if pid == os.getpid():                 # Mint itself: its windows can only be read in process
+        return pid, str(app.localizedName() or ""), str(app.bundleIdentifier() or ""), ""
     try:
         from mint.screen.axkit import focused_window
         window = focused_window(pid)
@@ -394,6 +396,105 @@ def _front() -> tuple[int, str, str, str]:
     except Exception:
         pass
     return pid, str(app.localizedName() or ""), str(app.bundleIdentifier() or ""), title
+
+
+def _hit(x: float, y: float):
+    """(error, element) under a screen point; ("own", None) on Mint's own windows, which are never
+    asked (AppKit answers in process on the calling thread: the 1 Oct SIGSEGV)."""
+    import ApplicationServices as AX
+
+    from mint.screen.axkit import own_window_at
+    if own_window_at(x, y):
+        return "own", None
+    try:
+        return AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(), float(x), float(y), None)
+    except Exception:
+        return -1, None
+
+
+_UNNAMED_ROLES = {"AXGroup", "AXWebArea", "AXUnknown", "AXScrollArea", "AXWindow", "AXImage", "AXLayoutArea",
+                  "AXSplitGroup"}
+NEAR_W, NEAR_H = 320.0, 72.0           # the strip read around a click, in points
+
+
+def _text_at(x: float, y: float) -> str:
+    """The words written at a clicked point (from a small screen read), or '' - never anything
+    that looks like a secret, and nothing while a password manager is on screen."""
+    if _pm_on_screen():
+        return ""
+    try:
+        from mint.screen import ocr
+        lines = ocr.read_area(x - NEAR_W / 2, y - NEAR_H / 2, NEAR_W, NEAR_H)
+    except Exception:
+        log.debug("teach: text at click", exc_info=True)
+        return ""
+    text = pick_text(lines, x, y)
+    if not text or _secret_like(text) or _sensitive_label(text):
+        return ""
+    return text
+
+
+def pick_text(lines: list[dict], x: float, y: float, near: float = 26.0, longest: int = 40) -> str:
+    """Of the lines read around a click: the one under the point (else the nearest within `near`
+    points); a long line is cut to the words nearest the point."""
+    best = None
+    for line in lines:
+        lx, ly, lw, lh = line["x"], line["y"], line["w"], line["h"]
+        dx = max(lx - x, 0.0, x - (lx + lw))
+        dy = max(ly - y, 0.0, y - (ly + lh))
+        distance = (dx * dx + dy * dy) ** 0.5
+        if distance <= near and (best is None or distance < best[0]):
+            best = (distance, line)
+    if best is None:
+        return ""
+    line = best[1]
+    text = " ".join(str(line["text"]).split())
+    if len(text) <= longest:
+        return text
+    words = text.split()
+    if not words or line["w"] <= 0:
+        return text[:longest]
+    # where along the line the click was, as a share of its width -> that word and its neighbours
+    at = min(max((x - line["x"]) / line["w"], 0.0), 1.0)
+    chars, index = 0, 0
+    for index, word in enumerate(words):
+        chars += len(word) + 1
+        if chars / max(len(text), 1) >= at:
+            break
+    lo = hi = index
+    while True:
+        grown = False
+        if lo > 0 and len(" ".join(words[lo - 1:hi + 1])) <= longest:
+            lo, grown = lo - 1, True
+        if hi < len(words) - 1 and len(" ".join(words[lo:hi + 2])) <= longest:
+            hi, grown = hi + 1, True
+        if not grown:
+            break
+    return " ".join(words[lo:hi + 1])
+
+
+def _in_window(pid: int, x: float, y: float) -> str:
+    """Where in its window a click was: '40% across, 23% down' (survives the window moving)."""
+    if not pid:
+        return ""
+    try:
+        import Quartz
+        for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly
+                                                   | Quartz.kCGWindowListExcludeDesktopElements,
+                                                   Quartz.kCGNullWindowID) or []:
+            if int(w.get("kCGWindowOwnerPID", 0)) != pid or int(w.get("kCGWindowLayer", 0)) != 0:
+                continue
+            b = w.get("kCGWindowBounds") or {}
+            if b and b["Width"] > 80 and b["X"] <= x <= b["X"] + b["Width"] and b["Y"] <= y <= b["Y"] + b["Height"]:
+                return window_spot(x, y, (b["X"], b["Y"], b["Width"], b["Height"]))
+    except Exception:
+        return ""
+    return ""
+
+
+def window_spot(x: float, y: float, window) -> str:
+    wx, wy, ww, wh = window
+    return f"{round(100 * (x - wx) / ww)}% across, {round(100 * (y - wy) / wh)}% down the window"
 
 
 _TRACKING = re.compile(r"^(utm_|gclid$|gad_|fbclid$|mc_|ref_src$|igshid$|si$|_hs|yclid$|msclkid$)", re.I)
@@ -495,6 +596,7 @@ class _Recording:
                 # (by then the focus may have moved on and the key would be recorded as plain text).
                 item["secure_input"] = _secure_input_on()
                 target = int(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGEventTargetUnixProcessID))
+                item["target"] = target
                 item["focus_secure"] = _focus_secure(target or self.front_pid)
             elif kind == Quartz.kCGEventScrollWheel:
                 item["dy"] = int(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGScrollWheelEventDeltaAxis1))
@@ -584,9 +686,11 @@ class _Recording:
         return pid, str(app.localizedName() or "") if app else "", str(app.bundleIdentifier() or "") if app else ""
 
     def _click(self, item: dict, right: bool) -> None:
-        import ApplicationServices as AX
         x, y = item["x"], item["y"]
-        err, element = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(), x, y, None)
+        err, element = _hit(x, y)
+        if err == "own":                               # the orb, the notch, a card: Mint's, not the task
+            self.down = None
+            return
         if err or element is None:
             if err == -25211:                          # kAXErrorAPIDisabled: no Accessibility
                 self.accessibility = False
@@ -607,9 +711,19 @@ class _Recording:
                 self._pm_note(app, item["t"])
                 return
             info = describe_element(element, x, y)
+        if not info.get("secure") and not info.get("menu") and (
+                not info.get("label") or info.get("role") in _UNNAMED_ROLES or info.get("kind") == "spot"):
+            # Electron apps (VS Code, Slack...) name almost nothing: the hit is a big unnamed group.
+            # What is written where the user clicked is what Mint can find again (click_text).
+            near = _text_at(x, y)
+            if near:
+                info["near_text"] = near
         event = {"type": "click", "t": item["t"], "button": "right" if right else "left",
                  "count": max(1, item.get("clicks", 1)), "app": app, "bundle": bundle, "pid": pid,
                  "x": round(x), "y": round(y), "mods": _mods(item["flags"]), **info}
+        spot = _in_window(pid, x, y)
+        if spot:
+            event["at"] = spot
         if not right and not info.get("secure"):
             event["shot"] = self._shot(x, y)
         self.add(event)
@@ -621,9 +735,7 @@ class _Recording:
             return
         if abs(item["x"] - down["x"]) + abs(item["y"] - down["y"]) < 14:
             return
-        import ApplicationServices as AX
-        err, element = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(),
-                                                          item["x"], item["y"], None)
+        err, element = _hit(item["x"], item["y"])
         target = {}
         if not err and element is not None:
             _pid, app, bundle = self._app_of(element)
@@ -635,9 +747,13 @@ class _Recording:
             down["to_container"] = target.get("container", "")
 
     def _key(self, item: dict) -> None:
-        import ApplicationServices as AX
+        from mint.screen.axkit import focused_element
         code, flags, chars = item["code"], item["flags"], item.get("chars", "")
-        focused = _attr(AX.AXUIElementCreateSystemWide(), "AXFocusedUIElement")
+        if item.get("target") and item["target"] == self.own_pid:
+            return                                      # typed into Mint (its chat), not the task
+        # The app the key went to (never the system-wide focus: when that is Mint, AppKit answers
+        # in process on this thread - see axkit.element_at).
+        focused = focused_element(item.get("target") or None)
         pid, app, bundle = self._app_of(focused) if focused is not None else (0, "", "")
         if not pid:
             pid, app, bundle, _ = _front()
@@ -704,9 +820,9 @@ class _Recording:
                 last["dx"] += dx
                 last["t_end"] = item["t"]
                 return
-        import ApplicationServices as AX
-        err, element = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(),
-                                                          item["x"], item["y"], None)
+        err, element = _hit(item["x"], item["y"])
+        if err == "own":
+            return
         where, app, pid = "", "", 0
         if not err and element is not None:
             pid, app, bundle = self._app_of(element)
@@ -848,9 +964,15 @@ def _target(e: dict) -> str:
     if e.get("secure"):
         return "password field"
     label = e.get("label", "")
+    near = e.get("near_text", "")
+    at = f" ({e['at']})" if e.get("at") else ""
+    if near and (not label or e.get("role") in _UNNAMED_ROLES or kind == "spot"):
+        # what Accessibility could not name, read off the screen: click_text finds it again
+        return f"the text '{near}' on screen (no accessible name){at}"
     if kind == "spot" and not label:
-        return f"a spot at ({e.get('x')}, {e.get('y')}) that has no accessible name"
-    words = f"{kind} '{label}'" if label else f"{kind} (no name)"
+        where = at or f" at ({e.get('x')}, {e.get('y')})"
+        return f"a spot{where} that has no accessible name"
+    words = f"{kind} '{label}'" if label else f"{kind} (no name){at}"
     if e.get("value") and e.get("role") not in ("AXStaticText",):
         words += f" [value '{e['value']}']"
     if e.get("container"):
@@ -1124,6 +1246,8 @@ WRITER_MODELS = [m for m in (os.environ.get("MINT_TEACH_MODEL"), "gemini-3.7-fla
 
 _TOOLS_TEXT = """\
 - open_app <App> - launch or switch to an app.
+- click_text "<words written on it>" - click the text as it reads on screen; for controls that have no \
+accessible name (Electron apps such as VS Code, Slack, Discord) - recorded as "the text '...' on screen".
 - ui_act click|double_click|right_click|type|dismiss target="<the control in plain words, e.g. 'New Note \
 button in the toolbar', 'To field', 'the message box'>" text="..." press_return=true - THE way to click or \
 type into anything in an app's window; it finds controls by their accessible name and role.
@@ -1166,7 +1290,9 @@ file or note name, a search term, a date, an amount, a specific item's URL - bec
 angle brackets, e.g. ui_act type target="To field" text="<recipient>". Keep what is fixed literal: app \
 names, button and field labels, menu paths, a site's address.
 2. Name controls, never coordinates or pixel positions. Say where a control is when that helps find it \
-("in the sidebar", "in the dialog", "at the top of the page").
+("in the sidebar", "in the dialog", "at the top of the page"; "40% across" means from the window's left). \
+A click recorded as "the text '...' on screen" becomes click_text "<that text>" (a parameter if it varies); \
+typing right after such a click becomes type_text.
 3. Merge low-level actions into meaningful steps. Drop noise: typos the user corrected, things undone, \
 detours that do not serve the goal, idle scrolling, switching to or from Mint itself. Keep prerequisites \
 (opening, selecting, waiting for a page or dialog).
@@ -1313,7 +1439,9 @@ def _halt(rec: "_Recording") -> None:
     rec.stopping.set()
     for thread in rec.threads:
         if thread is not threading.current_thread():
-            thread.join(timeout=3.0)
+            # the worker finishes naming the clicks still queued (it stops once the queue is empty);
+            # cut off at 3 s, the last steps of a demonstration - the ones that matter - were lost
+            thread.join(timeout=12.0 if thread.name == "teach-worker" else 3.0)
 
 
 def cancel() -> str:

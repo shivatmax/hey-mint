@@ -6,6 +6,7 @@ process Mint started (Codex runs, preview servers, scripts), quit the hidden
 screen-control engine (Desktop Voice) if it is running, then quit the app the
 normal way so the conversation is still folded into memory. If anything hangs,
 the process exits anyway after a few seconds - Mint once ignored SIGTERM.
+`restart` does the same clean-up, then exits with code 76: Mint.app starts it again.
 
 Nothing restarts it afterwards unless "Start at login" is on, and then only at
 the next login.
@@ -115,9 +116,8 @@ def _quit_engine() -> bool:
     return False
 
 
-def _shutdown(reason: str) -> None:
-    log.info("quitting fully (%s)", reason or "asked")
-    print(f"  [quit: {reason or 'asked'} - stopping everything]", flush=True)
+def _stop_everything() -> list[str]:
+    """Stop anything in flight, sub-agents, processes Mint started and the engine. -> what was done."""
     steps = []
     try:
         from mint.app import control
@@ -142,6 +142,23 @@ def _shutdown(reason: str) -> None:
         steps.append(f"ended {ended} helper process(es)")
     if _quit_engine():
         steps.append("quit the screen-control engine")
+    return steps
+
+
+def _grace(seconds: float) -> None:
+    """Quitting keeps the main thread busy (memory is folded in): tell Mint.app's watchdog to wait."""
+    try:
+        from mint.app import ear
+        ear.grace(seconds)
+    except Exception:
+        pass
+
+
+def _shutdown(reason: str) -> None:
+    log.info("quitting fully (%s)", reason or "asked")
+    print(f"  [quit: {reason or 'asked'} - stopping everything]", flush=True)
+    _grace(HARD_STOP + 30)
+    steps = _stop_everything()
     log.info("quit: %s", "; ".join(steps) or "nothing else was running")
     # The normal way out: the app's will-terminate hook folds the conversation into memory.
     from mint.ui import presence as ui
@@ -157,6 +174,50 @@ def quit_fully(*_args, reason: str = "") -> None:
         return
     _quitting.set()
     threading.Thread(target=_shutdown, args=(reason,), name="mint-quit", daemon=True).start()
+
+
+RESTART_CODE = 76      # Mint.app (the Ear) starts Mint again at once (the same code as notch.RESTART_CODE)
+
+
+def can_restart() -> bool:
+    """Only Mint.app can bring Mint back; run from a terminal, there is nothing to restart it."""
+    from mint.app import ear
+    return ear.managed()
+
+
+def restart(reason: str = "") -> str:
+    """Start Mint again (Settings, the menu): the same clean-up as quitting - the conversation is
+    still folded into memory - then exit with RESTART_CODE, and Mint.app starts it again. Any
+    thread. If Mint is too stuck to get here, Mint.app's own "Restart Mint" (its menu-bar item
+    while Mint doesn't respond, or ⌃⌥⌘M) does it from outside."""
+    if not can_restart():
+        return "Mint isn't running from Mint.app, so nothing would start it again: quit it and start it yourself."
+    if _quitting.is_set():
+        return "Already quitting."
+    _quitting.set()
+
+    def run() -> None:
+        log.warning("restarting (%s)", reason or "asked")
+        print(f"  [restart: {reason or 'asked'} - stopping everything, back in a few seconds]", flush=True)
+        _grace(60)
+        steps = _stop_everything()
+        log.info("restart: %s", "; ".join(steps) or "nothing else was running")
+        done = threading.Event()
+
+        def save() -> None:
+            try:
+                import AppKit
+                AppKit.NSNotificationCenter.defaultCenter().postNotificationName_object_(
+                    AppKit.NSApplicationWillTerminateNotification, AppKit.NSApplication.sharedApplication())
+            finally:
+                done.set()
+        from PyObjCTools import AppHelper
+        AppHelper.callAfter(save)
+        done.wait(10.0)                        # a stuck main thread can't save: go anyway
+        logging.shutdown()
+        os._exit(RESTART_CODE)
+    threading.Thread(target=run, name="mint-restart", daemon=True).start()
+    return "Restarting Mint - back in a few seconds."
 
 
 def quit_later(seconds: float, reason: str = "") -> None:
