@@ -774,7 +774,7 @@ class SettingsWindow:
         page.section("Keys")
         rows = (("toggle", "Open or close the chat", False), ("talk", f"Talk to {name} (no wake word)", False),
                 ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free", False),
-                ("clipboard", "Open the clipboard", False))
+                ("clipboard", "Open the clipboard", False), ("hide", f"Hide or show {name}", False))
         for key, title, modifier_ok in rows:
             card, top, x, h = page.row(title, control_w=250)
             button = self._button(card, "", x, top + (h - 28) / 2, 170, lambda: None)

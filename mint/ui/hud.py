@@ -203,6 +203,7 @@ class HUD:
         self._look_at = None
         self._interactive = False
         self._action_seq = 0
+        self.hidden = False                  # "Hide" (notch row, menu, ⌃⌥H): nothing of Mint shows until it is needed
         self.fire = None                     # set by Presence: fire(action, *args)
         self.menu_factory = None             # set by Presence: -> NSMenu
 
@@ -423,9 +424,43 @@ class HUD:
         if self.fire is not None:
             self.fire(action, *args)
 
+    def set_hidden(self, on: bool) -> None:
+        """Hide Mint or bring it back. Main thread. In the notch only the little Mint and the icons beside the camera go
+        (the notch still opens on hover or a tap); the orb fades away. It comes back by itself when it has something to
+        say or do ("Hey Mint", a reply, news), or with the Show button / ⌃⌥H."""
+        on = bool(on)
+        if on == self.hidden:
+            return
+        self.hidden = on
+        from mint.ui import notch
+        if not notch.active() and getattr(self, "_orb_window", None) is not None:
+            window = self._orb_window
+            AppKit.NSAnimationContext.beginGrouping()
+            AppKit.NSAnimationContext.currentContext().setDuration_(0.25)
+            window.animator().setAlphaValue_(0.0 if on else 1.0)
+            AppKit.NSAnimationContext.endGrouping()
+            if on:
+                AppHelper.callLater(0.3, lambda: self.hidden and window.orderOut_(None))
+            else:
+                window.orderFrontRegardless()
+                self.orb.hop()
+        if on:
+            self._hide_bubble()
+        from mint.core import hotkeys
+        key = (prefs.get("shortcuts") or {}).get("hide") or ""
+        back = f", {hotkeys.display(key)}" if key else ""
+        print(f"  [{'hidden - Hey Mint, the Show button' + back + ' bring Mint back' if on else 'shown'}]",
+              flush=True)
+
+    def toggle_hidden(self) -> None:
+        AppHelper.callAfter(lambda: self.set_hidden(not self.hidden))
+
     def set_state(self, state: str, note: str = "") -> None:
         def apply():
             previous = self._state
+            woke = state == "awake" and previous in ("sleeping", "paused", "starting", "offline")
+            if self.hidden and (woke or (state in ("thinking", "working", "speaking") and previous != state)):
+                self.set_hidden(False)           # woken, or it has something to say or do: back in sight
             self._state = state
             self._touch()
             if self._built:
@@ -695,7 +730,7 @@ class HUD:
         shown, full, moving = self._bubble_text(now, animate)
         self._bubble_moving = moving
         self._bubble_dirty = moving
-        if full.length() == 0:
+        if full.length() == 0 or self.hidden:
             self._hide_bubble()
             return
         rect = full.boundingRectWithSize_options_(

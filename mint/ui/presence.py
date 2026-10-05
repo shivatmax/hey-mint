@@ -125,6 +125,8 @@ class Presence:
             from mint.ui import clipboard_window
             if self._hotkeys.register(keys["clipboard"], clipboard_window.window.toggle):
                 print(f"  [shortcut: {hotkeys.display(keys['clipboard'])} opens the clipboard]", flush=True)
+        if keys.get("hide") and self.hud is not None and self._hotkeys.register(keys["hide"], self.hud.toggle_hidden):
+            print(f"  [shortcut: {hotkeys.display(keys['hide'])} hides or shows {prefs.name()}]", flush=True)
         self._register_dictation(keys)
 
     def _register_dictation(self, keys: dict) -> None:
@@ -170,6 +172,10 @@ class Presence:
         (voice lock, theme, position, the orb's looks, the notch, screen sharing) lives in Settings."""
         self._row(menu, "Microphone", "toggle:mic", checked=bool(prefs.get("mic")))
         self._row(menu, "Spoken replies", "toggle:voice", checked=bool(prefs.get("voice")))
+        hidden = bool(getattr(self.hud, "hidden", False))
+        key = (prefs.get("shortcuts") or {}).get("hide") or ""
+        self._row(menu, ("Show " if hidden else "Hide ") + prefs.name()
+                  + (f"  ({hotkeys.display(key)})" if key else ""), "hide")
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._row(menu, "Settings…", "open_settings", key=",")
 
@@ -253,6 +259,9 @@ class Presence:
         """Run a callback. UI actions stay on the main thread; the rest get a thread."""
         if action == "console" and self.hud is not None:
             AppHelper.callAfter(self._toggle_console)
+            return
+        if action == "hide" and self.hud is not None:
+            self.hud.toggle_hidden()                 # main thread inside
             return
         callback = self.callbacks.get(action)
         if callback:

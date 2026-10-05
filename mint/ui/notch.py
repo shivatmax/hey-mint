@@ -48,7 +48,7 @@ WING = 32              # how far the compact shape reaches out on each side of t
 EAR = 7                # the concave top corners, where the shape meets the screen edge
 MAX_W = 380            # the widest the dropped-down shape gets for words
 PAD_X = 16             # text inset from the shape's sides
-BTN, STEP = 26, 32     # hover controls: button size, spacing
+BTN, STEP = 30, 37     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
 INNER_OPEN = 0.8                     # resting on the small row's plain part opens the full notch after this
@@ -346,22 +346,25 @@ class Notch:
             layer.setOpacity_(0.0)
             box.layer().addSublayer_(layer)
         self.buttons = []
-        for symbol, tip, fn in (("mic.fill", "Microphone on/off", lambda: prefs.toggle("mic")),
+        for symbol, tip, fn in (("stop.fill", "Stop (same as saying “stop”)", lambda: self.hud._fire("stop")),
+                                ("mic.fill", "Microphone on/off", lambda: prefs.toggle("mic")),
                                 ("speaker.wave.2.fill", "Spoken replies on/off", lambda: prefs.toggle("voice")),
                                 ("bubble.left.and.bubble.right.fill", "Open the chat", self._chat),
                                 ("moon.zzz.fill", "Sleep", lambda: self.hud._fire("sleep")),
                                 ("eye.slash", "Visible in screen sharing", self._eye),
                                 ("sparkles", "Claude mode: your coding agents", self._agents_open),
+                                ("arrow.up.to.line", "Hide Mint: the notch stays, the little Mint and its icons go (⌃⌥H)",
+                                 lambda: self.hud.set_hidden(not self.hud.hidden)),
                                 ("slider.horizontal.3", "Settings", self._menu_from_button)):
             act = MintNotchAct.alloc().initWithFn_(fn)
             self._acts.append(act)
-            button = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 12), act, "fire:")
+            button = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 14), act, "fire:")
             button.setBordered_(False)
             button.setToolTip_(tip)
-            button.setContentTintColor_(_white(0.85))
+            button.setContentTintColor_(_white(0.96))
             button.setWantsLayer_(True)
             button.layer().setCornerRadius_(BTN / 2)
-            button.layer().setBackgroundColor_(_white(0.1).CGColor())
+            button.layer().setBackgroundColor_(_white(0.15).CGColor())
             button.setAlphaValue_(0.0)
             button.setHidden_(True)
             box.addSubview_(button)
@@ -624,7 +627,8 @@ class Notch:
         elif self._emoting(now):
             mode = "emote"                      # an expression: room under the little Mint for its extras
             width, height = compact_w + 48, self.nh + 46
-        elif prefs.get("notch_idle_face") is False and state in ("sleeping", "awake") and not activity:
+        elif (prefs.get("notch_idle_face") is False or getattr(hud, "hidden", False)) \
+                and state in ("sleeping", "awake", "paused") and not activity:
             mode = "plain"                      # just the notch until something happens
             width, height = self.nw + 8, self.nh    # a hair wider, so the black covers the hardware edge
         else:
@@ -645,7 +649,8 @@ class Notch:
         else:
             self._paused_since = 0.0
         stale = bool(self._paused_since) and now - self._paused_since > PAUSED_WINGS
-        wings = bool(music) and mode in ("compact", "plain", "music") and (mode == "music" or not (busy or stale))
+        wings = bool(music) and mode in ("compact", "plain", "music") and (mode == "music" or not (busy or stale)) \
+            and not (getattr(hud, "hidden", False) and mode == "plain")
         agent_wing = wings and mode != "music" and self._agent_wing()
         self._music_wings(music if wings else None, right=not agent_wing)
         self._home(mode, music)
@@ -1449,7 +1454,9 @@ class Notch:
         # (also when the row is simply not showing: folding the full notch from its Shelf or Search tab
         # leaves the buttons faded out, and the small row came up as an empty black shape)
         row = self._row()
-        entering = hover and (self.mode not in ("hover", "home") or self.buttons[0][1].alphaValue() < 0.01)
+        # (the first button SHOWN: Stop is first in the list but hidden while Mint is idle - checking it made the row
+        # restart its pop-in every frame, so the buttons flickered at almost no opacity)
+        entering = hover and bool(row) and (self.mode not in ("hover", "home") or row[0][1].alphaValue() < 0.01)
         start = WIN_W / 2 - (len(row) - 1) * STEP / 2
         row_y = WIN_H - height + 9
         if mode == "home":                      # in the Mint pane, under its status
@@ -1477,7 +1484,10 @@ class Notch:
             for symbol, button in self.buttons:      # the new button pops in with the others next time
                 if symbol == "sparkles":
                     button.setAlphaValue_(0.0)
-        return [(sym, b) for sym, b in self.buttons if sym != "sparkles" or agents]
+        busy = getattr(self.hud, "_state", "") in ("thinking", "working", "speaking") or \
+            getattr(self.hud, "_activity", None) is not None
+        return [(sym, b) for sym, b in self.buttons
+                if (sym != "sparkles" or agents) and (sym != "stop.fill" or busy)]
 
     def _reveal(self, view, frame) -> None:
         """Content arriving as the notch opens: a beat after the shape starts to grow it settles down a few
@@ -1549,14 +1559,12 @@ class Notch:
         AppKit.NSAnimationContext.endGrouping()
         layer = button.layer()
         if layer is not None and prefs.get("notch_playful") is not False:
-            # Each control pops up from small with a little spring, one after another.
-            layer.setAnchorPoint_(Quartz.CGPointMake(0.5, 0.5))
-            frame = button.frame()
-            layer.setPosition_(Quartz.CGPointMake(frame.origin.x + frame.size.width / 2,
-                                                  frame.origin.y + frame.size.height / 2))
-            pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.scale")
-            pop.setFromValue_(0.55)
-            pop.setToValue_(1.0)
+            # Each control drops in with a little spring, one after another. (Never move the layer's anchor:
+            # AppKit places a layer-backed button by its corner, and a centred anchor shifted every button
+            # half its size down and left, half outside the notch.)
+            pop = Quartz.CASpringAnimation.animationWithKeyPath_("transform.translation.y")
+            pop.setFromValue_(7.0)
+            pop.setToValue_(0.0)
             pop.setDamping_(12.0)
             pop.setStiffness_(320.0)
             pop.setMass_(0.7)
@@ -1582,16 +1590,24 @@ class Notch:
         except Exception:
             shown = False
         red = AppKit.NSColor.systemRedColor()
+        hidden = bool(getattr(self.hud, "hidden", False))
         for symbol, button in self.buttons:
             if symbol.startswith("mic"):
-                button.setImage_(gfx.symbol("mic.fill" if mic else "mic.slash.fill", 13))
-                button.setContentTintColor_(_white(0.85) if mic else red)
+                button.setImage_(gfx.symbol("mic.fill" if mic else "mic.slash.fill", 14))
+                button.setContentTintColor_(_white(0.96) if mic else red)
             elif symbol.startswith("speaker"):
-                button.setImage_(gfx.symbol("speaker.wave.2.fill" if voice else "speaker.slash.fill", 13))
-                button.setContentTintColor_(_white(0.85) if voice else red)
+                button.setImage_(gfx.symbol("speaker.wave.2.fill" if voice else "speaker.slash.fill", 14))
+                button.setContentTintColor_(_white(0.96) if voice else red)
             elif symbol.startswith("eye"):
-                button.setImage_(gfx.symbol("eye.fill" if shown else "eye.slash", 13))
-                button.setContentTintColor_(red if shown else _white(0.85))
+                button.setImage_(gfx.symbol("eye.fill" if shown else "eye.slash", 14))
+                button.setContentTintColor_(red if shown else _white(0.96))
+            elif symbol == "stop.fill":
+                button.setContentTintColor_(red)
+            elif symbol == "arrow.up.to.line":
+                # Hide <-> Show: the little Mint and the side icons, not the notch itself.
+                button.setImage_(gfx.symbol("arrow.down.to.line" if hidden else "arrow.up.to.line", 14))
+                button.setToolTip_("Show Mint beside the notch again" if hidden else
+                                   "Hide Mint: the notch stays, the little Mint and its icons go (⌃⌥H)")
 
     def _indicator(self, state, activity, now) -> None:
         """Right of the camera: bars while listening or speaking, a spinner while thinking,

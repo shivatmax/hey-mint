@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.6 (2026-10-05)
+
+- **Hide Mint:** a hide button in the notch's hover row (and the menu, "hide yourself", ⌃⌥H) takes the little Mint
+  and the icons beside the camera away - the notch still opens on hover - or fades the orb away. It comes back on
+  "Hey Mint", when it has something to say, with the Show button or ⌃⌥H (Settings ▸ Shortcuts).
+- **Notch buttons:** bigger (30 pt), bright white and fully opaque again - a pop-in that kept restarting had left
+  them flickering at almost no opacity and shifted half outside the notch.
+- **Stop button:** while Mint talks or works, ■ Stop shows first in the hover row - the same as saying "stop".
+
 ## 0.5.5 (2026-10-05)
 
 - **Listens only when you mean it.** After a reply Mint keeps listening for a follow-up only a few seconds

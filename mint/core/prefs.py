@@ -93,7 +93,8 @@ DEFAULTS: dict = {
     # modifier on its own: right_option, right_command, right_control, right_shift,
     # fn), tap it twice for hands-free; "dictate_toggle" starts/stops hands-free.
     "shortcuts": {"toggle": "cmd+j", "close": "", "talk": "ctrl+option+space", "dictate": "right_option",
-                  "dictate_toggle": "", "clipboard": "ctrl+option+v"},
+                  "dictate_toggle": "", "clipboard": "ctrl+option+v",
+                  "hide": "ctrl+option+h"},
     # Words dictation should spell exactly (names, jargon), comma-separated.
     "dictation_words": "",
     # Where screenshots go: "both" (a file and the clipboard), "clipboard" or "file".
