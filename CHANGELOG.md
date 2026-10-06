@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.10 (2026-10-06)
+
+- **No more silent or very late answers:** sometimes Gemini had your words (they showed on screen) but never heard
+  you finish - the voice lock had cut the audio mid-word, or noise kept the turn open - so Mint went to sleep, or
+  answered long after. Now, 1.2 s after your voice stops with nothing back, Mint tells the voice service you're
+  done; if there's still no answer 5 s later and you had just said "Hey Mint", it sends your words as text. Mint
+  stays listening meanwhile, and a transcript alone no longer counts as an answer for the stall watch.
+- **Always the quickest voice model:** Mint now uses a pool of Gemini Live models - 3.8 Live, 3.8 Live Extended
+  Flash Live and 3.8 Live Extended Thinking (its own quota; last, as it sometimes promises an action and doesn't
+  call the tool - such a promise with no action in 10 s goes to the next model) - found from your key once a day (newer ones join on their own;
+  transcribe/translate/old native-audio models are skipped). Each has its own input-tokens-a-minute limit, and every
+  turn re-sends the whole conversation (~23K input tokens), so one model fills up after a couple of quick turns and then
+  stalls. Mint counts each model's input tokens and moves on before the limit; a request with nothing back in 3 s moves
+  to the next model at once and is asked again; slow answers (median over 2 s) move at the next quiet moment.
+  A model that misbehaves rests 5 min, then 20 min, 1 h, 5 h, a day, a week; good answers and a clean day forgive
+  it, and Mint moves back to the best model when it's ready (`mint/voice/live_models.py`, voice-models.json;
+  settings `switch_when_slow`, `voice_models`, `live_tpm_limit`).
+
 ## 0.5.9 (2026-10-06)
 
 - **No more lost questions when the connection ends:** Google ends every voice connection after about an hour (and

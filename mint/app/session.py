@@ -10,6 +10,7 @@ Microphone routing is the heart of it:
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import base64
 
@@ -53,6 +54,8 @@ def _client() -> genai.Client:
 # Set by Mint.compact(): the compacted conversation the next session starts from.
 _carry_over = ""
 _STARTED = time.time()           # this run's first session: compaction reads the history from here on
+ANSWER_NUDGE = 1.2      # the user's voice stopped and nothing came back: close their audio for the voice service
+ANSWER_RESEND = 5.0     # and still nothing: send their words (said right after "Hey Mint") as text
 
 
 def _live_config() -> types.LiveConnectConfig:
@@ -703,6 +706,9 @@ class Mint:
             self._users_words = False
             self._voice_sent(time.monotonic())        # the user's verified words just finished
         elif event.startswith("closed"):
+            if getattr(self, "_users_words", False) and self.session is not None and self.loop is not None:
+                # The voice lock stopped the audio mid-utterance: Gemini never hears the end of it.
+                self._watch_answer(time.monotonic())
             self._users_words = False
             self._window.other_voice()
             now = time.monotonic()
@@ -715,10 +721,179 @@ class Mint:
         if self.loop is None or self.session is None:
             return
         self._spoke_at = now
+        self._asked_at = now
+        self._watch_answer(now)
+        self._watch_stall(now)
         if getattr(self, "_voice_watch_task", None) is None or self._voice_watch_task.done():
             self._voice_watch_task = self.loop.create_task(self._voice_watch())
 
-    async def _voice_watch(self, wait: float = 10.0) -> None:
+    def _note_latency(self, now: float) -> None:
+        """The model began answering: how long after the user's request (their voice ending, or the typed
+        text). 6 Oct evening: gemini-3.8-live took 1-4 s with 15-17 s stalls (even with a bare config) while
+        gemini-3.1-flash-live answered in 0.55-0.85 s every time. Slow several times running: use the fast one."""
+        asked = getattr(self, "_asked_at", 0.0)
+        if not asked:
+            return
+        self._asked_at = 0.0
+        took = max(0.0, now - asked)
+        recent = getattr(self, "_latencies", None)
+        if recent is None or getattr(self, "_latency_model", "") != config.MODEL:
+            recent = self._latencies = []
+            self._latency_model = config.MODEL
+        recent.append(took)
+        del recent[:-6]
+        log.info("answer began %.2f s after the request (%s)", took, config.MODEL)
+        from mint.voice import live_models
+        if took <= SLOW_MEDIAN:
+            live_models.good(config.MODEL)
+        why = _too_slow(recent)
+        if why:
+            self._move_model(why, strike=True)
+
+    def _move_model(self, why: str, strike: bool = True, at_once: bool = False) -> None:
+        """This model is misbehaving (strike) or needs a rest: use the next good one (live_models)."""
+        from mint.voice import live_models
+        from mint.core import prefs
+        if self.loop is None or prefs.get("switch_when_slow") is False or getattr(self, "_speed_switching", False):
+            return
+        if strike:
+            live_models.strike(config.MODEL, why)
+        if live_models.choose(config.MODEL) == config.MODEL:
+            return                                  # nowhere better to go
+        self._speed_switching = True
+        self.loop.create_task(self._switch_model(why, at_once=at_once))
+
+    async def _promise_watch(self, request: str, said_at: float, epoch: int) -> None:
+        """6 Oct (tested by the parallel-tasks session): gemini-3.8-live-extended-thinking said "I'll start that
+        research", ended its turn as still in progress - and in 2 of 3 runs never made the tool call. A promise
+        with no tool call in PROMISE_WAIT s: that model is benched and the request goes to the next one."""
+        try:
+            await asyncio.sleep(PROMISE_WAIT)
+            if (getattr(self, "_tool_call_at", 0.0) > said_at or epoch != self._stop_epoch or self._busy
+                    or self.session is None):
+                return
+            from mint.voice import live_models
+            self._print(f"[{live_models.label(config.MODEL)} said it would do it but didn't start - asking the "
+                        f"next model: {request[:80]}]")
+            live_models.strike(config.MODEL, "promised an action, made no tool call")
+            self._unanswered = request
+            self._move_model("promised an action, made no tool call", strike=False, at_once=True)
+        except Exception:
+            log.debug("the promise watch failed", exc_info=True)
+
+    def _watch_stall(self, asked: float) -> None:
+        if self.loop is not None and asked:
+            self.loop.create_task(self._stall_watch(asked))
+
+    async def _stall_watch(self, asked: float) -> None:
+        """A request with nothing at all back after SLOW_STALL seconds (23:18 on 6 Oct: 30 s of silence from
+        gemini-3.8-live right after connecting): the user is waiting now. Move to the next model at once and
+        ask it the same thing."""
+        try:
+            await asyncio.sleep(SLOW_STALL)
+            if self._asked_at != asked or self.session is None or self._busy:
+                return
+            if not self._unanswered:
+                words = self._heard_words()
+                if words and getattr(self, "_after_wake", False):
+                    self._unanswered = words           # asked again on the new connection (run)
+            self._move_model(f"no answer in {SLOW_STALL:g} s", strike=True, at_once=True)
+        except Exception:
+            log.debug("the stall watch failed", exc_info=True)
+
+    async def _switch_model(self, why: str, at_once: bool = False) -> None:
+        """Reconnect on the model live_models chooses - at a quiet moment (never mid-reply), or at once when the
+        user is waiting on a request that got nothing back. A fresh session: the prompt carries the last turns
+        and memory, and an unanswered request is sent again (run)."""
+        from mint.voice import live_models
+        try:
+            if not at_once:
+                await self._quiet_for(1.5, time.monotonic() + 120)
+            current, session = config.MODEL, self.session
+            target = live_models.choose(current)
+            if target == current or session is None:
+                return
+            self._print(f"[{live_models.label(current)}: {why} - switching to {live_models.label(target)}]")
+            log.info("switching voice model %s -> %s (%s)", current, target, why)
+            config.MODEL = target
+            self._latencies = []
+            self._resume_handle = None             # a resumption handle belongs to the other model
+            self._restarting = True
+            await session.close()
+        except Exception:
+            log.debug("switching the voice model failed", exc_info=True)
+        finally:
+            self._speed_switching = False
+
+    async def _prefer_watch(self) -> None:
+        """Once a better model is off the bench, move back to it - while Mint is asleep, never mid-conversation."""
+        from mint.voice import live_models
+        live_models.discover_later()                 # which Live models this key has (daily)
+        looked = time.monotonic()
+        while True:
+            await asyncio.sleep(60)
+            if time.monotonic() - looked > 3600:
+                live_models.discover_later()
+                looked = time.monotonic()
+            try:
+                better = live_models.better(config.MODEL)
+            except Exception:
+                log.debug("checking the voice models failed", exc_info=True)
+                continue
+            if (better and self.session is not None and self.asleep and not self._busy
+                    and not getattr(self, "_speed_switching", False)):
+                self._speed_switching = True
+                await self._switch_model(f"{live_models.label(better)} is ready again", at_once=True)
+
+    def _heard_words(self) -> str:
+        """The user's words in this turn not yet answered or dropped ('' if none)."""
+        if self._dropping or self._suppress_turn:
+            return ""
+        return " ".join((self._heard or "")[getattr(self, "_seg", 0):].split())
+
+    def _answered(self) -> bool:
+        """The model has begun answering this turn (sound, words, a tool call), or the words were judged."""
+        return (getattr(self, "_model_active_at", 0.0) >= getattr(self, "_turn_heard_at", math.inf)
+                or self._verdict is not None)
+
+    def _watch_answer(self, spoke: float) -> None:
+        task = getattr(self, "_answer_task", None)
+        if task is not None and not task.done():
+            task.cancel()                       # newer words: watch from them
+        self._answer_task = self.loop.create_task(self._voice_answer_watch(spoke))
+
+    def _answer_pending(self) -> bool:
+        task = getattr(self, "_answer_task", None)
+        return task is not None and not task.done()
+
+    async def _voice_answer_watch(self, spoke: float) -> None:
+        """6 Oct: "Tell me what skills you have" - the transcript showed, then nothing; Mint slept, or answered
+        much later. Gemini had the words but never heard them end (the voice lock had cut the audio mid-word, or
+        noise kept its voice detection open), so it waited. Close the user's audio soon after their voice stops;
+        still nothing, and they had just said "Hey Mint", send their words as text. Typed turns, a judged turn and
+        any answer at all end the watch."""
+        try:
+            await asyncio.sleep(ANSWER_NUDGE)
+            if self._answered() or not self._heard_words() or self.session is None or self._typed_turn:
+                return
+            log.info("no answer %.1f s after the user's words: closing their audio", ANSWER_NUDGE)
+            self._print("[no answer yet - telling the voice service you're done]")
+            await self._close_user_audio()
+            await asyncio.sleep(ANSWER_RESEND)
+            words = self._heard_words()
+            if self._answered() or not words or self.asleep or self._typed_turn:
+                return
+            if getattr(self, "_after_wake", False):
+                self._print(f"[still no answer - sending your words as text: {words[:80]}]")
+                asked = getattr(self, "_asked_at", 0.0)
+                await self.inject_text(words)
+                self._asked_at = asked or self._asked_at   # the wait is timed from the spoken words
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.debug("the answer watch failed", exc_info=True)
+
+    async def _voice_watch(self, wait: float = 14.0) -> None:
         """Spoken words that get nothing at all back - not even their transcript - within `wait` seconds: the
         session is deaf (5 Oct: gemini-3.8-live failing server-side; "Hey Mint" and a whole request went
         unanswered and Mint just fell asleep). Reconnect fresh, move to the fallback model if it happens again,
@@ -729,20 +904,26 @@ class Mint:
             if self._spoke_at > spoke:
                 continue                       # they said more since: watch from the newest words
             break
-        if self._server_at > spoke or self.session is None or self._busy or self.audio.playing:
+        if (getattr(self, "_model_active_at", 0.0) > spoke or self.session is None or self._busy
+                or self.audio.playing):
             self._deaf_voice = 0
             return
         self._deaf_voice = getattr(self, "_deaf_voice", 0) + 1
-        primary = config.MODEL
-        if self._deaf_voice >= 1 and config.MODEL != config.FALLBACK_MODEL:
-            config.MODEL = config.FALLBACK_MODEL
-            self._primary_task = asyncio.create_task(self._return_to_primary(primary))
-            self._print(f"[{primary} is not answering; using {config.FALLBACK_MODEL} for now]")
-        self._print(f"[no answer to your voice in {wait:.0f} s: reconnecting - say it again]")
-        try:
-            self.ui.assistant_said("Sorry, the voice service didn't answer. Say that again?")
-        except Exception:
-            pass
+        from mint.voice import live_models
+        live_models.strike(config.MODEL, f"no answer to the user's voice in {wait:.0f} s")
+        primary, config.MODEL = config.MODEL, live_models.choose(config.MODEL)
+        if config.MODEL != primary:
+            self._print(f"[{live_models.label(primary)} is not answering; using {live_models.label(config.MODEL)}]")
+        words = self._heard_words()
+        if words and getattr(self, "_after_wake", False):
+            self._unanswered = words           # sent again on the new connection (run)
+            self._print(f"[no answer to your voice in {wait:.0f} s: reconnecting - sending your words again]")
+        else:
+            self._print(f"[no answer to your voice in {wait:.0f} s: reconnecting - say it again]")
+            try:
+                self.ui.assistant_said("Sorry, the voice service didn't answer. Say that again?")
+            except Exception:
+                pass
         self._resume_handle = None
         try:
             await self.session.close()
@@ -987,8 +1168,8 @@ class Mint:
             if playing:
                 self._last_voice = now
             # Words waiting for their verdict (bounded: a turn the model never answers ends too).
-            deciding = bool(self._held) or (self._verdict_pending()
-                                            and now - self._last_chunk_at < listening.JUDGE_WAIT)
+            deciding = bool(self._held) or self._answer_pending() or (
+                self._verdict_pending() and now - self._last_chunk_at < listening.JUDGE_WAIT)
             idle_for = now - max(self._server_at, self._tools_at)
             # A planned task with steps left is still work between tool batches (the model thinking, the
             # autopilot nudging it on): on 5 Oct Mint fell asleep mid-task, 8 s into "install an extension".
@@ -1057,6 +1238,8 @@ class Mint:
         self._filler_checked = True
         self._halted = False                  # a new request: tools may run again
         self._print(f"[typed: {text[:120]}]")
+        self._asked_at = time.monotonic()
+        self._typed_request = text
         from mint.app import telegram
         telegram.on_event("request", {"text": text})    # its own request from the phone, or one typed here
         # Close any open stretch of microphone audio first: in testing, a typed
@@ -1069,6 +1252,7 @@ class Mint:
         self._unanswered = text
         if self.loop is not None:
             self.loop.create_task(self._answer_watch(text, time.monotonic(), self._stop_epoch))
+            self._watch_stall(self._asked_at)
         from mint.app import instant
         from mint.app import meet_call
         if meet_call.wants_end(text):
@@ -1220,6 +1404,11 @@ class Mint:
             from mint.core import usage
             usage.live(config.MODEL, meta)
             self._watch_context(meta)        # near the sliding window: compact at a quiet moment
+            from mint.voice import live_models
+            spent = getattr(meta, "prompt_token_count", None) or getattr(meta, "total_token_count", 0) or 0
+            if live_models.tokens(config.MODEL, spent):
+                # Near this model's input-tokens-a-minute limit (where it starts stalling): another model for a bit.
+                self._move_model("near its per-minute token limit", strike=False)
         if update := getattr(response, "session_resumption_update", None):
             if getattr(update, "resumable", False) and getattr(update, "new_handle", None):
                 self._resume_handle = update.new_handle
@@ -1233,6 +1422,7 @@ class Mint:
         if response.data or response.tool_call is not None or (
                 response.server_content is not None and response.server_content.output_transcription):
             self._model_active_at = time.monotonic()      # for the autopilot's "quiet for 2 s"
+            self._note_latency(self._model_active_at)
             # The model is answering: the user's words are in by now, so this
             # is when to ask whether they were meant for Mint at all.
             self._start_addressee_check()
@@ -1304,6 +1494,13 @@ class Mint:
                         memory.add("mint", self._said)
                         self._last_said = self._said
                 finished_said = "" if self._suppress_turn else self._said
+                request = " ".join((self._heard or getattr(self, "_typed_request", "") or "").split())
+                self._typed_request = ""
+                if (not self._suppress_turn and request and self.loop is not None
+                        and "IN_PROGRESS" in str(getattr(server, "interaction_status", "") or "")):
+                    # The model said it is on it ("I'll start that research") and ended its turn: a tool call
+                    # should follow. Watch that one does (_promise_watch).
+                    self.loop.create_task(self._promise_watch(request, time.monotonic(), self._stop_epoch))
                 self._check_empty_done(finished_said)
                 self._check_refused_job(finished_said)
                 if (not self._suppress_turn or self._verdict == "act") and \
@@ -1330,6 +1527,7 @@ class Mint:
             asyncio.create_task(self._answer_all(response.tool_call, "STOPPED: the user said stop. Do nothing more, "
                                                                      "don't retry: just say 'Stopped.' and wait."))
         elif response.tool_call is not None:
+            self._tool_call_at = time.monotonic()
             self._mute = False               # the model moved on to work: its words are about that
             # In the background, so this loop keeps reading the server while a
             # tool runs: the user's words (and "stop") are heard mid-task.
@@ -1386,6 +1584,8 @@ class Mint:
             self._stop_armed = True
             self._begin_user_turn()
             new_turn = True
+            self._turn_heard_at = now                 # an answer after this counts (see _voice_answer_watch)
+            self._after_wake = bool(self._woke_at and now - self._woke_at < 30)
             if self._woke_at and time.monotonic() - self._woke_at < 30:
                 # The first words after the wake word: a scrap of "Hey Mint"
                 # the phrase cut missed ("payment"). The transcript can come
@@ -1673,6 +1873,7 @@ class Mint:
         self._stop_epoch += 1
         self._halted = True
         self._unanswered = ""                 # a stopped request is not sent again after a reconnect
+        self._asked_at = 0.0                  # nor waited on: its silence is not the model being slow
         from mint.app import autopilot
         from mint.app import control
         from mint.tools import desktop
@@ -2594,7 +2795,16 @@ class Mint:
             self._print("[Gemini key added - connecting]")
         while True:
             try:
+                from mint.voice import live_models
+                chosen = live_models.choose(config.MODEL)
+                if chosen != config.MODEL:
+                    # The model in use is benched (stalls, slow answers, errors): the next good one.
+                    self._print(f"[voice model: {live_models.label(chosen)} - "
+                                f"{live_models.label(config.MODEL)} is resting]")
+                    config.MODEL = chosen
+                    self._resume_handle = None    # a resumption handle belongs to its own model
                 settings = _live_config()
+                live_models.tune(settings, config.MODEL)
                 client = _client()            # the key can change between connections (gemini_keys.py)
                 if self._resume_handle:
                     settings.session_resumption = types.SessionResumptionConfig(
@@ -2633,6 +2843,7 @@ class Mint:
                             group.create_task(self._listen())
                         if self.hands_free:
                             group.create_task(self._idle_watch())
+                        group.create_task(self._prefer_watch())
                         if not self.text_mode:
                             group.create_task(self._mic_share_watch())
                         group.create_task(self._read_terminal())
@@ -2679,11 +2890,16 @@ class Mint:
                   "Run ./set-key.sh with a working key.\n", file=sys.stderr)
             raise SystemExit(2)
         lowered = message.lower()
-        if ("quota" in lowered or "resource_exhausted" in lowered) and config.MODEL != config.FALLBACK_MODEL:
-            print(f"  [{config.MODEL} is out of quota; switching to {config.FALLBACK_MODEL}]", flush=True)
-            config.MODEL = config.FALLBACK_MODEL
-            self._resume_handle = None         # a resumption handle belongs to the other model
-            return
+        from mint.voice import live_models
+        if "quota" in lowered or "resource_exhausted" in lowered or "429" in lowered:
+            live_models.strike(config.MODEL, "out of quota")
+            nxt = live_models.choose(config.MODEL)
+            if nxt != config.MODEL:
+                print(f"  [{live_models.label(config.MODEL)} is out of quota; switching to "
+                      f"{live_models.label(nxt)}]", flush=True)
+                config.MODEL = nxt
+                self._resume_handle = None     # a resumption handle belongs to the other model
+                return
         # Seen twice in one day on gemini-3.8-live: every reconnect answered
         # "1011 Internal error" until Mint gave up and quit; the relaunch,
         # which has no resumption handle, connected at once. So: the second
@@ -2696,14 +2912,24 @@ class Mint:
         transient = any(word in lowered for word in (
             "1011", "internal", "unavailable", "timed out", "handshake", "503", "500", "overloaded", "1006"))
         # 5 Oct: gemini-3.8-live answered every turn - even a bare config with no tools - with "1011 Internal
-        # error" for minutes, and voice requests vanished. After one fresh-session retry, use the fallback.
-        if attempt >= 2 and transient and config.MODEL != config.FALLBACK_MODEL:
-            print(f"  [{config.MODEL} is failing ({_short_error(message)}); using {config.FALLBACK_MODEL} "
-                  "for now, back when it recovers]", flush=True)
-            primary, config.MODEL = config.MODEL, config.FALLBACK_MODEL
-            self._resume_handle = None
-            self._primary_task = asyncio.create_task(self._return_to_primary(primary))
-            return
+        # error" for minutes, and voice requests vanished. After one fresh-session retry, use the next model
+        # (benched longer each time it happens; live_models).
+        refused = any(word in lowered for word in ("not found", "not supported", "1007", "invalid argument",
+                                                     "thinking level"))
+        if refused and len(live_models.pool()) > 1:
+            # This model won't take Mint's session at all (a new model found by live_models.discover, or one
+            # Google retired): set aside for a week, and the next model.
+            live_models.retire(config.MODEL, _short_error(message))
+        elif attempt >= 2 and transient:
+            live_models.strike(config.MODEL, _short_error(message))
+        if attempt >= 2 and transient or refused:
+            nxt = live_models.choose(config.MODEL)
+            if nxt != config.MODEL:
+                print(f"  [{live_models.label(config.MODEL)} is failing ({_short_error(message)}); using "
+                      f"{live_models.label(nxt)} for now, back when it recovers]", flush=True)
+                config.MODEL = nxt
+                self._resume_handle = None
+                return
         if attempt == 7 or (attempt > 6 and not transient):
             traceback.print_exception(error)
         if attempt > 6 and not transient:
@@ -2745,25 +2971,6 @@ class Mint:
             self.ui.action("Reconnecting…")
         except Exception:
             log.debug("outage caption failed", exc_info=True)
-
-    async def _return_to_primary(self, primary: str) -> None:
-        """After an outage moved Mint to the fallback model: every ten minutes,
-        while Mint is asleep (never mid-conversation), try the main model again.
-        If it is still failing, _backoff moves back here on its own."""
-        await asyncio.sleep(600)
-        while config.MODEL == config.FALLBACK_MODEL:
-            session = self.session
-            if session is not None and self.asleep and not getattr(self, "_busy", False):
-                print(f"  [trying {primary} again]", flush=True)
-                config.MODEL = primary
-                self._resume_handle = None
-                self._restarting = True
-                try:
-                    await session.close()
-                except Exception:
-                    log.debug("closing the session to return to the main model failed", exc_info=True)
-                return
-            await asyncio.sleep(60)
 
     # --- Mint Ear: hand-over and unloading (mint/app/ear.py) ------------------------
 
@@ -3064,6 +3271,22 @@ def _seconds(value) -> float:
         return float(str(value).strip().rstrip("s"))
     except (TypeError, ValueError):
         return 60.0
+
+
+SLOW_MEDIAN = 2.0      # seconds to the first sound or tool call, the median of the last 3 requests
+SLOW_STALL = 3.0       # nothing at all back this long after a request: another model, at once
+PROMISE_WAIT = 10.0    # "I'll start that" with the turn left in progress, and no tool call this long after
+
+
+def _too_slow(recent: list[float]) -> str:
+    """Why the model is too slow to keep ('' if it isn't)."""
+    if len(recent) >= 3:
+        last = sorted(recent[-3:])[1]
+        if last > SLOW_MEDIAN:
+            return f"answers took {last:.1f} s"
+    if sum(1 for took in recent if took > SLOW_STALL) >= 2:
+        return f"{sum(1 for took in recent if took > SLOW_STALL)} answers took over {SLOW_STALL:g} s"
+    return ""
 
 
 def _routine_drop(message: str) -> bool:

@@ -121,6 +121,11 @@ DEFAULTS: dict = {
     # After Mint is done, it listens this many seconds for a follow-up, then needs the wake word
     # again (listening.py). 0 = the wake word every time.
     "follow_up_seconds": 6,
+    # A voice model that stalls, answers slowly or fails: use the next one for a while (live_models.py).
+    "switch_when_slow": True,
+    # The voice models to use, best first ([] = Mint's pool), and each one's tokens-a-minute limit.
+    "voice_models": [],
+    "live_tpm_limit": 65000,
     # Extra words and names for Mint to expect (see vocab.py).
     "vocabulary": [],
     # The welcome window (onboarding.py) has been seen, finished or skipped.

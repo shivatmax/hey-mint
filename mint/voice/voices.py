@@ -66,6 +66,8 @@ async def _record(voice: str, style: str) -> bytes:
         system_instruction=types.Content(parts=[types.Part(text=instruction)], role="user"),
         speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(
             prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))))
+    from mint.voice import live_models
+    live_models.tune(settings, config.MODEL)       # the thinking model needs a thinking level
     pcm = b""
     async with _client().aio.live.connect(model=config.MODEL, config=settings) as session:
         await session.send_realtime_input(text=SAMPLE)
