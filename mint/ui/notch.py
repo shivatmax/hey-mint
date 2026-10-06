@@ -226,6 +226,15 @@ class MintNotchTicker(AppKit.NSObject):
             log.exception("notch tick failed")
 
 
+def _in_call() -> bool:
+    try:
+        from mint.app import meet_call
+        call = meet_call.current()
+        return call is not None and call.live
+    except Exception:
+        return False
+
+
 def _white(alpha=1.0):
     return AppKit.NSColor.colorWithWhite_alpha_(1.0, alpha)
 
@@ -1631,6 +1640,8 @@ class Notch:
                 agent = None
             if agent:
                 kind = f"agent:{agent['state']}:{agent['app']}"   # Mint is idle: the wing tells how the agent is doing
+        if kind in ("bars", "sleep", "mic-off") and state != "speaking" and _in_call():
+            kind = "meet"                           # on a Google Meet call with the user: a red camera, beating
         accent = gfx.accent()
         if kind != self._ind:
             old = self._ind
@@ -1650,6 +1661,8 @@ class Notch:
                 glyph, tint = "mic.slash.fill", (1.0, 0.3, 0.3)
             elif kind == "sleep":
                 glyph, tint = "moon.zzz.fill", (0.75, 0.78, 0.9)
+            elif kind == "meet":
+                glyph, tint = "video.fill", (1.0, 0.36, 0.36)
             elif kind.startswith("agent:"):
                 _, a_state, a_app = kind.split(":")
                 from mint.ui.notch_agents import APP_RGB, STATE_RGB
@@ -1682,6 +1695,13 @@ class Notch:
         waits for you, a springy pop when it is done (or a shake when it failed)."""
         glyph = self.glyph
         glyph.removeAnimationForKey_("agent")
+        if kind == "meet":
+            beat = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+            beat.setValues_([1.0, 0.45, 1.0])
+            beat.setDuration_(1.8)
+            beat.setRepeatCount_(float("inf"))
+            glyph.addAnimation_forKey_(beat, "agent")
+            return
         if not kind.startswith("agent:"):
             return
         a_state = kind.split(":")[1]

@@ -1214,6 +1214,31 @@ def notch_guard_scene(p):
     time.sleep(1.8)
 
 
+@scene("notch-meet", 12)
+def notch_meet_scene(p):
+    """A Google Meet call with Mint: "start a Google Meet", then the notch's red camera while the call is on; the
+    user, on their phone in the call, asks something and Mint answers into the call."""
+    import types
+    from mint.app import meet_call
+    time.sleep(1.0)
+    say(p, "user_said", "start a Google Meet", gap=0.12)
+    p.set_state("thinking")
+    time.sleep(1.0)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Starting the Google Meet. The link is on Telegram.", gap=0.1)
+    time.sleep(1.0)
+    meet_call._call = types.SimpleNamespace(live=True, over=threading.Event())
+    p.set_state("awake")
+    time.sleep(2.6)
+    say(p, "user_said", "what's on my screen right now?", gap=0.1)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Your editor, with the release notes open.", gap=0.1)
+    time.sleep(1.4)
+    p.set_state("awake")
+    time.sleep(2.4)
+    meet_call._call = None
+
+
 def _notch_demo():
     """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
     never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
@@ -1288,7 +1313,7 @@ def tour(p):
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_agents_scene, notch_guard_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_agents_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,

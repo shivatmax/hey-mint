@@ -191,6 +191,9 @@ class _NoUI:
 
 
 class Mint:
+    meet = None                     # the Google Meet call going on (meet_call.Call), set by meet_begin
+    live = None                     # the running session (set in run): gc scans from threads crashed Mint (6 Oct)
+
     def __init__(self, text_mode: bool = False, hands_free: bool = False,
                  wake_word: str = "hey_mint", wake_threshold: float = 0.5,
                  sleep_after: float = 12.0, half_duplex: bool | None = None, ui=None) -> None:
@@ -229,6 +232,9 @@ class Mint:
         self.audio_in: asyncio.Queue = asyncio.Queue()
         self.out_queue: asyncio.Queue = asyncio.Queue(maxsize=40)
         self._resume_handle: str | None = None
+        # A Google Meet call (meet_call.Call) while one is on: the call is the microphone and the speaker.
+        self.meet = None
+        self._meet_q: asyncio.Queue = asyncio.Queue(maxsize=200)
 
         # --- hands-free state ----------------------------------------------
         self.hands_free = hands_free
@@ -437,7 +443,7 @@ class Mint:
         self._state("awake")
 
     def go_to_sleep(self, reason: str = "quiet") -> None:
-        if self.asleep or not self.hands_free:
+        if self.asleep or not self.hands_free or self.meet is not None:
             return
         self.asleep = True
         self._last_active = time.monotonic()
@@ -500,6 +506,8 @@ class Mint:
         free_since = 0.0
         while True:
             await asyncio.sleep(1.5)
+            if self.meet is not None:
+                continue                          # Mint's own Google Meet call: its audio is Mint's already
             if not prefs.get("share_mic"):
                 if self._mic_lent_to:
                     self._take_mic_back()
@@ -572,6 +580,8 @@ class Mint:
     # --- microphone routing ----------------------------------------------------
 
     async def _on_audio(self, pcm: bytes, from_ear: bool = False) -> None:
+        if self.meet is not None:
+            return                                # on a Google Meet call, the call is the microphone (_on_meet_audio)
         if self._ear_feeding and not from_ear:
             # Mint Ear is still handing over what it heard while this app
             # started; our own microphone takes over once that has caught up.
@@ -800,6 +810,149 @@ class Mint:
         """Every chunk of Mint's voice, as it is played. Drives the orb."""
         from mint.voice.wake import rms
         self.ui.set_level(rms(pcm))
+        if self.meet is not None:
+            self.meet.speak(pcm)                  # to the call (the Mac's speaker plays it silently, for the timing)
+
+    # --- Google Meet calls (meet_call.py) -------------------------------------------------------------------
+
+    def meet_begin(self, call) -> None:
+        """Any thread: a call is on. Mint hears the call instead of the Mac's mic and talks into it."""
+        if self.loop is not None:
+            self.loop.call_soon_threadsafe(self._meet_begin, call)
+
+    def _meet_begin(self, call) -> None:
+        self.meet = call
+        self._flush_playback()
+        if self._gate is not None:
+            self._gate.cancel()
+        silent = getattr(self.audio, "set_silent", None)
+        if silent is not None:
+            silent(True)
+        self.audio.muted = False
+        # The Mac's microphone may be off (Mint "paused"): the call is the microphone now, so Mint listens to it for
+        # as long as it lasts (6 Oct: paused, it dropped everything said in the call). The pause comes back after.
+        self._meet_was_paused = self.paused
+        if self.paused:
+            self.set_paused(False)
+        self._print("[in a Google Meet call: listening to the call, talking into it]")
+        if self.asleep:
+            self.loop.create_task(self.wake_up("meet"))
+
+    def meet_end(self) -> None:
+        if self.loop is not None:
+            self.loop.call_soon_threadsafe(self._meet_end)
+
+    def _meet_end(self) -> None:
+        if self.meet is None:
+            return
+        self._flush_playback()
+        self.meet = None
+        silent = getattr(self.audio, "set_silent", None)
+        if silent is not None:
+            silent(False)
+        while not self._meet_q.empty():
+            self._meet_q.get_nowait()
+        self._print("[the Google Meet call is over: back to the Mac's microphone]")
+        if getattr(self, "_meet_was_paused", False):
+            self._meet_was_paused = False
+            self.set_paused(True)
+        self._last_voice = time.monotonic()
+        self._window.finished(self._last_voice)
+
+    def meet_audio(self, pcm: bytes) -> None:
+        """Any thread: 16 kHz audio from the call."""
+        if self.loop is not None:
+            self.loop.call_soon_threadsafe(self._meet_offer, pcm)
+
+    def _meet_offer(self, pcm: bytes) -> None:
+        try:
+            self._meet_q.put_nowait(pcm)
+        except asyncio.QueueFull:
+            pass
+
+    async def _meet_feed(self) -> None:
+        while True:
+            pcm = await self._meet_q.get()
+            if self.meet is not None:
+                await self._on_meet_audio(pcm)
+
+    async def _on_meet_audio(self, pcm: bytes) -> None:
+        """The call's audio: only the user is in it, so no wake word, no voice lock, and Mint may be talked to while
+        it works (Meet sends the others' audio, never Mint's own, so there's no echo)."""
+        if self.paused:
+            return
+        if self.asleep:
+            await self.wake_up("meet")
+        from mint.voice.wake import rms
+        level = rms(pcm)
+        now = time.monotonic()
+        if not self.audio.playing:
+            self.ui.set_level(level)
+        if level > 0.012:
+            self._last_voice = now
+        self._window.sound(now, level > 0.012)
+        try:
+            self.out_queue.put_nowait(pcm)
+        except asyncio.QueueFull:
+            log.debug("audio queue full; dropping a call frame")
+
+    def _meet_request(self, spoken: bool = False) -> None:
+        """On the loop: start the Google Meet the user asked for; the model only says so, then tells the outcome.
+        Once Mint is in the call its voice is the call's, so success is told by a notification and Telegram
+        (meet_call.start) rather than spoken here."""
+        from mint.app import meet_call
+        if spoken:
+            self._flush_playback()                      # whatever it began to say from an earlier attempt
+            self.meet_note(meet_call.START_NOTE)
+
+        async def run() -> None:
+            said = await asyncio.to_thread(meet_call.start)
+            call = meet_call.current()
+            self._print(f"[google_meet] {said}")
+            if call is None or not call.live:
+                for _ in range(40):              # after "Starting the Google Meet." is said: a note mid-turn was lost
+                    if not self._turn_open and not self.audio.playing and self.audio_in.empty():
+                        break
+                    await asyncio.sleep(0.25)
+                self.meet_note(meet_call.started_note(said))
+        self.loop.create_task(run())
+
+    def meet_chat(self, text: str) -> None:
+        """Any thread: a message in the call's chat - a request, as if typed. The answer goes back to the chat too
+        (and is said in the call)."""
+        if self.loop is None:
+            return
+
+        def go() -> None:
+            self._chat_reply, self._chat_until = [], time.monotonic() + 120
+            self.loop.create_task(self.inject_text(text))
+        self.loop.call_soon_threadsafe(go)
+
+    def _chat_flush(self) -> None:
+        """At the end of a model turn: what Mint said, to the call's chat (meet_chat)."""
+        words = "".join(getattr(self, "_chat_reply", None) or []).strip()
+        if getattr(self, "_chat_reply", None) is None:
+            return
+        if time.monotonic() > getattr(self, "_chat_until", 0):
+            self._chat_reply = None
+            return
+        self._chat_reply = []
+        call = self.meet
+        if words and call is not None:
+            threading.Thread(target=call.chat_send, args=(words,), name="meet-chat", daemon=True).start()
+
+    def meet_note(self, text: str) -> None:
+        """Any thread: tell the model something about the call (it answers it, like a request)."""
+        if self.loop is None:
+            return
+
+        def send() -> None:
+            if self.session is None:
+                return
+            self._turn_open = True
+            self._window.handling()
+            self.loop.create_task(self.session.send_realtime_input(text=text))
+        self.loop.call_soon_threadsafe(send)
 
     async def _idle_watch(self) -> None:
         """Fall asleep once the listening window has passed (listening.Window): a few seconds after
@@ -896,6 +1049,13 @@ class Mint:
         self._unanswered = text
         if self.loop is not None:
             self.loop.create_task(self._answer_watch(text, time.monotonic(), self._stop_epoch))
+        from mint.app import instant
+        from mint.app import meet_call
+        if meet_call.wants_call(text):
+            # Started here, not left to the model (it once answered from an earlier failed attempt).
+            instant.ran("google_meet", {"action": "start"}, text)
+            self._meet_request()
+            text = f"{text}\n{meet_call.START_NOTE}"
         session = self.session
         try:
             # Realtime text is how the 3.x Live models take a typed turn
@@ -1053,11 +1213,15 @@ class Mint:
                 else:
                     self._said += server.output_transcription.text
                     self.ui.assistant_said(server.output_transcription.text)
+                    if getattr(self, "_chat_reply", None) is not None:
+                        self._chat_reply.append(server.output_transcription.text)
 
             if server.interrupted:
                 self._flush_playback()
 
             if server.turn_complete:
+                if self.meet is not None:
+                    self._chat_flush()
                 if self._verdict_pending() and self._heard[self._seg:].strip():
                     self._start_addressee_check()
                     await self._await_verdict(3.5)
@@ -1453,6 +1617,8 @@ class Mint:
         self._kind, self._next_kind = self._next_kind, "follow"
         if self.asleep and self._kind != "asked":
             self._kind = "follow"             # words that came after the window closed: no wake behind them
+        if self.meet is not None:
+            self._kind = "call"               # a call with Mint: everything said in it is for Mint (listening.quick)
         if not prefs.get("addressee_check"):
             self._decide("act", "rule")       # Settings: "Ignore talk meant for others" is off
 
@@ -1467,6 +1633,8 @@ class Mint:
         self._stop_armed = True
         self._filler_checked = True
         self._kind, self._next_kind = self._next_kind, "follow"
+        if self.meet is not None:
+            self._kind = "call"
         from mint.core import prefs
         if not prefs.get("addressee_check"):
             self._decide("act", "rule")
@@ -1522,7 +1690,7 @@ class Mint:
     def _play_reply(self, data: bytes) -> None:
         """Mint's voice, to the speaker (or, silent, just the state)."""
         self._last_voice = time.monotonic()
-        if not self.voice_on:
+        if not self.voice_on and self.meet is None:
             # Silent: the words still arrive as a transcript and are shown.
             if not self._silent_reply:
                 self._silent_reply = True
@@ -1646,6 +1814,8 @@ class Mint:
     def _flush_playback(self) -> None:
         while not self.audio_in.empty():
             self.audio_in.get_nowait()
+        if self.meet is not None:
+            self.meet.clear()
         # The voice-processing player schedules audio ahead; stop it too.
         flush = getattr(self.audio, "flush", None)
         if flush is not None:
@@ -1929,6 +2099,11 @@ class Mint:
                 return
             name, args, label = found
             self._instant_last = (heard, time.monotonic())
+            if name == "google_meet":
+                instant.ran(name, args, heard.strip())
+                self._print(f"[instant] {label}")
+                self._meet_request(spoken=True)
+                return
             try:
                 args = await asyncio.to_thread(instant.resolve, name, args)
                 if instant.model_just_ran(name):
@@ -2144,6 +2319,7 @@ class Mint:
 
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()
+        Mint.live = self                  # found by others without a gc scan (extra_tools._live_mint)
         from mint.agents import runtime as agent_hub
         agent_hub.hub.attach(self)          # sub-agents report to this session
         from mint.tools import automations
@@ -2231,6 +2407,7 @@ class Mint:
                         if not self.text_mode:
                             group.create_task(self._mic_share_watch())
                         group.create_task(self._read_terminal())
+                        group.create_task(self._meet_feed())
             except asyncio.CancelledError:
                 raise
             except BaseExceptionGroup as errors:

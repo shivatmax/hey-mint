@@ -83,6 +83,11 @@ DEFAULTS: dict = {
     "agent_telegram": "away",   # coding agents message you on Telegram: away (from the Mac) / always / off
     # The guard (guard.py): ask before deleting / changing / risky commands. all / delete / off.
     "guard": "all",
+    # Google Meet calls with Mint (meet_call.py): share the whole screen ("screen") or not ("off"); the longest call.
+    "meet_share": "screen",
+    "meet_max_minutes": 120,
+    # Who is let into Mint's call without asking: everyone (whoever has the link) / first / ask (Telegram).
+    "meet_admit": "everyone",
     "word_animation": True,
     "voice": True,
     "mic": True,
@@ -161,6 +166,22 @@ DEFAULTS: dict = {
     "telegram_enabled": False,
     "telegram_read_only": False,
     "telegram_notify": True,
+    # Email remote control (email_remote.py): requests emailed to `email_address` from the allowed senders
+    # ("list": email_allowed, empty = the address itself; "all" needs a secret word), with subjects starting
+    # with email_prefix; replies only to the verified sender. Read through IMAP + SMTP ("imap": an app password
+    # in the Keychain; IDLE, seconds) or Apple Mail ("mail": the account added in Internet Accounts, no password;
+    # email_mail_account "" = every inbox). "auto": IMAP when the address has an app password, else Mail.
+    "email_enabled": False,
+    "email_address": "",
+    "email_allow": "list",
+    "email_allowed": "",
+    "email_prefix": "Mint:",
+    "email_read_only": False,
+    "email_imap_host": "",             # "" = from the address (Gmail, iCloud, Fastmail, Yahoo; else imap.<domain>)
+    "email_smtp_host": "",             # "host" or "host:port"; "" = from the address
+    "email_auth_server": "",           # whose Authentication-Results to trust; "" = mx.google.com for Gmail
+    "email_backend": "auto",           # "auto" (app password saved: IMAP, else Mail) | "imap" | "mail"
+    "email_mail_account": "",          # the Mail account watched; "" = every inbox
     "stop_words": ["stop", "stop it", "stop everything", "cancel", "cancel that", "abort",
                    "enough", "hold on", "never mind", "nevermind", "shut up"],
 }

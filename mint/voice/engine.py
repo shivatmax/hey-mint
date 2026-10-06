@@ -73,6 +73,7 @@ class VoiceAudio:
         self.echo_cancelled = False
         self.private_output = False            # headphones: nothing said reaches the mic
         self.suspended = False
+        self.silent = False                    # a Google Meet call has Mint's voice: the speaker plays silence
         self.on_reconfigure = None             # callback(audio) after every rebuild
         self.status = ""
         self._pending = 0
@@ -380,6 +381,8 @@ class VoiceAudio:
             samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768
             if samples.size == 0:
                 continue
+            if self.silent:
+                samples[:] = 0                 # still played, so the timing (playing, idle) stays the same
             buffer = A.AVAudioPCMBuffer.alloc().initWithPCMFormat_frameCapacity_(self.play_format, samples.size)
             buffer.setFrameLength_(samples.size)
             np.frombuffer(buffer.floatChannelData()[0].as_buffer(samples.size), dtype=np.float32)[:] = samples
@@ -390,6 +393,9 @@ class VoiceAudio:
                 on_chunk(chunk)
             player = self.player
             player.scheduleBuffer_completionHandler_(buffer, lambda: self._finished_one())
+
+    def set_silent(self, on: bool) -> None:
+        self.silent = on
 
     def duck(self, on: bool) -> None:
         """Turn Mint's voice down while it is not yet sure the voice cutting

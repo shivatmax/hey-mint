@@ -696,8 +696,9 @@ def _power_modules():
     from mint.tools import agentapps
     from mint.tools import handoff
     from mint.ui import notch_agents
+    from mint.app import meet_call
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music, handoff, notch_agents)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music, handoff, notch_agents, meet_call)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -717,7 +718,7 @@ def _power(name: str):
 _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadsheet", "edit_spreadsheet", "tidy", "teach",
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
-                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "connector", "music", "notes", "reminders_manage", "contacts", "calendar_manage", "maps", "safari", "photos", "iwork", "agent_app", "hand_to_app", "claude_mode",
+                                                  "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "connector", "music", "notes", "reminders_manage", "contacts", "calendar_manage", "maps", "safari", "photos", "iwork", "agent_app", "hand_to_app", "claude_mode", "google_meet",
                                                   "dictation", "edit_video", "video_info", "ocr_copy",
                                                   "data_to_sheet", "convert_document")})
 

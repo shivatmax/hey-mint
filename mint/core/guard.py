@@ -13,7 +13,8 @@ asks, in plain words:
 
 At the Mac this is a card (under the notch in notch mode, by the orb otherwise) and you can say "yes" or "no".
 When the request came from your phone, or you are away from the Mac, the same question comes on Telegram with
-✅ Yes / ❌ No buttons. The first answer wins; no answer in time means no. Saying "stop" means no.
+✅ Yes / ❌ No buttons. When it came by email (email_remote), the question is emailed in that thread and a reply
+with YES or NO answers it. The first answer wins; no answer in time means no. Saying "stop" means no.
 
 Levels (Settings ▸ General ▸ Ask before deleting or changing, pref "guard"):
     all      deleting, and changing or moving existing things, and risky system commands (default)
@@ -337,7 +338,8 @@ def _away() -> bool:
 def ask(danger: Danger, who: str = "Mint", timeout: float | None = None) -> bool:
     """Blocking: show the question (card at the Mac, Telegram when from the phone or away) and wait."""
     phone = _from_phone()
-    p = Pending(ident=format(next(_ids), "x"), danger=danger, who=who, phone=phone or _away())
+    mail = _from_email()
+    p = Pending(ident=format(next(_ids), "x"), danger=danger, who=who, phone=phone or mail or _away())
     p.timeout = timeout or (WAIT_PHONE if p.phone else WAIT_MAC)
     with _lock:
         _pending[p.ident] = p
@@ -351,6 +353,8 @@ def ask(danger: Danger, who: str = "Mint", timeout: float | None = None) -> bool
             log.debug("no guard card", exc_info=True)
         if p.phone:
             threading.Thread(target=_telegram_ask, args=(p,), daemon=True).start()
+        if mail:
+            threading.Thread(target=_email_ask, args=(p,), daemon=True).start()
         deadline = time.monotonic() + p.timeout
         while not p.event.wait(0.25):
             if time.monotonic() > deadline:
@@ -373,6 +377,8 @@ def ask(danger: Danger, who: str = "Mint", timeout: float | None = None) -> bool
         except Exception:
             pass
         _telegram_done(p)
+        if mail:
+            _email_done(p)
     print(f"  [guard: {'yes' if ok else 'no'} ({p.how or 'answered'})]", flush=True)
     _audit("answer", f"{'yes' if ok else 'no'} via {p.how or '?'}: {danger.title}")
     return ok
@@ -406,6 +412,32 @@ def _audit(kind: str, text: str) -> None:
             fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {kind}: {text[:400]}\n")
     except OSError:
         pass
+
+
+# --- email ---------------------------------------------------------------------------------------------
+
+def _from_email() -> bool:
+    try:
+        from mint.app import email_remote
+        return email_remote.from_email()
+    except Exception:
+        return False
+
+
+def _email_ask(p: Pending) -> None:
+    try:
+        from mint.app import email_remote
+        email_remote.guard_ask(p)
+    except Exception:
+        log.exception("guard email ask")
+
+
+def _email_done(p: Pending) -> None:
+    try:
+        from mint.app import email_remote
+        email_remote.guard_done(p)
+    except Exception:
+        log.debug("guard email done", exc_info=True)
 
 
 # --- Telegram ------------------------------------------------------------------------------------------

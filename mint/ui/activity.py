@@ -30,6 +30,7 @@ SYMBOLS = {
     "menu": "filemenu.and.selection",
     "shot": "camera.viewfinder",
     "clip": "doc.on.clipboard",
+    "call": "video.fill",
 }
 
 _KIND = {
@@ -53,7 +54,7 @@ _KIND = {
     "plan_task": "plan", "step_done": "plan", "task": "plan",
     "switch_to": "switch",
     "wait_until_done": "timer", "preview_site": "web",
-    "read_file": "file", "write_file": "file", "find_files": "file", "file_action": "file", "hand_to_app": "file", "claude_mode": "code",
+    "read_file": "file", "write_file": "file", "find_files": "file", "file_action": "file", "hand_to_app": "file", "claude_mode": "code", "google_meet": "call",
     "web_search": "search", "read_url": "search",
     "browser": "web", "scroll_to": "scroll", "menu": "menu", "wait_for_text": "timer",
     "run_applescript": "code",
@@ -313,6 +314,10 @@ def phrase(name: str, args: dict) -> str:
                     "status": "Checking your coding agents",
                     "send": f"Telling {_quote(a.get('session') or 'the agent', 20)}: {_quote(a.get('text') or '', 30)}"
                     }.get(str(a.get("action") or "open"), "Claude mode")
+        case "google_meet":
+            return {"start": "Starting a Google Meet", "end": "Leaving the call", "share": "Sharing the screen",
+                    "unshare": "Stopping the screen share", "setup": "Setting up Google Meet",
+                    "status": "Checking the call"}.get(str(a.get("action") or "status"), "Google Meet")
         case "hand_to_app":
             verb = "Dragging into" if str(a.get("how") or "") == "drag" else "Giving to"
             return f"{verb} {_quote(a.get('app') or 'the app', 24)}"

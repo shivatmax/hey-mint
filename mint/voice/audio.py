@@ -28,6 +28,11 @@ class Audio:
         self.muted = False
         # Set while audio is actually coming out of the speakers.
         self.playing = False
+        # A Google Meet call has Mint's voice: silence is played instead, keeping the timing.
+        self.silent = False
+
+    def set_silent(self, on: bool) -> None:
+        self.silent = on
 
     # --- capture -------------------------------------------------------------
 
@@ -78,7 +83,7 @@ class Audio:
             self.playing = True
             if on_chunk is not None:
                 on_chunk(chunk)
-            await asyncio.to_thread(self._out_stream.write, chunk)
+            await asyncio.to_thread(self._out_stream.write, bytes(len(chunk)) if self.silent else chunk)
             if in_queue.empty():
                 # Give the stream a moment to finish the last buffer before
                 # declaring silence; otherwise half-duplex unmutes too early and

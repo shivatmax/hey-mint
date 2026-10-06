@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.7 (2026-10-06)
+
+- **Google Meet with Mint:** "start a Google Meet" (by voice, Telegram `/meet`, or email). Mint makes a meeting,
+  joins it, shares the Mac's screen and sends you the link. Join from your phone and talk with Mint as on a call:
+  the call is Mint's microphone and speaker. The call's chat works too, and Mint answers there as well. Whoever
+  asks to join is let in (Settings ▸ Voice ▸ Google Meet calls), and Telegram tells you who. Mint leaves when
+  everyone has gone. A red camera in the notch shows while a call is on.
+  - How: Mint's own Chrome profile, driven over a private pipe (no port, no server, no audio driver). The first
+    call opens Google's sign-in there; you type the password, Mint never does (`mint/app/meet_call.py`).
+- **Email control:** email Mint a request with a subject starting `Mint:`. It does it and answers in the same
+  thread, as a formatted HTML email with the steps, files, screenshots and a Join button for calls.
+  - Gmail with an app password (kept in the Keychain) and IMAP IDLE, so mail is seen in a second or two. Apple
+    Mail is the fallback.
+  - Only verified senders on your list, or anyone with your secret word. Requests run one at a time, each with
+    its whole answer (`mint/app/email_remote.py`).
+- **Fixes:**
+  - A request to start a call is started by Mint itself; the model had answered from an earlier failed try.
+  - Finding the running session no longer scans memory from background threads, which could crash Mint.
+
 ## 0.5.6 (2026-10-05)
 
 - **Hide Mint:** a hide button in the notch's hover row (and the menu, "hide yourself", ⌃⌥H) takes the little Mint

@@ -339,11 +339,12 @@ _VOICE_HELP = ("Voices (only these 30 work live): "
 
 
 def _live_mint():
-    """The running session object, found without importing it into the UI."""
-    import gc
-
+    """The running session object (it registers itself when it starts). Not a gc.get_objects() scan any more: from
+    a background thread that list freed PyObjC objects - an NSAutoreleasePool among them - off the main thread, and
+    Mint crashed (SIGSEGV in objc_autoreleasePoolPop, 6 Oct, the moment a Meet call's audio arrived)."""
     from mint.app.session import Mint
-    return next((o for o in gc.get_objects() if isinstance(o, Mint) and o.loop is not None), None)
+    mint = Mint.live
+    return mint if mint is not None and mint.loop is not None else None
 
 
 def _set_voice(args: dict) -> str:
@@ -617,6 +618,7 @@ def prompt_text() -> str:
     from mint.tools import undo
     from mint.tools import agentapps
     from mint.ui import notch_agents
+    from mint.app import meet_call
     from mint.tools import mailtriage
     from mint.tools import meetings
     from mint.tools import rewrite
@@ -634,7 +636,7 @@ def prompt_text() -> str:
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, notch_agents.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, notch_agents.PROMPT, meet_call.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

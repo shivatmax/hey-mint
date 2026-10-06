@@ -107,6 +107,7 @@ COMMANDS = [("status", "What Mint is doing now"), ("screenshot", "A picture of t
             ("trackers", "What Mint is watching for me"), ("undo", "What Mint can undo"),
             ("chatgpt", "Is the ChatGPT app busy or done?"), ("claude", "Claude Code sessions"),
             ("agents", "Claude Code and Codex: what they do, talk to them"),
+            ("meet", "Start a Google Meet with Mint: it shares the screen, you talk"),
             ("keyboard", "Show or hide the quick buttons"), ("help", "Everything I can do")]
 STRANGER_COMMANDS = [("start", "Pair this chat with Mint on your Mac")]
 
@@ -139,6 +140,7 @@ HELP = ("🌿 <b>Mint on your phone</b>\n"
         "/clipboard · my last copies (tap one to copy it)\n"
         "/trackers · what Mint is watching for me\n"
         "/undo · what Mint can undo\n"
+        "/meet · a Google Meet with Mint: it shares the Mac's screen and you talk to it\n"
         "/chatgpt · /claude · is the ChatGPT app or Claude Code busy or done\n\n"
         "<b>Your coding agents</b>\n"
         "/agents · your Claude Code and Codex sessions; 💬 tells one what to do\n"
@@ -838,6 +840,13 @@ class Bridge:
         elif word == "/agents":
             from mint.app import telegram_agents
             _later(telegram_agents.command, self)
+        elif word == "/meet" and age > STALE:
+            self.reply(f"/meet came while the Mac was asleep or offline ({_took(age)} ago), so I didn't start a call.")
+        elif word == "/meet" and self.paused() and rest.lower() not in ("end", "stop", "leave", "off", "status"):
+            self.reply(PAUSED_NOTE)
+        elif word == "/meet":
+            from mint.app import meet_call
+            _later(meet_call.telegram_command, self, rest)
         elif age > STALE:
             self.reply(f"{word} came while the Mac was asleep or offline ({_took(age)} ago), so I didn't do it.")
         elif word == "/clip":
@@ -909,6 +918,9 @@ class Bridge:
         if name in ("ag", "agto", "agopen"):
             from mint.app import telegram_agents
             return telegram_agents.plan(self, name, arg, message)
+        if name == "mt":                        # a Google Meet call's buttons
+            from mint.app import meet_call
+            return meet_call.telegram_plan(self, arg)
         if name == "stop":
             return "⏹ Stopping…", then(self.stop, refresh), ""
         if name == "pause":
@@ -2881,6 +2893,18 @@ def start(mint=None) -> None:
         prefs.on_change(lambda key, _value: refresh() if key.startswith("telegram_") else None)
     except Exception:
         pass
+    _email("start", mint)                   # email remote control: idle until it is set up and on
+
+
+def _email(name: str, *args):
+    """Email remote control (email_remote.py) shares this module's hooks into the session: the same events,
+    the same read-only gate. Never raises."""
+    try:
+        from mint.app import email_remote
+        return getattr(email_remote, name)(*args)
+    except Exception:
+        log.debug("email %s", name, exc_info=True)
+        return None
 
 
 def refresh() -> None:
@@ -2899,15 +2923,17 @@ def on_event(kind: str, data: dict | None = None) -> None:
         bridge.event(kind, data or {})
     except Exception:
         log.debug("telegram event %s", kind, exc_info=True)
+    _email("on_event", kind, data or {})
 
 
 def gate(name: str, args: dict) -> str:
     """'' to run the tool, else the refusal to return instead (read-only phone requests)."""
     try:
-        return bridge.gate(name, args)
+        refused = bridge.gate(name, args)
     except Exception:
         log.debug("telegram gate", exc_info=True)
-        return ""
+        refused = ""
+    return refused or _email("gate", name, args) or ""
 
 
 def status() -> dict:

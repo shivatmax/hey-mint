@@ -231,7 +231,8 @@ def scrap(text: str) -> bool:
 def quick(text: str, kind: str, mint_said: str = "", name: str = "Mint", special: bool = False) -> str | None:
     """A verdict without a model call: "act", "ignore", "wait" (unfinished: say nothing yet), or None (ask Jev).
 
-    kind: "asked" (the user opened Mint on purpose: shortcut, menu, typed), "wake" (the first
+    kind: "asked" (the user opened Mint on purpose: shortcut, menu, typed), "call" (a Google Meet call with Mint),
+    "wake" (the first
     thing said after the wake word) or "follow" (anything else: follow-ups, talk while Mint
     works, after Mint woke itself for news). special: stop words, a goodbye, a yes/no to the
     guard, an instant command, a lesson or demonstration under way - always let through."""
@@ -240,6 +241,10 @@ def quick(text: str, kind: str, mint_said: str = "", name: str = "Mint", special
         return None                               # nothing transcribed yet
     if kind == "asked" or special:
         return "act"
+    if kind == "call":
+        # A Google Meet call with Mint (meet_call.py): only the user is in it, so it is all for Mint - but a
+        # sentence still being thought out gets no answer yet.
+        return "wait" if unfinished(text, mint_said) else "act"
     if unfinished(text, mint_said):
         return "wait"                             # still thinking: say nothing, keep listening for the rest
     if kind == "wake" and scrap(text) and not addressed(text, name):

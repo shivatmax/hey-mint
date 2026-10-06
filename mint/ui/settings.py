@@ -78,6 +78,7 @@ FOLLOW_UP = [(0, "No - always say Hey Mint"), (4, "4 seconds"), (6, "6 seconds")
              (12, "12 seconds")]
 GUARD_LEVELS = [("all", "Deleting, changes and system commands"), ("delete", "Only deleting and system commands"),
                 ("off", "Never ask")]
+MEET_SHARE = [("screen", "The whole screen"), ("off", "Don't share")]
 AGENT_TELEGRAM = [("away", "When I'm away from the Mac"), ("always", "Always"), ("off", "Never")]
 POSITIONS = [("top-right", "Top right"), ("top-left", "Top left"), ("top-center", "Top centre"),
              ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"), ("custom", "Where I dragged it")]
@@ -708,6 +709,14 @@ class SettingsWindow:
                                      ("Also step aside for these apps", 230, self._add_mic_apps)])
         self.audio_status = page.text("", size=11, alpha=0.65)
         page.end()
+        page.section("Google Meet calls")
+        self._row_buttons(page, "Sign in to Google (once)", [("Open sign-in…", 150, self._meet_setup)],
+                          "Mint's Meet window has its own Chrome profile. You sign in there; Mint never types "
+                          "passwords.")
+        self._row_popup(page, "meet_share", "Share in the call", MEET_SHARE,
+                        "\"Start a Google Meet\" (or /meet on Telegram): Mint joins, shares this, and sends you the "
+                        "link.", w=200)
+        page.end()
         users = facts["mic_users"]
         self._seen = users
         self.mic_users.setStringValue_(
@@ -768,6 +777,10 @@ class SettingsWindow:
             "Allow, Always or Deny Claude Code's permission requests from the notch (adds a hook to "
             "~/.claude/settings.json; a backup is kept). The terminal still asks too.")
         page.end()
+
+    def _meet_setup(self) -> None:
+        from mint.app import meet_call
+        threading.Thread(target=meet_call.setup, name="meet-setup", daemon=True).start()
 
     def _page_shortcuts(self, page, facts: dict) -> None:
         name = prefs.name()
@@ -1007,8 +1020,13 @@ class SettingsWindow:
 
     def _facts_accounts(self) -> dict:
         from mint.tools import accounts
+        from mint.app import email_remote
         from mint.app import telegram  # noqa: F401 - imported here, off the main thread
-        return {"telegram": telegram.status()}
+        facts = {"telegram": telegram.status(), "email": email_remote.status()}
+        # Mail's account names for Email control's popup (None: Mail isn't open - asking would open it).
+        facts["email"]["mail_accounts"] = (accounts.mail_accounts() if facts["email"].get("backend") == "mail"
+                                           else None)
+        return facts
 
     def _page_accounts(self, page, facts: dict) -> None:
         page.section("API keys")
@@ -1023,6 +1041,7 @@ class SettingsWindow:
         page.end("Keys stay on this Mac, in a file only you can read. Nothing goes through any Hey Mint server - "
                  "there isn't one.")
         self._telegram_card(page, facts["telegram"])
+        self._email_card(page, facts["email"])
 
         from mint.tools import accounts
         page.section("Google: Gmail and Calendar")
@@ -1032,7 +1051,8 @@ class SettingsWindow:
         status = page.text("Checking…\n ", size=11, alpha=0.6)
         self._row_buttons(page, "", [("Check again", 110, lambda: check()),
                                      ("Connect Google…", 150, accounts.open_internet_accounts)])
-        page.end("Drafts only: Mint never sends an email itself.")
+        page.end("Drafts only: Mint never sends an email itself - except Email control's answers, which go only "
+                 "to the verified, allowed sender of an emailed request, in its thread.")
 
         def check():
             status.setStringValue_("Checking…")
@@ -1112,6 +1132,138 @@ class SettingsWindow:
             self._background("telegram-watch", telegram.status, compare)
         if state["enabled"] and token:
             AppHelper.callLater(2.0, watch)
+
+    def _email_card(self, page, state: dict) -> None:
+        """Email remote control: how mail is read (Apple Mail - no password - or an app password in the Keychain),
+        the address, who may send requests, the subject prefix and the secret word. `state` is
+        email_remote.status() plus Mail's account names, read off the main thread by _facts_accounts."""
+        from mint.app import email_remote
+        mail = state.get("backend", "mail") == "mail"
+        page.section("Email control")
+        if mail:
+            page.text(f"Email {prefs.name()} a request from anywhere - no Telegram needed - and get the answer by "
+                      "email. It reads and answers through the Mail app on this Mac, with the account you added "
+                      "in System Settings ▸ Internet Accounts: no password to make or paste. Mail opens in the "
+                      "background while this is on.", size=12, alpha=0.75)
+        else:
+            page.text(f"Email {prefs.name()} a request from anywhere - no Telegram needed - and get the answer by "
+                      "email. Give it an address (your Gmail, or one made for it) and that account's app password: "
+                      "for Gmail, turn on 2-Step Verification, then make one at myaccount.google.com/apppasswords.",
+                      size=12, alpha=0.75)
+
+        def changed() -> None:
+            email_remote.refresh()
+            AppHelper.callLater(0.5, self.refresh)
+        self._row_popup(page, "email_backend", "Read mail with",
+                        [("auto", "Automatic"), ("imap", "Gmail app password"), ("mail", "Apple Mail (no password)")],
+                        hint="Automatic: the app password when one is saved - Gmail tells Mint about a new message at "
+                             "once and answers come back in seconds - else Apple Mail (checks every 30 s; works when "
+                             "Google won't make an app password).", on_change=changed)
+        self._row_text(page, "email_address", "Email address", "you@gmail.com",
+                       hint=("Your own address, as in Mail: requests from it are allowed when the list below is "
+                             "empty." if mail else "The inbox it watches and answers from."), settle=1.0)
+        if mail:
+            names = state.get("mail_accounts")
+            current = state.get("mail_account", "")
+            options = [("", "Every inbox")] + [(n, n) for n in names or []]
+            if current and current not in (names or []):
+                options.append((current, current))
+            self._row_popup(page, "email_mail_account", "Mail account", options,
+                            hint=("Mail isn't open, so its accounts aren't listed yet." if names is None
+                                  else "Add accounts in System Settings ▸ Internet Accounts (turn on Mail)."
+                                  if not names else "The inbox it watches; replies go from that account."),
+                            on_change=changed)
+            if state.get("chosen") == "auto":
+                self._email_password_row(page, state, "Optional: save one and Mint reads Gmail directly - "
+                                                      "answers in seconds instead of through Mail.")
+            ready = bool(state["address"])
+            doing = ("Add your email address first." if not ready else "Off." if not state["enabled"]
+                     else state["error"] or (f"Watching {state.get('where', 'Mail')}." if state["running"]
+                                             else "Starting…"))
+        else:
+            shown = "Set" if state["password_set"] else "Not set"
+            card, top, x, h = page.row("App password", "You paste it; it goes into the macOS Keychain and is never "
+                                       "shown again.", control_w=250)
+            label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
+            label.setAlignment_(AppKit.NSTextAlignmentRight)
+            self._button(card, "Change…" if state["password_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
+                         lambda: self._email_secret("password"))
+            doing = ("Add the address and its app password first." if not (state["address"] and state["password_set"])
+                     else "Off." if not state["enabled"]
+                     else state["error"] or (f"Watching {state['address']}." + (" New mail is seen at once (IDLE)."
+                                                                                 if state.get("idle") else "")
+                                             if state["running"] else "Connecting…"))
+        card, top, x, h = page.row("Email control", doing, control_w=38)
+
+        def switch(on: bool) -> None:
+            prefs.set("email_enabled", on)
+            email_remote.refresh()
+            AppHelper.callLater(3.0, self.refresh)
+        self._switch(card, x, top + (h - 22) / 2, state["enabled"], switch)
+        self._row_popup(page, "email_allow", "Who may send requests",
+                        [("list", "Only the addresses below"), ("all", "Anyone who knows the secret word")],
+                        hint="Either way, the mail server must vouch that a message really is from its sender.",
+                        on_change=lambda: AppHelper.callLater(0.5, self.refresh))
+        self._row_text(page, "email_allowed", "Allowed senders", "you@example.com, …",
+                       hint="Separated by commas. Empty: only the address above (email yourself).", settle=1.0)
+        self._row_text(page, "email_prefix", "Subject starts with", "Mint:",
+                       hint="Only these messages are read; newsletters and ads never are. \"Mint: /help\" lists "
+                            "the commands.", w=160, settle=1.0)
+        secret = "Set" if state["secret_set"] else ("Needed for \"Anyone\"" if state["allow"] == "all" else "Not set")
+        card, top, x, h = page.row("Secret word", "Must also be in the subject. Recommended; required when anyone "
+                                   "may send requests.", control_w=250)
+        label = self._label(card, secret, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
+        label.setAlignment_(AppKit.NSTextAlignmentRight)
+        self._button(card, "Change…" if state["secret_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
+                     lambda: self._email_secret("secret"))
+        self._row_switch(page, "email_read_only", "Read-only by email",
+                         hint="Emailed requests never send, delete or buy anything.")
+        page.end("A message counts only when the mail server verified its sender (DKIM, or SPF with DMARC): a forged "
+                 "From is ignored. Answers go only to that sender, in the same thread; handled messages are marked "
+                 "read. Only this Mac talks to the mail server, through Mail or directly. Every request is logged in "
+                 "~/Library/Application Support/Mint/remote.log.")
+
+    def _email_password_row(self, page, state: dict, hint: str) -> None:
+        """The app-password row (Set / Not set, Add… or Change…), for "Automatic" while Mail is the way in."""
+        shown = "Set" if state["password_set"] else "Not set"
+        card, top, x, h = page.row("App password", hint, control_w=250)
+        label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
+        label.setAlignment_(AppKit.NSTextAlignmentRight)
+        self._button(card, "Change…" if state["password_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
+                     lambda: self._email_secret("password"))
+
+    def _email_secret(self, which: str) -> None:
+        """The app password (pasted by the user) or the secret word: straight into the Keychain, never shown."""
+        from mint.app import email_remote
+        address = str(prefs.get("email_address") or "").strip().lower()
+        alert = AppKit.NSAlert.alloc().init()
+        if which == "password" and not address:
+            alert.setMessageText_("Add the email address first.")
+            alert.runModal()
+            return
+        if which == "password":
+            alert.setMessageText_(f"App password for {address}")
+            alert.setInformativeText_("Paste the app password made for this (Gmail: myaccount.google.com/"
+                                      "apppasswords). It is saved in the macOS Keychain only. Leave it empty and "
+                                      "press Save to remove it.")
+        else:
+            alert.setMessageText_("Secret word")
+            alert.setInformativeText_("A word every emailed request must have in its subject, e.g. \"Mint: "
+                                      "pineapple what's on today?\". Leave it empty and press Save to remove it.")
+        field = AppKit.NSSecureTextField.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 320, 24))
+        alert.setAccessoryView_(field)
+        alert.addButtonWithTitle_("Save")
+        alert.addButtonWithTitle_("Cancel")
+        alert.window().setInitialFirstResponder_(field)
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        value = str(field.stringValue())
+
+        def save() -> bool:
+            if which == "password":
+                return email_remote.save_password(address, value)
+            return email_remote.save_secret(value)
+        self._background("email-secret", save, lambda _: self.refresh())
 
     def _change_key(self, env: str, title: str) -> None:
         """Paste a new key; it goes into .env (mode 600) and the environment."""
