@@ -201,8 +201,35 @@ def _log_to_file() -> Path:
 
 # --- main ------------------------------------------------------------------------
 
+def _memory_profile() -> None:
+    """While ~/Library/Application Support/Mint/profile-memory exists: what holds Mint's memory, by source line,
+    into mint.log every 2 minutes (tracemalloc; off otherwise - it slows allocation a little)."""
+    import threading
+    import tracemalloc
+    tracemalloc.start(6)
+
+    def report() -> None:
+        while True:
+            time.sleep(120)
+            snap = tracemalloc.take_snapshot().filter_traces([tracemalloc.Filter(False, tracemalloc.__file__)])
+            total = sum(s.size for s in snap.statistics("filename"))
+            lines = [f"  [memory] Python objects: {total / 1e6:.0f} MB; biggest:"]
+            for stat in snap.statistics("lineno")[:18]:
+                frame = stat.traceback[0]
+                where = "/".join(frame.filename.split("/")[-2:])
+                lines.append(f"    {stat.size / 1e6:6.1f} MB  {stat.count:7d}  {where}:{frame.lineno}")
+            lines.append("  [memory] by caller (6 frames):")
+            for stat in snap.statistics("traceback")[:6]:
+                lines.append(f"    {stat.size / 1e6:6.1f} MB  {stat.count:7d}  " + " <- ".join(
+                    f"{'/'.join(f.filename.split('/')[-2:])}:{f.lineno}" for f in list(stat.traceback)[:6]))
+            print("\n".join(lines), flush=True)
+    threading.Thread(target=report, name="memory-profile", daemon=True).start()
+
+
 def main() -> int:
     args = _parse()
+    if os.path.exists(os.path.expanduser("~/Library/Application Support/Mint/profile-memory")) and not args.say:
+        _memory_profile()
 
     if args.say:
         return _say(args.say)

@@ -1357,6 +1357,22 @@ def wants_call(text: str) -> bool:
     return bool(t) and len(t.split()) <= 16 and bool(_WANTS.search(t)) and not _NOT.search(t)
 
 
+_ENDS = re.compile(r"\b(?:end|stop|leave|quit|close|finish|hang up|drop|exit|disconnect)\b[\w\s'-]{0,20}?"
+                   r"\b(?:google meet|g ?meet|meet|call|meeting)\b|\bhang up\b", re.I)
+
+
+def wants_end(text: str) -> bool:
+    """The user's words end the call that's on ("end the Google Meet", "leave the call", "hang up"). Like
+    wants_call, the session does it itself (6 Oct: the model clicked around Chrome instead)."""
+    t = " ".join(str(text or "").lower().replace("’", "'").split())
+    return _call is not None and bool(t) and len(t.split()) <= 12 and bool(_ENDS.search(t)) \
+        and not re.search(r"\b(don'?t|do not|never|when|after|before)\b", t)
+
+
+END_NOTE = ("(Mint note - not the user: Mint itself is leaving the Google Meet the user asked to end. Don't call "
+            "google_meet or click anything - say only \"Leaving the call.\")")
+
+
 START_NOTE = ("(Mint note - not the user: Mint itself is starting the Google Meet the user just asked for; it takes "
               "a few seconds. Don't call google_meet and don't answer from any earlier attempt - say only "
               "\"Starting the Google Meet.\" The result comes in another note.)")

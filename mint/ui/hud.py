@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import re
+import os
 import time
 
 import AppKit
@@ -162,7 +163,28 @@ class _Ticker(AppKit.NSObject):
         return self
 
     def tick_(self, timer):
+        if _PROFILE:
+            started = time.perf_counter()
+            self.owner._tick()
+            _profiled("orb", time.perf_counter() - started)
+            return
         self.owner._tick()
+
+
+# The cost of each UI tick, measured while ~/Library/Application Support/Mint/profile-ticks exists (into mint.log
+# every 10 s). Off otherwise.
+_PROFILE = os.path.exists(os.path.expanduser("~/Library/Application Support/Mint/profile-ticks"))
+_prof: dict = {}
+
+
+def _profiled(name: str, took: float) -> None:
+    n, total, worst, since = _prof.get(name, (0, 0.0, 0.0, time.monotonic()))
+    n, total, worst = n + 1, total + took, max(worst, took)
+    if time.monotonic() - since > 10:
+        print(f"  [ticks] {name}: {n / (time.monotonic() - since):.0f}/s, {total / n * 1000:.2f} ms each, "
+              f"worst {worst * 1000:.1f} ms, {total / (time.monotonic() - since) * 100:.1f}% of a core", flush=True)
+        n, total, worst, since = 0, 0.0, 0.0, time.monotonic()
+    _prof[name] = (n, total, worst, since)
 
 
 def _panel(frame, click_through=True):
@@ -669,6 +691,12 @@ class HUD:
             return self._status
         if self._state in ("thinking", "working"):
             return TITLES[self._state]
+        try:
+            from mint.tools import automations
+            if automations.halted():
+                return "Paused everything · say “resume everything”"
+        except Exception:
+            pass
         return ""
 
     def _bubble_text(self, now: float, animate: bool):

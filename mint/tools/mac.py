@@ -420,9 +420,9 @@ def _night_status(client) -> dict:
 
 def night_shift(state: str = "on") -> str:
     import objc
-    bundle = objc.loadBundle("CoreBrightness", globals(),
-                             bundle_path="/System/Library/PrivateFrameworks/CoreBrightness.framework")
-    del bundle
+    from Foundation import NSBundle
+    # (NSBundle: objc.loadBundle wrapped every class in the process and kept them - ~90-230 MB, 6 Oct)
+    NSBundle.bundleWithPath_("/System/Library/PrivateFrameworks/CoreBrightness.framework").load()
     client = objc.lookUpClass("CBBlueLightClient").alloc().init()
     if str(state).lower() == "status":
         status = _night_status(client)

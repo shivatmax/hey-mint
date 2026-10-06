@@ -52,6 +52,7 @@ def _client() -> genai.Client:
 
 # Set by Mint.compact(): the compacted conversation the next session starts from.
 _carry_over = ""
+_STARTED = time.time()           # this run's first session: compaction reads the history from here on
 
 
 def _live_config() -> types.LiveConnectConfig:
@@ -61,6 +62,7 @@ def _live_config() -> types.LiveConnectConfig:
     now = local.strftime("%A %B %-d %Y, %-I:%M %p")
     offset = local.strftime("%z")
     zone = f"{local.tzname()} (UTC{offset[:3]}:{offset[3:]})"
+    from mint.app import compaction
     from mint.core import custom
     from mint.knowledge.conversation import memory
     personal = custom.prompt_addendum()
@@ -81,9 +83,9 @@ def _live_config() -> types.LiveConnectConfig:
                    + (f"\n\n{words}" if words else "")
                    + (f"\n\nWhat you remember from earlier conversations with this user "
                       f"(your own notes; use them, do not recite them):\n{remembered}" if remembered else "")
-                   + (f"\n\nThis conversation was just compacted. Everything said so far, summarised "
-                      f"(continue from it as if you remember it; do not read it out):\n{_carry_over}"
-                      if _carry_over else ""))
+                   + (f"\n\n{jobs}" if (jobs := _jobs_note()) else "")
+                   + (f"\n\n{compaction.framed(_carry_over)}" if _carry_over else ""))
+    from mint.tools import diet as tool_diet
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         media_resolution="MEDIA_RESOLUTION_MEDIUM",
@@ -122,7 +124,8 @@ def _live_config() -> types.LiveConnectConfig:
                 silence_duration_ms=700,
             )
         ),
-        tools=_named(tools.tools(), name),
+        # The everyday tools plus find_tools/use_tool for the rest (tool_diet.py; pref tool_diet false = all).
+        tools=_named(tool_diet.live_tools(tools.tools()), name),
     )
 
 
@@ -465,12 +468,29 @@ class Mint:
         self.paused = paused
         if paused:
             self.asleep = self.hands_free
+            self._audio_rest_later()
+        elif getattr(self.audio, "resting", False):
+            threading.Thread(target=self.audio.wake, name="audio-wake", daemon=True).start()
         self._print("[paused]" if paused else "[resumed]")
         self.ui.set_paused(paused)
         if paused and self.loop is not None and self.session is not None:
             # The mic may have gone off mid-sentence: tell the server the speech
             # is over, or its next typed turn waits for it (see _close_user_audio).
             asyncio.run_coroutine_threadsafe(self._close_user_audio(), self.loop)
+
+    def _audio_rest_later(self, after: float = 3.0) -> None:
+        """Paused with nothing to say: let the audio engine stop (audio_vp.rest) until the mic is on again or Mint
+        speaks. Checked again a moment later, so a reply still playing finishes first."""
+        rest = getattr(self.audio, "rest", None)
+        if rest is None:
+            return
+
+        def check() -> None:
+            if self.paused and self.meet is None and not self.audio.playing and self.audio_in.empty():
+                rest()
+        timer = threading.Timer(after, check)
+        timer.daemon = True
+        timer.start()
 
     def _audio_reconfigured(self, audio) -> None:
         """The engine was rebuilt (devices, echo mode, or it had stopped)."""
@@ -1051,11 +1071,25 @@ class Mint:
             self.loop.create_task(self._answer_watch(text, time.monotonic(), self._stop_epoch))
         from mint.app import instant
         from mint.app import meet_call
-        if meet_call.wants_call(text):
+        if meet_call.wants_end(text):
+            instant.ran("google_meet", {"action": "end"}, text)
+            threading.Thread(target=meet_call.end, name="meet-end", daemon=True).start()
+            text = f"{text}\n{meet_call.END_NOTE}"
+        elif meet_call.wants_call(text):
             # Started here, not left to the model (it once answered from an earlier failed attempt).
             instant.ran("google_meet", {"action": "start"}, text)
             self._meet_request()
             text = f"{text}\n{meet_call.START_NOTE}"
+        if len(text.split()) >= 3:
+            # What Mint has saved that bears on it, sent with the words (voice requests get theirs with the
+            # first tool, or by recall): a typed or remote request is answered from what Mint knows.
+            try:
+                from mint.knowledge import memory as membank
+                memo = await asyncio.wait_for(asyncio.to_thread(membank.recall_block, text, 4), 1.5)
+            except Exception:
+                memo = ""
+            if memo:
+                text = f"{text}\n\n[{memo}]"
         session = self.session
         try:
             # Realtime text is how the 3.x Live models take a typed turn
@@ -1091,6 +1125,23 @@ class Mint:
             self._turn_open = True
             self._window.handling()
             self.loop.create_task(self.session.send_realtime_input(text=note))
+
+    def _check_refused_job(self, said: str) -> None:
+        """The user asked for a background job and the model said it can't (see background.refused_job):
+        correct it once, so it starts the job instead of repeating the refusal."""
+        from mint.app import background
+        from mint.app import live
+        if not background.refused_job(live.request(), said):
+            return
+        if time.monotonic() - background.last_started < 30 or \
+                getattr(self, "_refused_job_at", 0) > time.monotonic() - 60:
+            return
+        self._refused_job_at = time.monotonic()
+        self._print("[the model said a background job can't use the screen: correcting it]")
+        if self.loop is not None and self.session is not None:
+            self._turn_open = True
+            self._window.handling()
+            self.loop.create_task(self.session.send_realtime_input(text=background.REFUSAL_NOTE))
 
     async def _answer_watch(self, text: str, sent_at: float, epoch: int, wait: float = 30.0) -> None:
         """A typed request that gets nothing at all back - no words, no tool call - within `wait`
@@ -1168,6 +1219,7 @@ class Mint:
         if (meta := getattr(response, "usage_metadata", None)) is not None:
             from mint.core import usage
             usage.live(config.MODEL, meta)
+            self._watch_context(meta)        # near the sliding window: compact at a quiet moment
         if update := getattr(response, "session_resumption_update", None):
             if getattr(update, "resumable", False) and getattr(update, "new_handle", None):
                 self._resume_handle = update.new_handle
@@ -1250,6 +1302,7 @@ class Mint:
                         self._last_said = self._said
                 finished_said = "" if self._suppress_turn else self._said
                 self._check_empty_done(finished_said)
+                self._check_refused_job(finished_said)
                 if (not self._suppress_turn or self._verdict == "act") and \
                         not (self.audio.playing or not self.audio_in.empty()):
                     # Mint is done (or its answer was only a "hmm"): the follow-up window starts.
@@ -1287,14 +1340,15 @@ class Mint:
             # answer must not come back for them.
             ids = set(cancelled.ids)
             if self._batch and ids & {i for i, _ in self._batch}:
-                self._print("[server cancelled the running tool]")
-                from mint.app import control
-                from mint.tools import desktop
-                control.stop()
-                desktop.cancel_running()
-                if self._tool_task is not None and not self._tool_task.done():
-                    self._tool_task.cancel()
+                # The user talked over it. What is running is not thrown away: it goes on in the
+                # background and is reported when it ends (background.py); the calls after it in
+                # this batch are not run. Only "stop" stops it.
+                self._print("[server cancelled the running tool: it goes on in the background]")
                 self._batch = []
+                self._batch_cancelled = True
+                detach = getattr(self, "_detach_now", None)
+                if detach is not None:
+                    detach.set()
 
     async def _on_heard(self, chunk: str) -> None:
         """A piece of the transcript of what the microphone heard."""
@@ -1364,36 +1418,90 @@ class Mint:
     async def compact(self, source: str = "button") -> str:
         """Like /compact: a Flash model summarises the conversation, and a new
         live session starts from that summary instead of the full back-and-forth.
-        The context gets small again; what happened is kept."""
-        from mint.ui.chat import summarize_text
-        transcript = (await asyncio.to_thread(self.ui.chat_transcript) or "") if self.ui else ""
-        if not transcript.strip():
-            transcript = self._history_transcript()
-        if not transcript.strip():
-            return "There is nothing to compact yet."
-        self._print(f"[compacting ({source}): {len(transcript)} characters]")
-        summary = await asyncio.to_thread(summarize_text, transcript)
-        if summary.startswith("Could not summarise"):
+        The context gets small again; what happened is kept - the user's own
+        rules and requests word for word (compaction.py)."""
+        summary = await self._compaction_summary(source)
+        if summary.startswith(("Could not summarise", "There is nothing")):
             return summary + " The session was left as it was."
         await self.new_session(source, carry=summary)
         return summary
 
-    def _history_transcript(self) -> str:
-        """The conversation since the last clear/new session, from history.jsonl
-        (for when there is no chat window)."""
-        import json
+    async def _compaction_summary(self, source: str) -> str:
+        """The sectioned summary of this conversation (history.jsonl since the last new session or
+        compaction), updating the previous one; the plan under way goes in as it is."""
+        from mint.app import compaction
+        from mint.app import tasks
         from mint.knowledge.conversation import HISTORY
+        since = max(float(getattr(self, "_fresh_at", 0.0) or 0.0), _STARTED)
+        items = await asyncio.to_thread(compaction.entries, HISTORY, since)
+        if not items:
+            return "There is nothing to compact yet."
+        plan = tasks.outline(self.task) if self.task else ""
+        self._print(f"[compacting ({source}): {len(items)} lines{' + the last summary' if _carry_over else ''}]")
         try:
-            entries = [json.loads(line) for line in HISTORY.read_text().splitlines()[-200:] if line.strip()]
-        except (OSError, ValueError):
-            return ""
-        for i in range(len(entries) - 1, -1, -1):
-            if entries[i].get("role") == "marker":
-                entries = entries[i + 1:]
-                break
-        names = {"user": "User", "mint": "Mint", "tool": "Tool"}
-        return "\n".join(f"{names.get(e.get('role'), e.get('role'))}: {e.get('text', '')}"
-                         for e in entries if e.get("role") in names)
+            return await asyncio.to_thread(compaction.summarize, items, _carry_over, plan)
+        except Exception as error:
+            log.warning("compaction failed: %s", str(error)[:160])
+            return f"Could not summarise right now: {str(error)[:120]}"
+
+    def _watch_context(self, meta) -> None:
+        """Every turn's Live usage numbers: near the sliding window's trigger (where the server would
+        silently drop the oldest turns, the user's first instructions with them), compact at the next
+        quiet moment instead (pref auto_compact)."""
+        from mint.app import compaction
+        from mint.core import prefs
+        tokens = compaction.context_tokens(meta)
+        if not tokens:
+            return
+        self._context_tokens = tokens
+        if (not compaction.due(tokens) or getattr(self, "_auto_compacting", False)
+                or time.monotonic() < getattr(self, "_auto_compact_after", 0.0) or not prefs.get("auto_compact")):
+            return
+        self._auto_compacting = True
+        log.info("context at %d tokens (%.0f%% of the window's trigger): compacting at the next quiet moment",
+                 tokens, 100 * tokens / compaction.TRIGGER_TOKENS)
+        self._print(f"[context {tokens} tokens: compacting at the next quiet moment]")
+        asyncio.create_task(self._auto_compact())
+
+    async def _quiet_for(self, seconds: float, deadline: float) -> bool:
+        """True once nothing has happened for `seconds` (compaction.busy_reason); False at the deadline."""
+        from mint.app import compaction
+        calm = None
+        while time.monotonic() < deadline:
+            if compaction.busy_reason(self):
+                calm = None
+            else:
+                calm = calm or time.monotonic()
+                if time.monotonic() - calm >= seconds:
+                    return True
+            await asyncio.sleep(0.5)
+        return False
+
+    async def _auto_compact(self) -> None:
+        """Compact on our own, at a quiet moment: Mint not speaking, the user not talking, no tool or
+        plan step running. Background jobs and the plan are outside the Live session and go on."""
+        from mint.app import compaction
+        from mint.knowledge.conversation import memory
+        try:
+            deadline = time.monotonic() + 15 * 60
+            while await self._quiet_for(compaction.QUIET_FOR, deadline):
+                await asyncio.to_thread(memory.checkpoint, 20)     # now, so new_session has nothing left to wait for
+                summary = await self._compaction_summary("auto")
+                if summary.startswith(("Could not summarise", "There is nothing")):
+                    self._print(f"[auto compaction skipped: {summary[:120]}]")
+                    self._auto_compact_after = time.monotonic() + 300
+                    return
+                if compaction.busy_reason(self):
+                    continue                     # something started meanwhile: wait, and summarise again
+                log.info("auto compaction at %d tokens", getattr(self, "_context_tokens", 0))
+                await self.new_session("auto", carry=summary)
+                return
+            log.info("no quiet moment for an automatic compaction in 15 min; trying again after a later turn")
+        except Exception:
+            log.exception("automatic compaction failed")
+            self._auto_compact_after = time.monotonic() + 300
+        finally:
+            self._auto_compacting = False
 
     async def new_session(self, source: str = "button", carry: str = "") -> None:
         """Start over: fold this conversation into long-term memory, forget the
@@ -1403,15 +1511,18 @@ class Mint:
         from mint.knowledge.conversation import memory, HISTORY
         self._print(f"[{'compact' if carry else 'new session'} ({source})]")
         self._flush_playback()
-        if self.task:
-            from mint.app import tasks
-            tasks.pause(self.task, "a new conversation was started")
-        self.task = None
+        if not carry:                    # a compaction keeps the plan under way (its steps are in the summary)
+            if self.task:
+                from mint.app import tasks
+                tasks.pause(self.task, "a new conversation was started")
+            self.task = None
+            self.ui.progress(0, 0)
         self._recent_calls = {}
-        self.ui.progress(0, 0)
-        await asyncio.to_thread(memory.summarize_now)
+        await asyncio.to_thread(memory.checkpoint, 20)       # the memory checkpoint before a fresh start
         self._resume_handle = None
         _carry_over = carry
+        self._fresh_at = time.time()
+        self._context_tokens = 0
         try:
             import json as _json
             with open(HISTORY, "a") as f:          # later compactions start from here
@@ -1419,7 +1530,9 @@ class Mint:
                                      "text": "compacted" if carry else "new session"}) + "\n")
         except OSError:
             pass
-        if carry:
+        if carry and source == "auto":
+            self.ui.chat_note("compacted automatically · your earlier instructions are kept")
+        elif carry:
             self.ui.chat_reset("compacted · the session continues from this summary")
             self.ui.chat_card(carry)
         else:
@@ -1536,6 +1649,8 @@ class Mint:
             self._tool_task.cancel()
         self._batch, self._batch_results = [], {}
         self._busy = False
+        from mint.app import background
+        still_running = background.on_stop()
         # A lesson on screen ends, and a demonstration being watched is wrapped up. A meeting
         # recording goes on: "stop" is said in meetings all the time.
         try:
@@ -1563,7 +1678,9 @@ class Mint:
             note = ("STOPPED: the user said stop. Everything was cut off and nothing more will "
                     "be done. Do not continue, retry or resume the task" +
                     (" (the task plan was cancelled)" if had_task else "") +
-                    ". Just say 'Stopped.' and wait.")
+                    ". Just say 'Stopped.' and wait." +
+                    (f" ({still_running} They were NOT stopped - if the user meant them too, stop them with "
+                     "stop_agent.)" if still_running else ""))
             responses = [types.FunctionResponse(
                 id=i, name=n, response={"result": (finished[i] + " -- then: " + note) if i in finished else note})
                 for i, n in pending]
@@ -1823,6 +1940,8 @@ class Mint:
 
     def _done_speaking(self) -> None:
         """Playback drained: reopen the mic and reset the idle clock."""
+        if self.paused:
+            self._audio_rest_later()
         if self.half_duplex:
             self.audio.muted = False
         self._last_voice = time.monotonic()
@@ -1896,11 +2015,18 @@ class Mint:
         self._batch_results = {}
         opened = False
         try:
+            self._batch_cancelled = False
             for function in tool_call.function_calls:
-                if control.stopped():
+                if control.stopped() or self._batch_cancelled:
                     return
                 name, args = function.name, dict(function.args or {})
-                if name in _OPENERS and opened:
+                # use_tool(name, args) is the hidden tool itself from here on: the guard, the phone gate, the
+                # trace, undo and the screen lease all see the real name and arguments (tool_diet.py).
+                from mint.tools import diet as tool_diet
+                name, args, unusable = tool_diet.unwrap(name, args)
+                if unusable:
+                    result, image = unusable, None
+                elif name in _OPENERS and opened:
                     # Each open brings a new tab or window to the front, and the
                     # next read or type acts on whatever is in front. In testing
                     # the model opened Gmail and then a new doc in one batch, so
@@ -1928,19 +2054,20 @@ class Mint:
                     else:
                         if name in _OPENERS:
                             opened = True
-                        result, image = await self._run_one(name, args)
+                        result, image = await self._run_detachable(name, args)
                         self._recent_calls[key] = (time.monotonic(), result)
                         if send_key:
                             sends[send_key] = (time.monotonic(), result)
+                result = tool_diet.fit(name, result)        # a huge result: head + tail, the rest in a file
                 self._print(f"[{name}] {result[:160]}")
-                _trace(name, args, result)
+                _trace(name if name == function.name else f"{name} (use_tool)", args, result)
                 from mint.app import telegram
                 telegram.on_event("tool_end", {"name": name, "args": args, "result": result})
                 from mint.knowledge.conversation import memory
                 memory.add("tool", f"{name}({_describe(name, args)}) -> {result[:240]}")
                 self._last_voice = time.monotonic()
                 responses.append(types.FunctionResponse(
-                    id=function.id, name=name, response={"result": result}))
+                    id=function.id, name=function.name, response={"result": result}))
                 self._batch_results[function.id] = result
                 from mint.app import autopilot
                 autopilot.note(name, args, result)
@@ -1966,6 +2093,38 @@ class Mint:
                 video=types.Blob(data=base64.b64decode(image["data"]), mime_type=image["mime_type"]))
         await self.session.send_tool_response(function_responses=responses)
 
+    async def _run_detachable(self, name: str, args: dict) -> tuple[str, dict | None]:
+        """Run one call; if it runs long, or the user talks over it, it goes on in the background
+        (background.py) and the model is answered at once - so the conversation is never stuck
+        behind it and nothing the user started is thrown away."""
+        from mint.app import background
+        from mint.core import guard
+        work = asyncio.ensure_future(self._run_one(name, args))
+        self._detach_now = asyncio.Event()
+        started = time.monotonic()
+        try:
+            stays = name in background.NEVER_DETACH
+            while not work.done():
+                waits = [work] if stays or self._detach_now.is_set() else \
+                    [work, asyncio.ensure_future(self._detach_now.wait())]
+                await asyncio.wait(waits, timeout=0.25, return_when=asyncio.FIRST_COMPLETED)
+                if len(waits) > 1:
+                    waits[1].cancel()
+                if work.done():
+                    break
+                interrupted = self._detach_now.is_set()
+                slow = time.monotonic() - started > background.DETACH_AFTER
+                if (interrupted or slow) and not stays and guard.current() is None:
+                    why = "interrupted" if interrupted else "it is taking a while"
+                    note = background.detach(work, name, args, why)
+                    self._print(f"[{name}: going on in the background ({why})]")
+                    return note, None
+        except asyncio.CancelledError:
+            # Stopped (stop_everything) - the call goes too.
+            work.cancel()
+            raise
+        return work.result()
+
     async def _run_one(self, name: str, args: dict) -> tuple[str, dict | None]:
         from mint.app import telegram
         refused = telegram.gate(name, args)     # a read-only request from the phone: no sends, deletes or purchases
@@ -1990,12 +2149,8 @@ class Mint:
             if what in ("summarize", "summarise", "compact"):
                 # Summarising compacts: once this answer is spoken, the session
                 # restarts from the summary (see _compact_when_quiet).
-                from mint.ui.chat import summarize_text
-                transcript = (await asyncio.to_thread(self.ui.chat_transcript) or "") or self._history_transcript()
-                if not transcript.strip():
-                    return "There is nothing to summarise yet.", None
-                summary = await asyncio.to_thread(summarize_text, transcript)
-                if summary.startswith("Could not summarise"):
+                summary = await self._compaction_summary("asked")
+                if summary.startswith(("Could not summarise", "There is nothing")):
                     return summary, None
                 asyncio.create_task(self._compact_when_quiet(summary))
                 return (f"Summary (the session will now be compacted to it - you keep this summary, the "
@@ -2036,6 +2191,19 @@ class Mint:
         if name == "plan_task":
             from mint.app import tasks
             steps = [str(s) for s in (args.get("steps") or []) if str(s).strip()]
+            goal = " ".join(str(args.get("goal", "")).split())
+            busy = self.task is not None and tasks.remaining(self.task) and \
+                time.time() - float(self.task.get("updated") or self.task.get("started") or 0) < 300
+            asked = getattr(self, "_plan_refused", ("", 0.0))
+            if busy and goal and goal.lower() != str(self.task.get("goal", "")).lower() and \
+                    not (asked[0] == goal.lower() and time.monotonic() - asked[1] < 90):
+                # A second request while a plan is under way: it must not push the first one aside.
+                self._plan_refused = (goal.lower(), time.monotonic())
+                done, total = tasks.progress(self.task)
+                return (f"NOT STARTED: you are in the middle of '{self.task['goal']}' (step {done + 1} of {total}). "
+                        "Do this new request alongside it with background_task (write the whole job), then carry "
+                        "on with the current plan. Only if the user wants to drop the current one and do this "
+                        "instead, call plan_task again with the same goal."), None
             self.task, paused = tasks.start(str(args.get("goal", "")), steps)
             self._print(f"[task] {self.task['goal']}: " + " | ".join(f"{i}. {s}" for i, s in enumerate(steps, 1)))
             if steps:
@@ -2074,7 +2242,12 @@ class Mint:
             result, image = already, None
         else:
             instant.model_ran(name)             # and the instant path will not run it after this
-            result, image = await tools.dispatch(name, args)
+            from mint.app import background
+
+            def waiting(what: str) -> None:
+                self._print(f"[{name}: {what}]")
+            async with background.hold(background.Screen.YOU, name, args, waiting):
+                result, image = await tools.dispatch(name, args)
         self.ui.activity_end(name, not _looks_failed(result))
         return result + self._context_after(name), image
 
@@ -2102,7 +2275,12 @@ class Mint:
             if name == "google_meet":
                 instant.ran(name, args, heard.strip())
                 self._print(f"[instant] {label}")
-                self._meet_request(spoken=True)
+                if args.get("action") == "end":
+                    from mint.app import meet_call
+                    self.meet_note(meet_call.END_NOTE)
+                    threading.Thread(target=meet_call.end, name="meet-end", daemon=True).start()
+                else:
+                    self._meet_request(spoken=True)
                 return
             try:
                 args = await asyncio.to_thread(instant.resolve, name, args)
@@ -2353,6 +2531,10 @@ class Mint:
             # A meeting cut off by a quit or crash still gets its transcript and notes.
             threading.Timer(20, meetings.resume_pending).start()
         membank.tidy_later()                # merge duplicate memories, drop past ones (once a day)
+        from mint.knowledge import learner
+        learner.curate_later()              # skills unused for a month go stale, old stale ones are archived
+        from mint.knowledge import history_index
+        history_index.ingest_later(10)      # the history search index catches up, in its own thread
         attempt = 0
         self._state("starting")
         if self.ear is not None and self.ear.reason != "wake":
@@ -2426,7 +2608,9 @@ class Mint:
             self._restarting = False
             return
         message = str(error)
-        self._state("offline", _short_error(message))
+        why = _outage_caption(message)
+        self._state("offline", why)
+        self._tell_outage(why)
         from mint.core import gemini_keys
         if gemini_keys.failed(_live_env, message, "live"):
             # Rate-limited or refused, and a second Gemini key is set: reconnect on it at once, same model.
@@ -2472,7 +2656,41 @@ class Mint:
             raise SystemExit(1)
         delay = min(2 ** attempt, 30)
         log.warning("session dropped (%s); reconnecting in %ss", _short_error(message), delay)
-        await asyncio.sleep(delay)
+        await self._count_down(delay, why)
+
+    def _tell_outage(self, why: str) -> None:
+        """The voice service failed: say so in the caption - and once, out loud (the Mac's own voice, as
+        Gemini's is gone), when the user spoke to Mint just now and is waiting for an answer."""
+        try:
+            self.ui.action(why)
+        except Exception:
+            log.debug("outage caption failed", exc_info=True)
+        now = time.monotonic()
+        waiting = now - getattr(self, "_spoke_at", 0.0) < 30 and now - getattr(self, "_outage_said", 0.0) > 120
+        if waiting and self.voice_on and not self.text_mode and self.meet is None:
+            self._outage_said = now
+            try:
+                import subprocess
+                subprocess.Popen(["/usr/bin/say", why.split(" - ")[0] + ". Trying again."],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                log.debug("could not say the outage", exc_info=True)
+
+    async def _count_down(self, delay: float, why: str) -> None:
+        """Wait before reconnecting, with the time left in the caption instead of silence."""
+        end = time.monotonic() + delay
+        while (left := end - time.monotonic()) > 0:
+            seconds = max(1, round(left))
+            line = f"{why} - trying again in {seconds} second{'' if seconds == 1 else 's'}."
+            try:
+                self.ui.action(line)
+            except Exception:
+                log.debug("outage caption failed", exc_info=True)
+            await asyncio.sleep(min(left, 5.0 if left > 10 else 1.0))
+        try:
+            self.ui.action("Reconnecting…")
+        except Exception:
+            log.debug("outage caption failed", exc_info=True)
 
     async def _return_to_primary(self, primary: str) -> None:
         """After an outage moved Mint to the fallback model: every ten minutes,
@@ -2504,6 +2722,8 @@ class Mint:
         # pauses: starting it (voice processing) resets the Ear's microphone, and
         # in testing a sentence cut there lost its end.
         await self._own_mic.wait()
+        if self.paused:
+            self._audio_rest_later(5.0)        # started with the mic off: the engine comes up, then rests
         await self.audio.listen(self._on_audio)
 
     async def _ear_feed(self) -> None:
@@ -2694,12 +2914,20 @@ class Mint:
         # Fold the rest of today's conversation into memory before quitting,
         # but never hold up quitting for long.
         from mint.knowledge.conversation import memory
-        worker = threading.Thread(target=memory.summarize_now, daemon=True)
-        worker.start()
-        worker.join(timeout=8)
+        memory.close(timeout=8)
 
 
 # --- helpers ---------------------------------------------------------------------
+
+def _jobs_note() -> str:
+    """Background jobs started earlier that are still running (they outlive a reconnect)."""
+    try:
+        from mint.app import background
+        note = background.running_note()
+    except Exception:
+        return ""
+    return (note + " They report when they end; do not start them again.") if note else ""
+
 
 def _describe(name: str, args: dict) -> str:
     """A short, human caption for a tool call, shown in the HUD."""
@@ -2773,3 +3001,28 @@ def _duration(seconds: float) -> str:
 def _short_error(message: str) -> str:
     message = " ".join(message.split())
     return message[:90] + ("…" if len(message) > 90 else "")
+
+
+# A dropped or refused Live session, in one plain line for the caption (most specific first).
+_OUTAGES = (
+    (("api key", "api_key", "permission_denied", "unauthenticated", "suspended", " 401", " 403"),
+     "Gemini refused the API key - check it in Settings"),
+    (("429", "quota", "resource_exhausted", "rate limit", "too many requests"),
+     "Gemini's quota is used up for now"),
+    (("getaddrinfo", "nodename", "name or service", "network is unreachable", "no route", "connection refused",
+      "connection reset", "errno 8", "errno 51", "errno 61", "ssl", "cannot connect", "connecterror", "1006",
+      "timed out", "timeout", "handshake"),
+     "No connection to the voice service - check the internet"),
+    (("1011", "internal", "unavailable", "overloaded", "503", "500", "502", "deadline"),
+     "The voice service is down on Google's side"),
+    (("1007", "invalid argument", "invalid_argument"),
+     "The voice service refused Mint's settings"),
+)
+
+
+def _outage_caption(message: str) -> str:
+    lowered = f" {' '.join(str(message).split()).lower()}"
+    for words, caption in _OUTAGES:
+        if any(word in lowered for word in words):
+            return caption
+    return "The voice service dropped"

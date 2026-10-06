@@ -149,6 +149,9 @@ DEFAULTS: dict = {
     "update_channel": "stable",
     # Mishearings the user corrected (hearing.py; the fix_hearing tool).
     "hearing_fixes": [],
+    # Near the Live context limit, compact the conversation at a quiet moment instead of letting the
+    # server drop its oldest turns (compaction.py).
+    "auto_compact": True,
     # Minutes asleep and idle before Mint unloads and Mint Ear listens instead
     # (mint/app/ear.py). 0 = stay loaded - the default: in the user's first hour with
     # it (27 Sep) the Ear missed wakes and the hand-over was not reliable enough.
@@ -184,6 +187,9 @@ DEFAULTS: dict = {
     "email_mail_account": "",          # the Mail account watched; "" = every inbox
     "stop_words": ["stop", "stop it", "stop everything", "cancel", "cancel that", "abort",
                    "enough", "hold on", "never mind", "nevermind", "shut up"],
+    # The voice session declares only the everyday tools; the rest are found with find_tools and run with
+    # use_tool (tool_diet.py). False = declare every tool, as before (takes effect at Mint's next start).
+    "tool_diet": True,
 }
 
 THEMES = ("mint", "blue", "aurora", "sunset", "rose", "mono")

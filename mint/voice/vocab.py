@@ -84,6 +84,8 @@ def terms() -> list[str]:
         pass
     if user := str(prefs.get("user_name") or "").strip():
         add(user)
+    global _common
+    _common = None              # the 235,000-word dictionary is only for this: 19 MB kept for nothing (6 Oct)
     return found[:LIMIT]
 
 

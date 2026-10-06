@@ -74,6 +74,9 @@ class VoiceAudio:
         self.private_output = False            # headphones: nothing said reaches the mic
         self.suspended = False
         self.silent = False                    # a Google Meet call has Mint's voice: the speaker plays silence
+        self.resting = False                   # the mic is off (Mint paused): no engine running for nothing
+        self._restarting = False               # a rebuild is under way (it takes ~2 s with voice processing)
+        self._restarted_at = 0.0
         self.on_reconfigure = None             # callback(audio) after every rebuild
         self.status = ""
         self._pending = 0
@@ -223,7 +226,7 @@ class VoiceAudio:
 
     def _start(self) -> None:
         with self._build_lock:
-            if self._started or self.suspended:
+            if self._started or self.suspended or self.resting:
                 return
             if self._deferred:
                 self._deferred = False
@@ -260,6 +263,7 @@ class VoiceAudio:
             if self._closed or self._deferred:
                 return                         # deferred: the first start builds with the new settings
             self._restart_pending = False
+            self._restarting = True
             log.warning("audio: restarting (%s)", reason)
             print(f"  [audio: restarting - {reason}]", flush=True)
             self._teardown()
@@ -269,6 +273,9 @@ class VoiceAudio:
             except Exception as error:
                 log.error("audio restart failed: %s", error)
                 print(f"  [audio: could not restart the microphone: {error}]", flush=True)
+            finally:
+                self._restarting = False
+                self._restarted_at = time.monotonic()
             if self.on_reconfigure is not None:
                 try:
                     self.on_reconfigure(self)
@@ -277,7 +284,8 @@ class VoiceAudio:
 
     def _schedule_restart(self, reason: str) -> None:
         """From any thread; several notifications in a burst make one restart."""
-        if self._closed or self._restart_pending or self.suspended or time.monotonic() < self._settle_until:
+        if self._closed or self._restart_pending or self.suspended or self.resting or self._restarting \
+                or time.monotonic() < self._settle_until:
             return
         self._restart_pending = True
         threading.Timer(0.5, lambda: self.restart(reason)).start()
@@ -307,7 +315,28 @@ class VoiceAudio:
             if not self.suspended:
                 return
             self.suspended = False
+            if self.resting:
+                return                         # the mic is off anyway: it starts when needed (wake)
         self.restart("microphone free again")
+
+    def rest(self) -> None:
+        """The mic is off (Mint paused) and nothing is playing: stop the engine. Running, voice processing cost
+        ~15% of a core while listening to nothing (6 Oct). wake() brings it back - for the mic, or to speak."""
+        with self._build_lock:
+            if self.resting or self.suspended or self._closed or self._deferred or self.playing:
+                return
+            self.resting = True
+            self._teardown()
+        log.info("audio resting: the microphone is off")
+
+    def wake(self) -> None:
+        with self._build_lock:
+            if not self.resting:
+                return
+            self.resting = False
+            if self.suspended:
+                return
+        self.restart("the microphone is on again, or Mint speaks")
 
     # --- capture ---------------------------------------------------------------
 
@@ -340,6 +369,10 @@ class VoiceAudio:
             except asyncio.TimeoutError:
                 # Watchdog: a running engine delivers audio every 0.1 s. Silence
                 # for seconds means it stopped under us; bring it back.
+                if self.resting or self._restarting or time.monotonic() - self._restarted_at < 6.0:
+                    # (a rebuild right after another one tore down an audio unit macOS still had a callback
+                    # queued for: SIGSEGV in AVAudioIOUnit::_GetHWFormat, 6 Oct)
+                    continue
                 if (self._started and not self.suspended and not self._restart_pending
                         and time.monotonic() - self._last_tap > 3.0):
                     await asyncio.to_thread(self.restart, "the microphone went silent")
@@ -376,6 +409,8 @@ class VoiceAudio:
         self._start()
         while True:
             chunk = await in_queue.get()
+            if self.resting:
+                await asyncio.to_thread(self.wake)     # the mic is off but Mint has something to say
             if self.suspended or not self._started:
                 continue                       # a call has the speaker; say nothing
             samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768

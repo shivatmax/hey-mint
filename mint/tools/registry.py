@@ -612,9 +612,17 @@ def tools() -> list[types.Tool]:  # noqa: F811
     return result + [types.Tool(function_declarations=extra_tools.declarations())]
 
 
+async def _fenced_core(name: str, args: dict) -> tuple[str, dict | None]:
+    """Outside text (pages, mail, screen and file text) comes back fenced as data (untrusted.py) - before any
+    of Mint's own notes (context pack, loop warnings, what is in front) are added to it."""
+    from mint.core import untrusted
+    result, image = await _core_dispatch(name, args)
+    return untrusted.fence(name, result, args), image
+
+
 async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:  # noqa: F811
     from mint.tools import extra as extra_tools
-    return await extra_tools.wrap(_core_dispatch, name, args)
+    return await extra_tools.wrap(_fenced_core, name, args)
 
 
 # --- Sub-agents (agents/orchestrator.py) ------------------------------------------
@@ -775,7 +783,9 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:  # noqa: F
     if name == "watch_video":
         from mint.tools import video
         try:
-            return await asyncio.to_thread(video.tool, args or {})
+            from mint.core import untrusted
+            text, image = await asyncio.to_thread(video.tool, args or {})
+            return untrusted.fence(name, text, args), image
         except Exception as error:
             log.exception("watch_video failed")
             return f"FAILED: could not watch the video: {error}", None
@@ -893,3 +903,44 @@ def _hearing_handlers():
 
 
 _SYNC["fix_hearing"] = lambda a: _hearing_handlers()["fix_hearing"](a)
+
+
+# --- Tool diet: the rarely used tools behind find_tools / use_tool (tool_diet.py) -------------
+# The voice session unwraps use_tool itself before its checks; this layer is for every other
+# caller (background jobs, the command line), so the real tool runs either way.
+
+_dispatch_before_diet = dispatch
+
+
+async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:  # noqa: F811
+    from mint.tools import diet as tool_diet
+    if name == "find_tools":
+        return await asyncio.to_thread(tool_diet.find, str((args or {}).get("query", ""))), None
+    if name == "use_tool":
+        name, args, unusable = tool_diet.unwrap(name, args)
+        if unusable:
+            return unusable, None
+        if name in tool_diet.BRIDGE:
+            return f"use_tool runs a tool; call {name} directly.", None
+    result, image = await _dispatch_before_diet(name, args)
+    return tool_diet.fit(name, result), image
+
+
+# --- Parallel work: background jobs (background.py) -----------------------------------
+# A job runs alongside the conversation and other jobs, with Mint's own tools.
+
+_tools_before_background = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.app import background
+    return _tools_before_background() + [types.Tool(function_declarations=[background.declaration()])]
+
+
+def _background_task(args: dict) -> str:
+    from mint.app import background
+    return background.start(str(args.get("task", "")), str(args.get("context", "") or ""),
+                            str(args.get("title", "") or ""))
+
+
+_SYNC["background_task"] = _background_task

@@ -153,6 +153,11 @@ class Hub:
             result = providers.check_keys()
             print(f"  [agents: provider keys {result}]", flush=True)
         threading.Thread(target=keys, daemon=True, name="agent-key-check").start()
+        try:                                   # Mint's own background jobs, in the notch's agents list
+            from mint.app import background
+            background.attach(self)
+        except Exception:
+            log.debug("no notch feed for jobs", exc_info=True)
         try:                                   # the orbs and chat lines, when there is a UI
             from mint.ui import agent_view
             agent_view.attach(self)
@@ -187,6 +192,11 @@ class Hub:
                 await mint.wake_up("agent")
             except Exception:
                 log.debug("could not wake for an agent", exc_info=True)
+        try:
+            from mint.app import background
+            await background.until_quiet(mint, 20.0 if wake else background.QUIET_WAIT)
+        except Exception:
+            log.debug("could not wait for a quiet moment", exc_info=True)
         self._outbox.append(text)
         await self.flush()
 
@@ -216,6 +226,9 @@ class Hub:
 
     def delegate(self, agent_name: str, task: str, context: str = "", thinking: str | None = None,
                  why: str = "", folder: str = "", helpers: list[str] | None = None, save_to: str = "") -> str:
+        from mint.tools import automations
+        if automations.refused():              # the user said "pause everything"
+            return automations.refused()
         agent = registry.get(agent_name)
         if agent is None:
             names = ", ".join(a["name"] for a in registry.load())
@@ -285,6 +298,14 @@ class Hub:
         ref = (ref or "").strip().lower()
         if ref in self.runs:
             return self.runs[ref]
+        import re
+        number = re.fullmatch(r"(?:task|job)?[\s#-]*(\d+)", ref)
+        if number and f"task-{number.group(1)}" in self.runs:
+            return self.runs[f"task-{number.group(1)}"]
+        jobs = [r for r in self.runs.values() if r.id.startswith("task-") and ref and
+                (ref in getattr(r, "title", "").lower() or ref in r.task.lower())]
+        if jobs:
+            return max(jobs, key=lambda r: (r.active, r.started))
         matches = [r for r in self.runs.values() if r.name.lower() == ref or (ref and ref in r.name.lower())]
         active = [r for r in matches if r.active]
         pool = active or matches
@@ -350,6 +371,9 @@ class Hub:
             if not r.active:
                 continue
             r.stop = True
+            if r.agent.get("runner") in ("mint", "detached"):
+                from mint.app import background
+                background.stop_job(r)
             if r.answer is not None and not r.answer.done():
                 self.loop.call_soon_threadsafe(r.answer.set_result, "(stopped)")
 
@@ -406,17 +430,24 @@ class Hub:
         agent = run.agent
         workspace = Path(run.agent["workspace"]).expanduser()
         workspace.mkdir(parents=True, exist_ok=True)
+        mint_job = agent.get("runner") == "mint"
+        if mint_job:
+            from mint.app import background
         names = list(dict.fromkeys(list(agent.get("tools") or []) + ["ask_user", "report_progress"]))
-        schema = agent_tools.schemas(names)
+        schema = background.schemas() if mint_job else agent_tools.schemas(names)
         if run.mission is not None:
             delegating = run.depth < team.MAX_DEPTH and run.mission.allowed != []
             schema += [{"name": n, **team.SCHEMAS[n]} for n in team.TEAM_TOOLS
                        if delegating or n not in ("ask_agent", "ask_agents")]
-        system = self._system(run, workspace)
-        memory_note = await asyncio.to_thread(team.recall, run.task)
-        source = f"{run.parent.name} (your teammate)" if run.parent else "Mint"
-        run.messages = [{"role": "user", "content": f"Task from {source}:\n{run.task}" +
-                         (f"\n\nContext:\n{run.context}" if run.context else "") + memory_note}]
+        if mint_job:
+            system = await asyncio.to_thread(background.system, run)
+            run.messages = [{"role": "user", "content": await asyncio.to_thread(background.first_message, run)}]
+        else:
+            system = self._system(run, workspace)
+            memory_note = await asyncio.to_thread(team.recall, run.task)
+            source = f"{run.parent.name} (your teammate)" if run.parent else "Mint"
+            run.messages = [{"role": "user", "content": f"Task from {source}:\n{run.task}" +
+                             (f"\n\nContext:\n{run.context}" if run.context else "") + memory_note}]
         run.status = "working"
         self.emit("start", run, run.task)
         try:
@@ -445,11 +476,22 @@ class Hub:
                         run.messages.append({"role": "assistant", "content": out["text"] or "(ok)",
                                              **_continuation(out)})
                         continue
+                    if mint_job and not (out["text"] or "").strip() and not getattr(run, "_asked_result", False):
+                        # It stopped without saying what it found (6 Oct: the conversation then guessed it).
+                        run._asked_result = True
+                        run.messages.append({"role": "assistant", "content": "(done)", **_continuation(out)})
+                        run.messages.append({"role": "user", "content": "Now reply WITHOUT calling a tool: your "
+                                             "result for the user in one or two sentences - what was done and "
+                                             "what you actually found or read (quote it). Say plainly if you "
+                                             "could not check it."})
+                        continue
                     return await self._end(run, "done", out["text"] or "(no summary given)")
                 run.messages.append({"role": "assistant", "content": out["text"], "tool_calls": out["tool_calls"],
                                      **_continuation(out)})
                 calls = out["tool_calls"]
-                if len(calls) > 1 and all(c["name"] in _PARALLEL for c in calls):
+                if mint_job and background.parallel_safe(calls):
+                    results = await asyncio.gather(*(self._tool(run, c, workspace) for c in calls))
+                elif len(calls) > 1 and all(c["name"] in _PARALLEL for c in calls):
                     # Independent lookups in one step run together (searches, page
                     # reads): Astra's 16 one-at-a-time searches took 65 s in testing.
                     results = await asyncio.gather(*(self._tool(run, c, workspace) for c in calls))
@@ -478,10 +520,15 @@ class Hub:
             run.doing = "waiting for your answer"
             run.answer = self.loop.create_future()
             self.emit("ask", run, question)
-            await self.tell_mint(
-                f"(A message from your sub-agent {run.name} [{run.id}], not from the user.) {run.name} asks: "
-                f"\"{question}\". Ask the user this now, briefly and in your own words; when they answer, pass "
-                "the answer back with answer_agent.", wake=True)
+            if run.agent.get("runner") == "mint":
+                ask = (f"(Background work update - not from the user.) Background job {run.id} "
+                       f"(\"{getattr(run, 'title', run.task[:60])}\") asks: \"{question}\". Ask the user this now, "
+                       f"briefly and in your own words; pass their answer with answer_agent '{run.id}'.")
+            else:
+                ask = (f"(A message from your sub-agent {run.name} [{run.id}], not from the user.) {run.name} asks: "
+                       f"\"{question}\". Ask the user this now, briefly and in your own words; when they answer, "
+                       "pass the answer back with answer_agent.")
+            await self.tell_mint(ask, wake=True)
             try:
                 answer = await asyncio.wait_for(asyncio.shield(run.answer), ANSWER_TIMEOUT)
             except asyncio.TimeoutError:
@@ -495,11 +542,31 @@ class Hub:
             return "Noted."
         if name in team.TEAM_TOOLS:
             return await self._team_tool(run, name, args)
+        if run.agent.get("runner") == "mint":
+            from mint.ui import activity
+            from mint.app import background
+            try:
+                run.doing = activity.phrase(name, args) or name.replace("_", " ")
+            except Exception:
+                run.doing = name.replace("_", " ")
+            self.emit("tool", run, run.doing, tool=name)
+
+            def waiting(what: str) -> None:
+                run.doing = what
+                background._say_wait(run, what)
+                self.emit("progress", run, what)
+            result = await background.call(run, name, args, on_wait=waiting)
+            if name == "write_file" and not result.startswith(("FAILED", "NOT", "The ")):
+                run.files.append(str(args.get("path", "")))
+            from mint.core import untrusted
+            return untrusted.clip(result, 8000)
         run.doing = agent_tools.describe_args(name, args)
         self.emit("tool", run, run.doing, tool=name)
         root = run.mission.root if run.mission is not None else None
         destination = run.destination if run.parent is None else None
         result = await asyncio.to_thread(agent_tools.run, name, args, workspace, root, destination)
+        from mint.core import untrusted
+        result = untrusted.fence(name, result, args)      # pages and search results: data, not instructions
         if name == "write_file" and result.startswith("Wrote "):
             written = str(args.get("path", ""))
             written = str(Path(written).expanduser()) if written.startswith("~") else written
@@ -592,6 +659,8 @@ class Hub:
         return f"{child.name} {status}: {result[:6000]}{files}"
 
     async def _end(self, run: Run, status: str, result: str) -> None:
+        if run.id.startswith("task-"):
+            print(f"  [{run.id} {status}: {' '.join(str(result).split())[:200]}]", flush=True)
         delivered = ""
         if status == "done" and run.destination is not None and run.parent is None:
             try:
@@ -614,11 +683,24 @@ class Hub:
         where = delivered + (f" {'Working files' if delivered else 'Files'} are in {run.agent['workspace']}: "
                              f"{', '.join(working[-6:])}."
                              if working and run.agent.get("runner") != "codex" else "")
+        job = run.agent.get("runner") in ("mint", "detached")
         try:
             from mint.knowledge.conversation import memory
-            memory.add("agent", f"{run.name} ({status}) task: {run.task[:200]} -> {result[:600]}{where}")
+            memory.add("agent", (f"Background job {run.id} ({status}): {run.task[:200]} -> {result[:600]}" if job else
+                                 f"{run.name} ({status}) task: {run.task[:200]} -> {result[:600]}") + where)
         except Exception:
             pass
+        if job:
+            from mint.app import background
+            background.screen.forget(run.id)
+            background.learn(run, status, result)
+            text = background.report(run, status, result)
+            if text:
+                self._finished.append(text)
+                if self._flush_handle is None:
+                    self._flush_handle = self.loop.call_later(
+                        GATHER, lambda: asyncio.ensure_future(self._flush_results()))
+            return
         await asyncio.to_thread(team.remember, run, status, result)
         if run.parent is not None:
             # A helper reports to the agent that asked it, not to Mint.
@@ -650,8 +732,11 @@ class Hub:
         if not batch:
             return
         still = [r for r in self.runs.values() if r.active]
-        pending = f" Still working: {', '.join(r.name for r in still)}." if still else ""
-        head = ("(A message from your sub-agents, not from the user.) " if len(batch) > 1 else
+        pending = (f" Still working: {', '.join(r.id if r.id.startswith('task-') else r.name for r in still)}."
+                   if still else "")
+        jobs_only = all(b.startswith("Background job") or b.startswith("Your interrupted") for b in batch)
+        head = ("(Background work update - not from the user.) " if jobs_only else
+                "(A message from your sub-agents, not from the user.) " if len(batch) > 1 else
                 "(A message from your sub-agent, not from the user.) ")
         key_note = (" A key problem cannot be fixed by you or the agents: tell the user plainly that they need to "
                     "make a new API key and put it in .env - do not promise to fix it."
@@ -659,8 +744,13 @@ class Hub:
                     " The agents' account is out of credits: tell the user plainly they need to add credits (or "
                     "use another key) - you and the agents cannot fix that. Offer to do a small task yourself."
                     if any("has no credits left" in b for b in batch) else "")
-        await self.tell_mint(head + " | ".join(batch) + pending + key_note +
-                             " Tell the user the outcome briefly - one sentence per agent; offer to open files.")
+        quiet_ones = all(b.startswith("Your interrupted") for b in batch)
+        await self.tell_mint(head + " | ".join(batch) + pending + key_note + (
+            " This is for your context only: say nothing about it unless it changes what the user is doing now."
+            if quiet_ones else
+            " Tell the user the outcome briefly - one sentence per job; offer to open files."
+            if jobs_only else
+            " Tell the user the outcome briefly - one sentence per agent; offer to open files."))
 
 
 hub = Hub()

@@ -220,10 +220,14 @@ class MintNotchTicker(AppKit.NSObject):
         return self
 
     def tick_(self, timer):
+        from mint.ui.hud import _PROFILE, _profiled
+        started = time.perf_counter() if _PROFILE else 0.0
         try:
             self.owner.tick()
         except Exception:
             log.exception("notch tick failed")
+        if _PROFILE:
+            _profiled("notch", time.perf_counter() - started)
 
 
 def _in_call() -> bool:
@@ -271,6 +275,7 @@ class Notch:
         self._mint_words = ""                # what Mint is saying (the open notch's Mint pane shows it)
         self.allow_key = False
         self.agent_until = 0.0               # an agent finished: the notch shows its summary until then
+        self._calm, self._calm_skip = False, 0   # nothing moving on the notch: ticks at 10 a second (tick)
         self._agents_hooked = False
         self._search_hooked = False
         self._drag_count = -1
@@ -527,6 +532,13 @@ class Notch:
             return                              # off, or a transition is steering the shape
         now = time.monotonic()
         mouse = AppKit.NSEvent.mouseLocation()
+        if self._calm and not self._stirring(hud, mouse, now):
+            # Nothing on the notch is moving and nothing is near: a full look 10 times a second is plenty.
+            # Anything happening (the pointer coming close, Mint waking, words, a song) is back at 30.
+            self._calm_skip = (self._calm_skip + 1) % 3
+            if self._calm_skip:
+                return
+        self._calm_skip = 0
         island = self._island()
         inside = self._inside(mouse)
         near_notch = (abs(mouse.x - self.cx) < self.nw / 2 + WING and mouse.y > self.top - self.nh - 4)
@@ -672,6 +684,9 @@ class Notch:
         if not wings or agent_wing:
             self._indicator(state, activity, now)    # (with music on: the agent takes the right wing)
         showing_face = mode != "plain" and not wings
+        self._calm = (mode in ("compact", "plain") and not music and not activity and not caption and not guests
+                      and not shown_island and not agent_push and not pushed and not self.progress
+                      and not self.pinned and not self.hover_since and state in ("sleeping", "paused", "offline"))
         if (self.face_host.opacity() > 0.5) != showing_face:
             Quartz.CATransaction.begin()
             # Gone at once when something else takes the wing (the battery's words were drawn under a
@@ -683,6 +698,23 @@ class Notch:
         # Clicks only on the shape itself; everywhere else the window is air.
         self.panel.setIgnoresMouseEvents_(not inside)
         self.mode = mode
+
+    def _stirring(self, hud, mouse, now: float) -> bool:
+        """Cheap: is anything starting that the notch must follow at full speed?"""
+        if getattr(hud, "_state", "") not in ("sleeping", "paused", "offline") or getattr(hud, "_activity", None):
+            return True
+        if getattr(getattr(hud, "_said", None), "words", None) or getattr(getattr(hud, "_you", None), "words", None):
+            return True
+        if abs(mouse.x - self.cx) < self.nw / 2 + WING + 160 and mouse.y > self.top - self.nh - 160:
+            return True                         # the pointer is coming (hover must feel instant)
+        if now < max(self.battery_peek_until, self.search_until, self.agent_until, self.drag_until,
+                     self.music_peek_until):
+            return True
+        try:
+            from mint.ui.emotes import emotes
+            return now - getattr(emotes, "last_played", 0.0) < 4.0
+        except Exception:
+            return False
 
     def _emoting(self, now) -> bool:
         try:
@@ -1598,8 +1630,12 @@ class Notch:
             shown = sharing.visible()
         except Exception:
             shown = False
-        red = AppKit.NSColor.systemRedColor()
         hidden = bool(getattr(self.hud, "hidden", False))
+        painted = (mic, voice, shown, hidden, len(self.buttons))
+        if painted == getattr(self, "_painted", None):
+            return                              # nothing changed: images and tints stay (every frame cost ~0.3 ms)
+        self._painted = painted
+        red = AppKit.NSColor.systemRedColor()
         for symbol, button in self.buttons:
             if symbol.startswith("mic"):
                 button.setImage_(gfx.symbol("mic.fill" if mic else "mic.slash.fill", 14))

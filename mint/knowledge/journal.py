@@ -6,10 +6,11 @@ you about flights?", "what was that site you found last week?", "what did Astra
 find on Monday?", "which video did I have you watch on Friday?".
 
 It reads what Mint already keeps - every turn of every conversation with its
-time (history.jsonl: what the user said, what Mint did and answered, what the
-agents reported), the tasks, the automations' runs and the videos watched -
-narrows it to the days asked about, and a Flash Lite model answers from that,
-with dates and times. Nothing new is recorded for it.
+time (history.jsonl and its rotated-out parts in history-archive/: what the user
+said, what Mint did and answered, what the agents reported), the tasks, the
+automations' runs and the videos watched - narrows it to the days asked about,
+and a Flash Lite model answers from that, with dates and times. Nothing new is
+recorded for it.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import datetime as dt
 import json
 import logging
 import re
+import time
 
 from mint.core import config
 
@@ -25,6 +27,10 @@ log = logging.getLogger("mint.knowledge.journal")
 
 HISTORY = config.PROJECT_ROOT / "history.jsonl"
 MAX_CHARS = 90_000
+SMALL = 20_000        # a time range with less history than this goes to the model whole
+FAST_CHARS = 32_000   # what the index's hits (and the lines around them) may add up to
+WINDOW = 8            # lines either side of the best hit
+AROUND = 12           # lines either side for around= (scrolling)
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
           "november", "december"]
@@ -122,29 +128,44 @@ def _range(t: str, now: dt.datetime, today: dt.datetime) -> tuple[dt.datetime, d
     return today - dt.timedelta(days=30), now, "the last 30 days"
 
 
+def _history_files(start: dt.datetime) -> list:
+    """history.jsonl, after the rotated-out parts that may hold lines from `start` on
+    (history-archive/history-YYYYMMDD.jsonl holds lines up to that day)."""
+    files = []
+    for path in sorted((HISTORY.parent / "history-archive").glob("history-*.jsonl")):
+        try:
+            rotated = dt.datetime.strptime(path.stem.split("-", 1)[1][:8], "%Y%m%d")
+        except ValueError:
+            rotated = None
+        if rotated is None or rotated.date() >= start.date():
+            files.append(path)
+    return files + [HISTORY]
+
+
 def _history(start: dt.datetime, end: dt.datetime) -> list[str]:
     a, b = start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M")
     lines = []
-    try:
-        with HISTORY.open() as f:
-            for raw in f:
-                try:
-                    row = json.loads(raw)
-                except ValueError:
-                    continue
-                when = str(row.get("t", ""))
-                if not (a <= when <= b) or row.get("role") == "marker":
-                    continue
-                who = {"user": "User", "mint": "Mint", "jarvis": "Mint", "tool": "Did", "agent": "Agent"}.get(
-                    row.get("role"), str(row.get("role")))
-                text = " ".join(str(row.get("text", "")).split())
-                try:
-                    shown = dt.datetime.strptime(when, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %a %H:%M")
-                except ValueError:
-                    shown = when
-                lines.append(f"{shown} {who}: {text[:400 if who == 'Did' else 700]}")
-    except OSError:
-        pass
+    for path in _history_files(start):
+        try:
+            with path.open() as f:
+                for raw in f:
+                    try:
+                        row = json.loads(raw)
+                    except ValueError:
+                        continue
+                    when = str(row.get("t", ""))
+                    if not (a <= when <= b) or row.get("role") == "marker":
+                        continue
+                    who = {"user": "User", "mint": "Mint", "jarvis": "Mint", "tool": "Did", "agent": "Agent"}.get(
+                        row.get("role"), str(row.get("role")))
+                    text = " ".join(str(row.get("text", "")).split())
+                    try:
+                        shown = dt.datetime.strptime(when, "%Y-%m-%d %H:%M").strftime("%Y-%m-%d %a %H:%M")
+                    except ValueError:
+                        shown = when
+                    lines.append(f"{shown} {who}: {text[:400 if who == 'Did' else 700]}")
+        except OSError:
+            pass
     return lines
 
 
@@ -193,10 +214,10 @@ STOP = {"what", "when", "where", "which", "did", "does", "about", "that", "this"
         "were", "there", "they", "them", "then", "tell", "ask", "asked", "you", "the", "and", "for", "was", "mint"}
 
 
-def _narrow(lines: list[str], question: str) -> list[str]:
+def _narrow(lines: list[str], question: str, budget: int = MAX_CHARS) -> list[str]:
     """Too much for one request: the lines that share the question's rarer words (a word
     in few lines counts for more than "open"), with their neighbours, then the most
-    recent of the rest."""
+    recent of the rest - about `budget` characters."""
     import math
     tokens = [set(re.findall(r"[a-z0-9]+", line.lower())) for line in lines]
     words = {w for w in re.findall(r"[a-z0-9]+", question.lower()) if len(w) > 2 and w not in STOP}
@@ -212,10 +233,10 @@ def _narrow(lines: list[str], question: str) -> list[str]:
             if j not in chosen:
                 chosen.add(j)
                 size += len(lines[j]) + 1
-        if size > MAX_CHARS * 0.7:
+        if size > budget * 0.7:
             break
     for i in range(len(lines) - 1, -1, -1):
-        if size > MAX_CHARS:
+        if size > budget:
             break
         if i not in chosen:
             chosen.add(i)
@@ -223,10 +244,80 @@ def _narrow(lines: list[str], question: str) -> list[str]:
     return [lines[i] for i in sorted(chosen)]
 
 
-def recall_history(question: str, when: str = "") -> str:
+def _by_time(lines: list[str]) -> list[str]:
+    """Oldest first; lines of the same minute keep their order (the user's words before the answer)."""
+    return sorted(lines, key=lambda line: line[:20])
+
+
+def _from_index(question: str, start: dt.datetime, end: dt.datetime):
+    """The fast path: the history index instead of reading every file. -> (lines, best hit or
+    None), or None when there is no index (then the files are read, as before)."""
+    from mint.knowledge import history_index
+    index = history_index.get(HISTORY)
+    if index is None:
+        return None
+    try:
+        index.ingest()
+        rows, chars = index.size(start, end)
+        extras = _extras(start, end)
+        if chars + sum(len(x) + 1 for x in extras) <= SMALL:     # little enough: all of it
+            return _by_time([r.line() for r in index.between(start, end)] + extras), None
+        found = index.find(question, start, end, window=WINDOW)
+        if not found.hits:                       # nothing to search for ("what did we do?"): as before
+            return _by_time([r.line() for r in index.between(start, end)] + extras), None
+        picked = {r.id: r for r in found.top}    # the best hit with its conversation around it
+        size = sum(len(r.line()) + 1 for r in found.top)
+        # Then the other hits with a line or two either side: the best and the newest in turn ("which
+        # one am I watching" is about the latest mention as much as the closest match).
+        newest = sorted(found.hits[1:], key=lambda h: -h.id)
+        for hit in (h for pair in zip(found.hits[1:], newest) for h in pair):
+            if size > FAST_CHARS:
+                break
+            if hit.id in picked:
+                continue
+            for r in index.around(hit.id, 2, 2):
+                if r.id not in picked:
+                    picked[r.id] = r
+                    size += len(r.line()) + 1
+        if sum(len(x) + 1 for x in extras) > FAST_CHARS // 3:
+            extras = _narrow(extras, question, FAST_CHARS // 3)
+        lines = [picked[i].line() for i in sorted(picked)]
+        return _by_time(lines + extras), found.hits[0]
+    except Exception as error:
+        log.warning("history index failed, reading the files: %s", str(error)[:160])
+        return None
+
+
+def _around(ref: str) -> str:
+    """recall_history(around=...): the conversation around one line, as it was (no summary)."""
+    from mint.knowledge import history_index
+    digits = re.sub(r"\D", "", str(ref))
+    index = history_index.get(HISTORY)
+    if not digits or index is None:
+        return ("FAILED: 'around' takes a line number from an earlier recall_history answer (like '1234'); "
+                "ask with a question instead.")
+    try:
+        index.ingest()
+        rows = index.around(int(digits), AROUND, AROUND, same_conversation=False)
+    except Exception as error:
+        return f"FAILED: could not read the history: {str(error)[:160]}"
+    if not rows:
+        return f"There is no history line #{digits}."
+    text = "\n".join(r.line(ref=True, full=True) for r in rows)
+    return (f"The history around #{digits}, as it was:\n{text}\n(Earlier: around='{rows[0].id}'; "
+            f"later: around='{rows[-1].id}'.)")
+
+
+def recall_history(question: str, when: str = "", around: str = "") -> str:
+    if str(around or "").strip():
+        return _around(str(around))
     from mint.core import llm
     start, end, label = when_range(when)
-    lines = sorted(_history(start, end) + _extras(start, end))
+    picked = _from_index(question, start, end)
+    if picked is None:
+        lines, best = _by_time(_history(start, end) + _extras(start, end)), None
+    else:
+        lines, best = picked
     if not lines:
         return f"Nothing happened with Mint {label} (no conversations or actions recorded then)."
     if sum(len(x) + 1 for x in lines) > MAX_CHARS:
@@ -238,20 +329,23 @@ def recall_history(question: str, when: str = "") -> str:
               "answered, 'Did' the actions Mint took and their results, 'Agent' what sub-agents reported, 'On screen' "
               "which app / window / page was in front (the activity timeline; give the address when asked for a "
               "page). Times use the "
-              f"24-hour clock (01:20 is 1:20 AM, 13:20 is 1:20 PM); today is {now:%A %d %B}.\n\n"
-              f"Answer the question from it: {question or 'What happened?'}\n"
+              f"24-hour clock (01:20 is 1:20 AM, 13:20 is 1:20 PM); today is {now:%A %d %B %Y}."
+              + (" These are the parts of the log that match the question, not all of it." if best else "")
+              + f"\n\nAnswer the question from it: {question or 'What happened?'}\n"
               "Be specific (names, files, sites, results) and say when (day and time). If it is not in the log, "
               "say so plainly. At most 120 words; plain sentences to be spoken.\n\nLOG:\n" + log_text)
     try:
         text, _model = llm.generate(prompt)
     except Exception as error:
         return f"FAILED: could not read the history: {error}"
-    return f"({label}, {len(lines)} entries) {text.strip()}"
+    more = (f"\n(Best match: line #{best.id}, {time.strftime('%a %d %b %H:%M', time.localtime(best.ts))}. "
+            f"To read more of that conversation, call recall_history with around='{best.id}'.)" if best else "")
+    return f"({label}, {len(lines)} entries) {text.strip()}{more}"
 
 
 PROMPT = """The past: for what happened before - "what did we do yesterday", "when did I ask about…", "what was \
 that site / file / video from last week", "what did Astra find on Monday", "what was I working on", "how long was I in Slack" - call recall_history (with `when` if \
-the user gives a time). recall is for lasting facts about the user; recall_history is for events."""
+the user gives a time). recall is for lasting facts about the user; recall_history is for events. Its answer names the best matching line; to hear more of that conversation word for word, call it again with around=<that number>."""
 
 
 def declarations():
@@ -266,8 +360,12 @@ def declarations():
             "question": types.Schema(type=S, description="what the user wants to know about the past"),
             "when": types.Schema(type=S, description=("optional: today, this morning, yesterday, last night, "
                                                       "monday, last week, 3 days ago, past 2 weeks, 20 sep, "
-                                                      "september; empty = the last 30 days"))},
+                                                      "september; empty = the last 30 days")),
+            "around": types.Schema(type=S, description=("optional: a line number from an earlier recall_history "
+                                                        "answer ('Best match: line #1234') to read that part of the "
+                                                        "conversation word for word; the question is then ignored"))},
             required=["question"]))]
 
 
-HANDLERS = {"recall_history": lambda a: recall_history(str(a.get("question") or ""), str(a.get("when") or ""))}
+HANDLERS = {"recall_history": lambda a: recall_history(str(a.get("question") or ""), str(a.get("when") or ""),
+                                                       str(a.get("around") or ""))}

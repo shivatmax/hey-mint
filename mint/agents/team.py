@@ -217,10 +217,9 @@ def recall(task: str, limit: int = 3) -> str:
                  + "\n".join(parts))
     try:
         from mint.knowledge import memory as membank
-        facts = [b.get("text", "") for b in membank.relevant(task, limit=4)]
-        facts = [f for f in facts if f]
-        if facts:
-            text += "\n\nWhat Mint knows about the user that may matter:\n" + "\n".join(f"- {f}" for f in facts)
+        block = membank.recall_block(task, k=4)
+        if block:
+            text += "\n\n" + block
     except Exception:
         log.debug("membank recall failed", exc_info=True)
     return text

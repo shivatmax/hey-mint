@@ -50,7 +50,7 @@ from mint.core import prefs
 
 log = logging.getLogger("mint.ui.notch_agents")
 
-APP_RGB = {"claude": (0.85, 0.47, 0.34), "codex": (0.62, 0.66, 1.00)}
+APP_RGB = {"claude": (0.85, 0.47, 0.34), "codex": (0.62, 0.66, 1.00), "mint": (0.43, 0.91, 0.72)}
 STATE_RGB = {"thinking": (0.70, 0.60, 1.00), "working": None, "waiting": (1.00, 0.72, 0.26),
              "asking": (1.00, 0.72, 0.26), "done": (0.33, 0.87, 0.55), "failed": (1.00, 0.40, 0.40),
              "idle": (0.62, 0.64, 0.70)}
@@ -100,12 +100,21 @@ def _state_rgb(state: str) -> tuple:
     return STATE_RGB.get(state) or _accent()
 
 
+_front: list = [0.0, ""]
+
+
 def _front_bundle() -> str:
+    """The app in front, looked up at most twice a second (asked every frame, it cost ~0.2 ms each time)."""
+    now = time.monotonic()
+    if now - _front[0] < 0.5:
+        return _front[1]
     try:
         app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
-        return (app.bundleIdentifier() or "") if app is not None else ""
+        bundle = (app.bundleIdentifier() or "") if app is not None else ""
     except Exception:
-        return ""
+        bundle = ""
+    _front[0], _front[1] = now, bundle
+    return bundle
 
 
 def host_bundle(s) -> str:
@@ -114,6 +123,8 @@ def host_bundle(s) -> str:
     term = (s.term or {}).get("bundle_id") or ""
     if term:
         return term
+    if s.app == "mint":
+        return ""                      # Mint's own job: the face itself, with Mint's green dot
     if s.app == "claude" and where == "claude-desktop":
         return CLAUDE_APP
     if s.app == "codex" and "desktop" in where:
@@ -1029,7 +1040,8 @@ class AgentPane:
             self.head.setFrameOrigin_(AppKit.NSMakePoint(12, self.ch - 24))
         self.head.setStringValue_(title)
         self.head_right.setStringValue_(right)
-        end = self.cw - 40                                  # the open button sits at the corner
+        # The open button sits at the corner, the minimize button next to it.
+        end = self.cw - (66 if not self.min_btn.isHidden() else 40)
         x = self.head.frame().origin.x
         # The title first (the file's name), the path in what is left.
         title_w = min(self.head.fittingSize().width + 4, end - x - (60 if right else 0))
@@ -1374,6 +1386,14 @@ def _plain(text: str) -> str:
 
 def open_session(s) -> None:
     """Bring the session's own window forward: its terminal tab (Terminal, iTerm), its editor, or the app."""
+    if s.app == "mint":                       # Mint's own background job: its lines are in the chat
+        try:
+            from mint.app.session import Mint
+            if Mint.live is not None:
+                Mint.live.ui.show_chat(True)
+        except Exception:
+            log.debug("could not open the chat for a job", exc_info=True)
+        return
     term = dict(s.term or {})
     where = (s.where or "").lower()
     if not term.get("tty") and s.app == "claude" and where in ("cli", "", "claude-vscode", "sdk-cli"):

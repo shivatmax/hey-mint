@@ -1183,6 +1183,82 @@ def notch_agents_scene(p):
     time.sleep(4.5)
 
 
+@scene("notch-jobs", 24)
+def notch_jobs_scene(p):
+    """Parallel work: two jobs handed to the background one after the other, a quick question answered at
+    once while both run, and each job reporting when it ends - the notch lists them like agent sessions."""
+    from mint.ui import notch
+    from mint.tools.agent_watch import Session, Step
+    put, emit = AGENTS
+    now = time.time()
+
+    def job(key, title, prompt):
+        return Session(key=f"mint:{key}", app="mint", id=key, where="mint", title=title, prompt=prompt,
+                       state="thinking", since=time.time(), updated=time.time(), turn_started=time.time())
+
+    def step(s, verb, target):
+        for old in s.steps:
+            old.status = "ok"
+        s.steps.append(Step(id=f"{s.id}-{len(s.steps)}", verb=verb, target=target, status="run",
+                            started=time.time()))
+        s.turn_steps, s.state, s.updated = len(s.steps), "working", time.time()
+
+    time.sleep(1.0)
+    say(p, "user_said", "find flights to Goa next Friday and put the best three in a note", gap=0.08)
+    p.set_state("thinking"); time.sleep(0.9)
+    p.set_state("speaking")
+    say(p, "assistant_said", "On it - I'll tell you when it's done.", gap=0.1)
+    goa = job("task-1", "Goa flights", "Find flights to Goa next Friday; best three in a note")
+    put([goa]); emit("started", goa)
+    p.set_state("awake"); time.sleep(0.8)
+    step(goa, "Searching", "flights Bengaluru to Goa, Fri Oct 16")
+    put([goa])
+    F["mouse"] = (notch.notch.cx + 120, notch.notch.top - 120)
+    AppHelper.callAfter(notch.notch._agents_open)
+    time.sleep(1.6)
+    say(p, "user_said", "also tidy my Downloads folder", gap=0.08)
+    p.set_state("thinking"); time.sleep(0.7)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Sure, that's going too.", gap=0.1)
+    tidy = job("task-2", "Tidy Downloads", "Tidy the Downloads folder")
+    step(goa, "Reading", "skyscanner.co.in")
+    put([tidy, goa]); emit("started", tidy)
+    p.set_state("awake"); time.sleep(1.2)
+    step(tidy, "Listing", "~/Downloads (214 files)")
+    put([tidy, goa]); time.sleep(1.4)
+    say(p, "user_said", "what's the weather right now?", gap=0.08)
+    step(goa, "Comparing", "9 fares")
+    put([tidy, goa])
+    p.set_state("thinking"); time.sleep(0.8)
+    p.set_state("speaking")
+    say(p, "assistant_said", "28 degrees and sunny.", gap=0.1)
+    step(tidy, "Moving", "PDFs to Documents/PDFs")
+    put([tidy, goa]); time.sleep(1.4)
+    p.set_state("awake")
+    step(goa, "Writing", "note: Goa flights")
+    put([tidy, goa]); time.sleep(1.6)
+    step(tidy, "Moving", "images to Pictures/Downloads")
+    put([tidy, goa]); time.sleep(1.2)
+    for old in goa.steps:
+        old.status = "ok"
+    goa.state, goa.since = "done", time.time()
+    goa.summary = "Best three: IndiGo 6:05 ₹4,180 · Akasa 9:40 ₹4,420 · Air India 13:15 ₹4,950. Saved in Notes."
+    put([tidy, goa]); emit("finished", goa)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Your Goa flights are in Notes - IndiGo at 6:05 is the cheapest.", gap=0.1)
+    time.sleep(1.4); p.set_state("awake"); time.sleep(1.4)
+    for old in tidy.steps:
+        old.status = "ok"
+    tidy.state, tidy.since = "done", time.time()
+    tidy.summary = "Sorted 214 files into 6 folders; nothing deleted."
+    put([tidy, goa]); emit("finished", tidy)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Downloads is tidy - 214 files in six folders.", gap=0.1)
+    time.sleep(1.6); p.set_state("awake")
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(2.0)
+
+
 @scene("notch-guard", 14)
 def notch_guard_scene(p):
     """The guard: Mint is asked to delete old invoices; before anything moves it shows exactly what and waits for a
@@ -1313,7 +1389,7 @@ def tour(p):
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_agents_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_agents_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,

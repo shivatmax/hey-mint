@@ -343,3 +343,15 @@ def test_meet_chat_is_read_once_and_mints_own_lines_are_skipped(tmp_path):
             proc.wait(5)
         except Exception:
             proc.kill()
+
+
+@pytest.mark.parametrize("text,ends", [
+    ("End the Google Meet.", True), ("leave the call", True), ("hang up", True), ("stop the meeting now", True),
+    ("start a google meet", False), ("don't end the call", False), ("what's the time", False),
+    ("end the call when I say so", False)])
+def test_ending_a_call_is_recognised_while_one_is_on(monkeypatch, text, ends):
+    """6 Oct: "End the Google Meet." went to the model, which clicked around Chrome instead of leaving."""
+    monkeypatch.setattr(meet_call, "_call", object())
+    assert meet_call.wants_end(text) is ends
+    monkeypatch.setattr(meet_call, "_call", None)
+    assert meet_call.wants_end(text) is False                  # no call: nothing to end

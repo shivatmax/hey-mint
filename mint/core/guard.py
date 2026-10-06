@@ -21,6 +21,13 @@ Levels (Settings ▸ General ▸ Ask before deleting or changing, pref "guard"):
     delete   deleting and risky system commands only
     off      the guard never asks (Mint's older rule still applies: risky words need your request)
 
+Whatever the level, Mint's own files always ask first: its app-support folder (.venv, settings.json, memory,
+skills), Mint.app, and Claude Code's / Codex's config (~/.claude, ~/.codex) - by a tool or a shell command.
+
+Two more rules: after BREAKER "no"s (or no answers) in a row for one request, the guard stops asking and tells the
+model to drop that task and ask the user what to do instead; and when several questions are open at once (parallel
+jobs), "yes to all" - or Telegram's "Allow all" button - answers every one.
+
 Claude Code is guarded too when it is connected (agent_hooks): a destructive shell command (rm -rf, git reset
 --hard, push --force...) makes Claude Code ask first even where you allowed it, and that question reaches the
 notch and Telegram like any approval.
@@ -31,6 +38,7 @@ API:
     await check(name, args, source) -> str     '' to go ahead, else the refusal for the model
     ask(danger, source, timeout) -> bool       blocking (helper agents' threads)
     answer(ident, yes) / heard(text)           a button, a Telegram press, or the user's words
+    protected(path) -> str                     what of Mint's own a path is ('' for anything else)
 """
 
 from __future__ import annotations
@@ -49,14 +57,17 @@ log = logging.getLogger("mint.core.guard")
 HOME = str(Path.home())
 WAIT_MAC = 90.0            # seconds to answer at the Mac
 WAIT_PHONE = 300.0         # ... when asked on Telegram
+BREAKER = 3                # this many "no"s / no answers in a row for one request: stop asking about it
+BREAKER_WINDOW = 600.0     # ... counted within this many seconds
 YES = re.compile(r"^\W*(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|do it|allow( it)?|confirm(ed)?|haan|ha+n?|"
                  r"theek hai|kar do)\b", re.I)
 NO = re.compile(r"^\W*(no|nope|nah|don'?t|do not|cancel|stop|never ?mind|wait|mat( karo)?|nahi+n?)\b", re.I)
+ALL = re.compile(r"\b(all|everything|both|each of them|every one|sab)\b", re.I)   # "yes to all", "no, none of them"
 
 
 @dataclass
 class Danger:
-    kind: str                      # delete / change / system
+    kind: str                      # delete / change / system / protect (Mint's own files: asked at every level)
     title: str                     # "move 3 files to the Trash"
     lines: list = field(default_factory=list)   # what exactly (paths, the command)
     mono: bool = False             # the lines are code
@@ -157,9 +168,86 @@ def _paths(value) -> list:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
+# --- Mint's own files: asked about at every level, "off" too ---------------------------------------------
+
+def _own_roots() -> list[tuple[str, bool, str]]:
+    """(path, everything inside counts too, what it is)."""
+    home = Path.home()
+    app = home / "Library" / "Application Support" / "Mint"
+    roots = []
+    try:
+        from mint.core import config
+        project = Path(config.PROJECT_ROOT)
+    except Exception:
+        project = app
+    for base in dict.fromkeys((app, project)):
+        roots += [(str(base / ".venv"), True, "Mint's Python environment"),
+                  (str(base / "settings.json"), False, "Mint's settings"),
+                  (str(base / "memory"), True, "Mint's memory"), (str(base / "skills"), True, "Mint's skills"),
+                  (str(base / "mint"), True, "Mint's program files")]
+    roots += [(str(Path("/Applications/Mint.app")), True, "the Mint app"),
+              (str(home / "Applications" / "Mint.app"), True, "the Mint app"),
+              (str(home / ".claude"), True, "Claude Code's settings"), (str(home / ".claude.json"), False,
+                                                                       "Claude Code's settings"),
+              (str(home / ".codex"), True, "Codex's settings"),
+              (str(app), True, "Mint's own folder (its memory, skills and settings)")]
+    return roots
+
+
+def protected(path) -> str:
+    """What of Mint's own `path` is ('' for anything else). A folder that holds one of them counts too: deleting
+    ~/Library deletes Mint's memory."""
+    raw = str(path or "").strip().strip("'\"")
+    if not raw:
+        return ""
+    raw = re.split(r"[*?\[]", raw.replace("${HOME}", "~").replace("$HOME", "~"), 1)[0]   # a glob: its folder
+    full = os.path.normpath(os.path.expanduser(raw))
+    if not os.path.isabs(full):
+        return ""
+    if full.lower().endswith("/mint.app") or "/mint.app/" in full.lower() + "/":
+        return "the Mint app"
+    for root, inside, what in _own_roots():
+        if full == root or (inside and full.startswith(root + os.sep)):
+            return what
+        if root.startswith(full.rstrip(os.sep) + os.sep):
+            return f"a folder holding {what}"
+    return ""
+
+
+# A command that deletes, moves or writes over something: then its paths are checked against Mint's own.
+_SHELL_WRITES = re.compile(r"(?:^|[;&|`(\s])(rm|rmdir|unlink|shred|srm|trash|mv|cp|ditto|rsync|tee|truncate|ln|"
+                           r"install|chmod|chown|chflags|sed\s+-i|find)\s", re.I)
+_COPIES = {"cp", "ditto", "rsync", "ln", "install", "tee"}       # only the last path is written to
+_REDIRECT = re.compile(r"(?<![0-9&])>>?\s*(\"[^\"]*\"|'[^']*'|(?:\\ |[^\s;&|<>()`])+)")
+_SHELL_OWN = re.compile(r"Application(\\ | |%20)Support/Mint\b|\bMint\.app\b|(~|\$\{?HOME\}?|/Users/[^/\s]+)/"
+                        r"\.(claude|codex)\b|\.claude\.json\b", re.I)
+
+
+def _shell_own(text: str) -> str:
+    """What of Mint's own a shell command would delete or write over ('' for nothing)."""
+    targets = [m.group(1) for m in _REDIRECT.finditer(text)]
+    verbs = {v.split()[0].lower() for v in _SHELL_WRITES.findall(text)}
+    if verbs and (verbs != {"find"} or re.search(r"\s-(delete|exec)\b", text)):
+        tokens = [next(t for t in group if t) for group in
+                  re.findall(r'"([^"]*)"|\'([^\']*)\'|((?:\\ |[^\s;&|<>()`])+)', text) if any(group)]
+        tokens = [t.replace("\\ ", " ") for t in tokens if not t.startswith("-")]
+        targets += tokens[-1:] if verbs <= _COPIES else tokens
+    for target in targets:
+        found = protected(target)
+        if found:
+            return found
+    m = _SHELL_OWN.search(text) if (verbs or targets) and not verbs <= _COPIES else None
+    if m is None:
+        return ""
+    return "Claude Code's or Codex's settings" if re.search(r"claude|codex", m.group(0), re.I) else "Mint's own files"
+
+
 def shell_danger(command: str) -> tuple[str, str]:
     """(why, kind) for the riskiest thing a shell command does, ('', '') when nothing."""
     text = str(command or "")
+    own = _shell_own(text)
+    if own:
+        return f"deletes or writes over {own}", "protect"
     for pattern, why, kind in _SHELL:
         if re.search(pattern, text, re.I | re.M):
             return why, kind
@@ -178,10 +266,32 @@ def _script_danger(script: str) -> tuple[str, str]:
     return "", ""
 
 
+def _own_danger(name: str, a: dict, action: str) -> Danger | None:
+    """A file tool about to delete, move or write over Mint's own files (asked at every level)."""
+    if name == "file_action" and action in ("trash", "move", "rename"):
+        paths = _paths(a.get("path")) + ([str(a.get("to"))] if action == "move" and a.get("to") else [])
+        verb = {"trash": "move {} to the Trash", "move": "move {}", "rename": "rename {}"}[action]
+    elif name == "write_file":
+        paths, verb = [str(a.get("path") or "")], "write over {}"
+    elif name in ("tidy", "merge_folders"):
+        paths = [str(a.get("folder") or "")] + _paths(a.get("folders")) + [str(a.get("into") or "")]
+        verb = "move files in {}"
+    else:
+        return None
+    for path in paths:
+        what = protected(path)
+        if what:
+            return Danger("protect", verb.format(what), [_about(path)])
+    return None
+
+
 def assess(name: str, args: dict) -> Danger | None:
     """What this tool call would delete or change, or None when it is harmless (no side effects here)."""
     a = args or {}
     action = str(a.get("action") or "").lower()
+    own = _own_danger(name, a, action)
+    if own is not None:
+        return own
     if name == "file_action" and action == "trash":
         paths = _paths(a.get("path"))
         return Danger("delete", f"move {len(paths)} item{'s' if len(paths) != 1 else ''} to the Trash"
@@ -231,6 +341,11 @@ def assess(name: str, args: dict) -> Danger | None:
         if why:
             lines = [ln.rstrip() for ln in str(a.get("script") or "").strip().splitlines()][:8]
             return Danger(kind, f"run a script that {why}", lines, mono=True)
+    if name == "run_shell":                   # only with --allow-shell
+        why, kind = shell_danger(a.get("command"))
+        if why:
+            lines = [ln.rstrip() for ln in str(a.get("command") or "").strip().splitlines()][:8]
+            return Danger(kind, f"run a command that {why}", lines, mono=True)
     if name == "press_key":
         combo = "+".join(sorted([m.lower() for m in _paths(a.get("modifiers"))] if isinstance(a.get("modifiers"), list)
                                 else [m for m in re.split(r"[+, ]+", str(a.get("modifiers") or "").lower()) if m])
@@ -268,6 +383,8 @@ def level() -> str:
 
 
 def wanted(danger: Danger | None) -> bool:
+    if danger is not None and danger.kind == "protect":
+        return True                       # Mint's own files: at every level, "off" too
     lv = level()
     return danger is not None and lv != "off" and (lv == "all" or danger.kind in ("delete", "system"))
 
@@ -308,10 +425,17 @@ def answer(ident: str, yes: bool, how: str = "button") -> bool:
 
 
 def heard(text: str) -> bool:
-    """The user's words while a question is open: "yes" / "no" answer it."""
+    """The user's words while a question is open: "yes" / "no" answer it; with several open, "yes to all" /
+    "no to all" answers every one."""
     p = current()
     if p is None or not text:
         return False
+    if ALL.search(text) and (NO.search(text) or YES.search(text)):
+        with _lock:
+            open_now = [q for q in _pending.values() if not q.event.is_set()]
+        if len(open_now) > 1:
+            yes = not NO.search(text)
+            return any([answer(q.ident, yes, "voice") for q in open_now])
     if NO.search(text):
         return answer(p.ident, False, "voice")
     if YES.search(text):
@@ -335,8 +459,52 @@ def _away() -> bool:
         return False
 
 
+# --- the circuit breaker: three "no"s for one request and the guard stops asking ------------------------
+
+_refused: dict = {}          # request key -> (refusals in a row, when the last one was)
+
+
+def _request_key(who: str) -> str:
+    """One request: the user's words it came from (a background job's own task), else who is asking."""
+    try:
+        from mint.app import live
+        words = live.request() or ""
+    except Exception:
+        words = ""
+    return " ".join(words.lower().split())[:200] or f"who:{who}"
+
+
+def tripped(key: str) -> bool:
+    with _lock:
+        count, at = _refused.get(key, (0, 0.0))
+    return count >= BREAKER and time.monotonic() - at < BREAKER_WINDOW
+
+
+def _tally(key: str, ok: bool) -> None:
+    now = time.monotonic()
+    with _lock:
+        if ok:
+            _refused.pop(key, None)
+            return
+        count, at = _refused.get(key, (0, 0.0))
+        _refused[key] = ((count if now - at < BREAKER_WINDOW else 0) + 1, now)
+        while len(_refused) > 50:
+            _refused.pop(min(_refused, key=lambda k: _refused[k][1]))
+
+
+STOP_TASK = ("NOT DONE, and the guard will not ask again: the user turned down {n} of these in a row for this "
+             "request. Stop this task now - don't retry it or try another way. Ask the user in one short sentence "
+             "what they would like to do instead.")
+
+
 def ask(danger: Danger, who: str = "Mint", timeout: float | None = None) -> bool:
-    """Blocking: show the question (card at the Mac, Telegram when from the phone or away) and wait."""
+    """Blocking: show the question (card at the Mac, Telegram when from the phone or away) and wait.
+    After BREAKER refusals in a row for the same request: False at once, nothing shown."""
+    key = _request_key(who)
+    if tripped(key):
+        print(f"  [guard: not asking again ({BREAKER} refusals for this request): {danger.title}]", flush=True)
+        _audit("skip", f"{who}: {danger.title} (after {BREAKER} refusals)")
+        return False
     phone = _from_phone()
     mail = _from_email()
     p = Pending(ident=format(next(_ids), "x"), danger=danger, who=who, phone=phone or mail or _away())
@@ -381,6 +549,7 @@ def ask(danger: Danger, who: str = "Mint", timeout: float | None = None) -> bool
             _email_done(p)
     print(f"  [guard: {'yes' if ok else 'no'} ({p.how or 'answered'})]", flush=True)
     _audit("answer", f"{'yes' if ok else 'no'} via {p.how or '?'}: {danger.title}")
+    _tally(key, ok)
     return ok
 
 
@@ -393,6 +562,8 @@ async def check(name: str, args: dict, who: str = "Mint") -> str:
     ok = await asyncio.to_thread(ask, danger, who)
     if ok:
         return ""
+    if tripped(_request_key(who)):
+        return STOP_TASK.format(n=BREAKER)
     return (f"NOT DONE: the guard asked the user before you {danger.title}, and they said no or didn't answer. "
             "Nothing was changed. Tell them in one short sentence that you didn't do it; don't try another way.")
 
@@ -401,8 +572,11 @@ def check_sync(name: str, args: dict, who: str) -> str:
     danger = assess(name, args)
     if not wanted(danger):
         return ""
-    return "" if ask(danger, who) else (f"NOT DONE: the user didn't allow it ({danger.title}). Nothing was changed; "
-                                        "don't try another way.")
+    if ask(danger, who):
+        return ""
+    if tripped(_request_key(who)):
+        return STOP_TASK.format(n=BREAKER)
+    return f"NOT DONE: the user didn't allow it ({danger.title}). Nothing was changed; don't try another way."
 
 
 def _audit(kind: str, text: str) -> None:
@@ -459,17 +633,53 @@ def _telegram_ask(p: Pending) -> None:
         mins = int(p.timeout // 60)
         text = (f"{icon} <b>{esc(p.who)} wants to {esc(p.danger.title)}</b>{body}\n\n"
                 f"<i>Nothing happens unless you say yes (within {mins} min).</i>")
-        sent = b.html(text, markup=telegram.keys([("✅ Yes, do it", f"gd:{p.ident}:y"), ("❌ No", f"gd:{p.ident}:n")]))
+        _tg_msgs[p.ident] = None                 # on Telegram from now: counted for "Allow all"
+        sent = b.html(text, markup=_tg_markup(p.ident))
         if sent and sent.get("message_id"):
             _tg_msgs[p.ident] = sent["message_id"]
+            _tg_refresh(skip=p.ident)
+        else:
+            _tg_msgs.pop(p.ident, None)
     except Exception:
+        _tg_msgs.pop(p.ident, None)
         log.exception("guard telegram ask")
+
+
+def _tg_open() -> list[str]:
+    """The questions open on Telegram right now."""
+    with _lock:
+        return [i for i in list(_tg_msgs) if i in _pending and not _pending[i].event.is_set()]
+
+
+def _tg_markup(ident: str) -> dict:
+    """Yes / No - and "Allow all (N)" while two or more questions wait (parallel jobs)."""
+    from mint.app import telegram
+    rows = [[("✅ Yes, do it", f"gd:{ident}:y"), ("❌ No", f"gd:{ident}:n")]]
+    waiting = len(_tg_open())
+    if waiting > 1:
+        rows.append([(f"✅ Allow all ({waiting})", "gd:all:y")])
+    return telegram.keys(*rows)
+
+
+def _tg_refresh(skip: str = "") -> None:
+    """The other open questions get, update or lose their "Allow all" button as the count changes."""
+    try:
+        from mint.app import telegram
+        b = telegram.bridge
+        for ident in _tg_open():
+            mid = _tg_msgs.get(ident)
+            if ident != skip and mid:
+                b._call("editMessageReplyMarkup", patient=False, chat_id=b._chat(), message_id=mid,
+                        reply_markup=_tg_markup(ident))
+    except Exception:
+        log.debug("guard telegram refresh", exc_info=True)
 
 
 def _telegram_done(p: Pending) -> None:
     mid = _tg_msgs.pop(p.ident, None)
     if not mid:
         return
+    _tg_refresh()
     try:
         from mint.app import telegram
         b = telegram.bridge
@@ -483,6 +693,12 @@ def _telegram_done(p: Pending) -> None:
 def telegram_plan(arg: str):
     """telegram.py's button handler for gd:<id>:y|n -> (toast, act, used label)."""
     ident, _, choice = arg.partition(":")
+    if ident == "all":                      # "Allow all (N)": every question open on Telegram
+        idents = _tg_open()
+        if not idents:
+            return "Those questions are closed.", None, ""
+        return (f"✅ Doing all {len(idents)}", (lambda: [answer(i, True, "telegram") for i in idents]),
+                "✅ Allowed all")
     with _lock:
         p = _pending.get(ident)
     if p is None:
@@ -578,7 +794,10 @@ class _GuardCard:
         else:
             self.body.setFont_(AppKit.NSFont.systemFontOfSize_weight_(11.5, AppKit.NSFontWeightRegular))
         self.body.setStringValue_("\n".join(str(x) for x in d.lines[:8]))
-        self.hint.setStringValue_("Say “yes” or “no”" + (" · also asked on Telegram" if p.phone else ""))
+        with _lock:
+            waiting = sum(1 for q in _pending.values() if not q.event.is_set())
+        self.hint.setStringValue_("Say “yes” or “no”" + (f" · “yes to all” for all {waiting}" if waiting > 1 else "")
+                                  + (" · also asked on Telegram" if p.phone else ""))
         text_w = W - 2 * pad - 46
         self.title.setFrameSize_(AppKit.NSMakeSize(text_w, 40))
         title_h = min(40, self.title.cell().cellSizeForBounds_(AppKit.NSMakeRect(0, 0, text_w, 400)).height)

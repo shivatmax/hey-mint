@@ -68,18 +68,30 @@ import json, os, re, socket, subprocess, sys
 SOCK = os.path.expanduser("~/Library/Application Support/Mint/agents.sock")
 SETTINGS = os.path.expanduser("~/Library/Application Support/Mint/settings.json")
 GUARD = %(GUARD)s
+# Mint's own files and Claude Code's / Codex's settings: a command that deletes or writes over them always asks,
+# even with the guard off (the same floor as Mint's own guard).
+OWN = re.compile(r"Application(\\ | )Support/Mint\b|\bMint\.app\b|(~|\$\{?HOME\}?|/Users/[^/\s]+)/\.(claude|codex)\b|"
+                 r"\.claude\.json\b", re.I)
+WRITES = re.compile(r"(^|[;&|`(\s])(rm|rmdir|unlink|shred|srm|trash|mv|truncate|chmod|chown|chflags|sed\s+-i)\s|"
+                    r"(^|[^0-9&])>>?\s*\S", re.I)
 
 
 def guard(payload):
     """Mint's guard (PreToolUse, Bash): a command that deletes or changes things makes Claude Code ask you first,
     even where you allowed it. Local and instant: Mint itself isn't asked."""
+    command = str((payload.get("tool_input") or {}).get("command") or "")
+    if OWN.search(command) and WRITES.search(command):
+        sys.stdout.write(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "ask",
+            "permissionDecisionReason": "Mint's guard: this command deletes or writes over Mint's own files or "
+                                        "Claude Code's / Codex's settings. It needs your OK."}}) + "\n")
+        return
     try:
         level = (json.load(open(SETTINGS)).get("guard") or "all")
     except Exception:
         level = "all"
     if level == "off":
         return
-    command = str((payload.get("tool_input") or {}).get("command") or "")
     for pattern, why, kind in GUARD:
         if (level == "all" or kind != "change") and re.search(pattern, command, re.I | re.M):
             sys.stdout.write(json.dumps({"hookSpecificOutput": {

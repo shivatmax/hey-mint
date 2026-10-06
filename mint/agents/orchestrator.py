@@ -24,9 +24,10 @@ def declarations() -> list[types.FunctionDeclaration]:
         _fn("list_agents", "List your sub-agents: name, what each is for, its model, and what each is doing now.", {}),
         _fn("delegate_task",
             "Hand a substantial task to a sub-agent, which works in the background while you keep talking. "
-            "ONLY when it truly needs an agent: multi-step web research, a long document, building or "
-            "revising code / RL environments, work producing files. Never for a quick answer, a single "
-            "action on the Mac, anything on screen, or chit-chat - do those yourself. Write complete "
+            "ONLY when the user names an agent ('ask Astra', 'give it to Sage') or for building or revising "
+            "code / RL environments (Codex, Luna). Other long work - research, write-ups, documents, files, "
+            "anything on the Mac - goes to background_task (your own job), not here. Never for a quick answer "
+            "or chit-chat. Write complete "
             "instructions: goal, constraints, deliverables (files, format). Choose thinking by difficulty: "
             "none for simple mechanical work, low for normal tasks, medium for research, design, debugging "
             "or RL environments (never more).",
@@ -204,10 +205,10 @@ def prompt_text() -> str:
         "look. Never make up material you were meant to get from somewhere else (ChatGPT's answer, a page, "
         "a file): if you could not read it, wait for it (wait_until_done), look, or tell the user - and hand "
         "on what you actually read (attach_window). "
-        "Call an agent ONLY when the work truly needs one: multi-step web research, a long document, "
-        "building or revising code or RL environments, anything that produces files over many steps. Do "
-        "everything else yourself - answers you know, quick facts, one action on the Mac, anything on "
-        "screen, reminders, chat. When you do delegate, give complete instructions and pick the thinking "
+        "Call an agent ONLY when the user names one, or to build or revise code or RL environments. "
+        "Research, write-ups, documents and other long work go to background_task (your own background "
+        "job, which can also save anywhere and use the Mac) unless the user asks for an agent; quick things "
+        "you do yourself. When you do delegate, give complete instructions and pick the thinking "
         "level by difficulty (none / low / medium). Several independent pieces can run at once "
         "(delegate_tasks). Agents work as a TEAM: give a job to the ONE agent best placed to lead it, and it "
         "brings in teammates itself when their specialty helps (Sage writing a report asks Astra for the "

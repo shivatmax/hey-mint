@@ -3,7 +3,9 @@
     Skills  every skill by category with its record (uses, wins, rank); pick one
             to edit its title, when-to-use, apps, category and its steps and
             notes as text; New, Save, Delete (archived, not destroyed), Show in
-            Finder.
+            Finder, Pinned (nothing automatic may change it), and Undo change
+            (puts back the skill as it was before its newest change - the
+            ledger keeps every version, and an undo can itself be undone).
     Memory  every remembered fact: fixed or not, group and text are edited in
             the table itself and saved at once; add a fact (filed by Jev, or
             exactly as typed), delete, and "Test recall" to see which facts Mint
@@ -23,6 +25,7 @@ from PyObjCTools import AppHelper
 
 from mint.knowledge import memory as membank
 from mint.core import prefs
+from mint.knowledge import skill_ledger
 from mint.knowledge import skills as skillbook
 
 W, H = 900, 620
@@ -207,16 +210,23 @@ class BrainWindow:
         self._label(view, "Category", x + 266, h - 124, 70, alpha=0.7)
         self.f_category = self._field(view, x + 336, h - 128, w - 336, "apps/chatgpt",
                                       handler=lambda: self._mark_dirty())
-        self.skill_info = self._label(view, "", x, h - 152, w, alpha=0.6, size=11)
+        self.skill_info = self._label(view, "", x, h - 152, w - 84, alpha=0.6, size=11)
+        self.f_pinned = AppKit.NSButton.checkboxWithTitle_target_action_("Pinned", self.target, "act:")
+        self.f_pinned.setFrame_(AppKit.NSMakeRect(x + w - 78, h - 154, 78, 20))
+        self.f_pinned.setToolTip_("A pinned skill is never changed or removed by anything automatic.")
+        self._handlers[objc.pyobjc_id(self.f_pinned)] = self._toggle_pin
+        view.addSubview_(self.f_pinned)
         self.body = self._text_area(view, x, 56, w, h - 216)
         self._button(view, "Save", x + w - 100, 14, 100, self._save_skill, key="s")
         self._button(view, "Show in Finder", x + w - 250, 14, 146, self._reveal_skill)
-        self.skill_status = self._label(view, "", x, 20, w - 260, alpha=0.7, size=11)
+        undo = self._button(view, "Undo change", x + w - 366, 14, 112, self._undo_skill)
+        undo.setToolTip_("Put this skill back as it was before its newest change (that can be undone too).")
+        self.skill_status = self._label(view, "", x, 12, w - 372, h=32, alpha=0.7, size=11, lines=2)
 
     def _tab_memory(self, view) -> None:
         h = H - 60
         self._label(view, "Memory: one fact per row. Fixed facts are in every conversation; the rest are "
-                          "looked up by Jev when a question needs them.", 16, h - 38, W - 64, h=34,
+                          "looked up when a question needs them.", 16, h - 38, W - 64, h=34,
                     bold=True, size=13, lines=2)
         self.new_fact = self._field(view, 16, h - 76, 470, "Add a fact, e.g. My manager is Meera")
         self.new_group = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
@@ -316,7 +326,7 @@ class BrainWindow:
             if column == "title":
                 return f"{skill['title']} — {skill['category']}"
             m = skill["meta"]
-            return f"{m['wins']}/{m['uses']} · {skillbook.rank(skill)}"
+            return f"{m['wins']}/{m['uses']} · {'stale' if skillbook.is_stale(skill) else skillbook.rank(skill)}"
         if row >= len(self._shown_blocks):
             return ""
         block = self._shown_blocks[row]
@@ -380,9 +390,15 @@ class BrainWindow:
         self.f_category.setStringValue_(skill["category"])
         self.body.setString_(skill["body"])
         self.body.scrollRangeToVisible_((0, 0))
+        warnings = skillbook.lint(skill)
         self.skill_info.setStringValue_(
-            f"Used {m['uses']}×, worked {m['wins']}, failed {m['fails']} · {skillbook.rank(skill)} · "
-            f"source {m.get('source', '?')} · updated {m.get('updated') or m.get('created', '')}")
+            f"Used {m['uses']}×, worked {m['wins']}, failed {m['fails']} · {skillbook.rank(skill)}"
+            f"{' (stale)' if skillbook.is_stale(skill) else ''} · by {m.get('created_by', '?')} · "
+            f"updated {m.get('updated') or m.get('created', '')}"
+            + (f" · ⚠ {len(warnings)} lint" if warnings else ""))
+        self.skill_info.setToolTip_("\n".join(warnings) if warnings else None)
+        self.f_pinned.setState_(AppKit.NSControlStateValueOn if skillbook.is_pinned(skill)
+                                else AppKit.NSControlStateValueOff)
         self._dirty = False
         self.skill_status.setStringValue_("")
 
@@ -424,10 +440,49 @@ class BrainWindow:
         skill = next((s for s in self._skills if s["path"] == self._current), None)
         if skill is None:
             return
-        message = skillbook.archive(skill["name"])
+        message = skillbook.archive(skill["name"], actor="user", reason="Delete in Skills & Memory", skill=skill)
         self._current, self._dirty = None, False
         self._skills = skillbook.all_skills()
         self._filter_skills()
+        self.skill_status.setStringValue_(message)
+
+    def _toggle_pin(self) -> None:
+        if self._current is None:
+            return
+        if self._dirty:
+            self._save_skill(quiet=True)
+        on = self.f_pinned.state() == AppKit.NSControlStateValueOn
+        self.skill_status.setStringValue_(skillbook.set_pinned(self._current, on))
+        self._skills = skillbook.all_skills()
+        self._filter_skills()
+
+    def _undo_skill(self) -> None:
+        if self._current is None:
+            return
+        name = self._current.stem
+        rows = skillbook.history(name, 1)
+        if not rows:
+            self.skill_status.setStringValue_("No recorded change to undo for this skill.")
+            return
+        entry = rows[0]
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Undo the newest change to this skill?")
+        alert.setInformativeText_(skill_ledger.describe(entry) + "\n\nUnsaved edits here are dropped. The undo is "
+                                  "recorded too, so it can be undone.")
+        alert.addButtonWithTitle_("Undo")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        ok, message = skillbook.rollback(entry["id"], actor="user")
+        self._dirty = False
+        self._skills = skillbook.all_skills()
+        if ok:
+            restored = next((s for s in self._skills if s["path"].stem == name), None)
+            self._current = restored["path"] if restored else None
+        self._filter_skills()
+        fresh = next((s for s in self._skills if s["path"] == self._current), None)
+        if fresh:
+            self._load_skill(fresh)
         self.skill_status.setStringValue_(message)
 
     def _reveal_skill(self) -> None:
@@ -454,7 +509,7 @@ class BrainWindow:
 
         def work():
             if choice == "Jev decides":
-                return membank.add(text, pinned=pinned or None)
+                return membank.add(text, pinned=pinned or None, origin="edit")
             return membank.add_exact(text, choice, pinned)
 
         def done(message):
@@ -487,7 +542,7 @@ class BrainWindow:
         question = str(self.recall_q.stringValue() or "").strip()
         if not question:
             return
-        self.recall_out.setStringValue_("Asking Jev…")
+        self.recall_out.setStringValue_("Searching…")
 
         def done(found):
             if isinstance(found, str):
@@ -496,4 +551,4 @@ class BrainWindow:
             fixed = sum(1 for b in self._blocks if b.get("pinned"))
             lines = [f"• {b['text']}" for b in found] or ["Nothing - no stored fact is relevant."]
             self.recall_out.setStringValue_("\n".join(lines[:3]) + f"\n(+ {fixed} fixed facts, always given)")
-        _bg(lambda: membank.relevant(question), done)
+        _bg(lambda: membank.search(question, k=6), done)

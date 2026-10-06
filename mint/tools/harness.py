@@ -256,6 +256,41 @@ _STREAK_TOOLS = {"find_files", "web_search", "read_url", "recall", "find_skill",
 _STREAK_BROWSER = {"find", "click", "fill", "select", "links", "read"}
 REPEATS = 3        # the same call with the same result this many times: warn
 FAILS = 4          # this many failed calls in a row: warn
+# The same call with the same arguments for one request: the third is a loop. If the first two gave the same
+# result (or both failed) it is not run again at all - nothing has changed, so it cannot help.
+SAME_CALL = 3
+_this_request: dict = {}               # (request, fingerprint) -> [(time, result digest, failed)]
+
+
+def _request_now() -> str:
+    try:
+        from mint.app import live
+        return live.request() or ""
+    except Exception:
+        return ""
+
+
+def _repeat_ok(name: str, args: dict) -> bool:
+    """Calls that are fine to repeat as they are: waiting, looking, keys, scrolling."""
+    return name in _EXEMPT or name in {"scroll", "press_key", "media_key", "set_volume", "music"} or (
+        name == "browser" and str((args or {}).get("action")) in {"scroll", "back", "forward", "reload", "read"})
+
+
+def looping(name: str, args: dict) -> str:
+    """Before a call: why not to run it (the same call, same arguments, same outcome twice already in this
+    request), or ''."""
+    if _repeat_ok(name, args):
+        return ""
+    now = time.monotonic()
+    for stale in [k for k, v in _this_request.items() if now - v[-1][0] > 300]:
+        del _this_request[stale]
+    earlier = _this_request.get((_request_now(), _fingerprint(name, args)), [])
+    if len(earlier) >= SAME_CALL - 1 and (len({d for _, d, _ in earlier}) == 1 or all(f for _, _, f in earlier)):
+        log.info("loop: %s blocked after %d identical calls", name, len(earlier))
+        return (f"NOT RUN - you are looping: this exact {name} call already ran {len(earlier)} times for this "
+                "request with the same outcome, so running it again cannot help. Try something different (another "
+                "tool, other arguments, look at what is in front) - or ask the user one short question.")
+    return ""
 
 
 def _fingerprint(name: str, args: dict) -> str:
@@ -281,12 +316,13 @@ def _password_field() -> bool:
 def check(name: str, args: dict, result: str) -> str:
     """The loop warning to add to `result`, or ''."""
     now = time.monotonic()
-    if name in _EXEMPT or name in {"scroll", "press_key", "media_key", "set_volume", "music"} or (
-            name == "browser" and str((args or {}).get("action")) in {"scroll", "back", "forward", "reload", "read"}):
+    if _repeat_ok(name, args):
         _outcomes.append(_failed(result))
         return ""
     key = _fingerprint(name, args)
     digest = hashlib.sha1((result or "")[:3000].encode()).hexdigest()[:12]
+    here = _this_request.setdefault((_request_now(), key), [])
+    here.append((now, digest, _failed(result)))
     same = sum(1 for at, k, d in _calls if k == key and d == digest and now - at < 180)
     _calls.append((now, key, digest))
     _outcomes.append(_failed(result))
@@ -311,6 +347,11 @@ def check(name: str, args: dict, result: str) -> str:
         _outcomes.clear()
         return (f"\n[Loop warning] The last {FAILS} steps all failed. Stop and check where things are (look, "
                 "or list_open), then try one different approach - or tell the user what is blocking it.")
+    if len(here) >= SAME_CALL:
+        log.info("loop warning: %s with the same arguments %d times in one request", name, len(here))
+        return (f"\n[Loop warning] That is {len(here)} identical {name} calls for this request. If the user asked "
+                "for this repetition, carry on; otherwise you are looping - try something different or ask the "
+                "user one short question.")
     return ""
 
 
@@ -328,6 +369,9 @@ async def guard(core, name: str, args: dict):
             return (f"NOT RUN: the user's browser rule puts this in {wanted}, not {args.get('name') or args.get('what')}. "
                     f"Use open_url (it opens {wanted} by itself) or browser action=new_tab - don't open another "
                     "browser first."), None
+    stuck = looping(name, args)
+    if stuck:
+        return stuck, None
     result, image = await core(name, args)
     if isinstance(result, str):
         result += check(name, args, result)

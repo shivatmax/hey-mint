@@ -98,11 +98,15 @@ class Session:
 
     @property
     def project(self) -> str:
+        if self.app == "mint":
+            return self.title or "Background job"
         name = os.path.basename(self.cwd.rstrip("/")) if self.cwd else ""
         return name or ("Claude Code" if self.app == "claude" else "Codex")
 
     @property
     def app_name(self) -> str:
+        if self.app == "mint":
+            return "Mint"
         return "Claude Code" if self.app == "claude" else "Codex"
 
     @property
@@ -126,6 +130,8 @@ class _File:
 
 class Watcher:
     def __init__(self) -> None:
+        self._gen = 0                   # bumped by every change (_dirty = True): sessions() is cached against it
+        self._snap: tuple = (None, [])
         self._lock = threading.RLock()
         self._sessions: dict[str, Session] = {}
         self._files: dict[str, _File] = {}
@@ -147,6 +153,16 @@ class Watcher:
             self._thread = threading.Thread(target=self._run, name="mint-agent-watch", daemon=True)
             self._thread.start()
 
+    @property
+    def _dirty(self) -> bool:
+        return self._dirty_flag
+
+    @_dirty.setter
+    def _dirty(self, value: bool) -> None:
+        self._dirty_flag = value
+        if value:
+            self._gen += 1
+
     def on_change(self, fn) -> None:
         self._change_fns.append(fn)
 
@@ -154,15 +170,22 @@ class Watcher:
         self._event_fns.append(fn)
 
     def sessions(self) -> list[Session]:
+        """The sessions to show, best first: copies, made again only when something changed (or a second passed,
+        for the time limits). The notch asks several times a frame; deep-copying every time cost ~4 ms a frame -
+        14% of a core with Mint idle (6 Oct)."""
         now = time.time()
+        key = (self._gen, int(now))
         with self._lock:
+            if self._snap[0] == key:
+                return [copy.copy(s) for s in self._snap[1]]
             items = [copy.deepcopy(s) for s in self._sessions.values()
                      if s.busy or s.approval or now - s.updated < KEEP_IDLE]
-        rank = {"waiting": 0, "asking": 0, "failed": 2, "working": 1, "thinking": 1, "done": 3, "idle": 4}
-        # (a session quiet for a while ranks as idle, whatever it said last)
-        items.sort(key=lambda s: (0 if s.approval else rank.get(s.state, 5) if s.busy or now - s.updated < KEEP
-                                  else 4, -s.updated))
-        return items
+            rank = {"waiting": 0, "asking": 0, "failed": 2, "working": 1, "thinking": 1, "done": 3, "idle": 4}
+            # (a session quiet for a while ranks as idle, whatever it said last)
+            items.sort(key=lambda s: (0 if s.approval else rank.get(s.state, 5) if s.busy or now - s.updated < KEEP
+                                      else 4, -s.updated))
+            self._snap = (key, items)
+            return [copy.copy(s) for s in items]
 
     def get(self, key: str) -> Session | None:
         with self._lock:
@@ -172,6 +195,17 @@ class Watcher:
     def poke(self) -> None:
         """Look again now (a hook said something happened)."""
         self._wake.set()
+
+    def put(self, session: Session, event: str = "") -> None:
+        """A session Mint runs itself (a background job, background.py): shown like the others."""
+        with self._lock:
+            old = self._sessions.get(session.key)
+            self._sessions[session.key] = session
+            self._dirty = True
+            if event and (old is None or old.state != session.state or event == "asking"):
+                self._events.append((event, copy.deepcopy(session)))
+        self.start()
+        self.poke()
 
     # --- the thread -------------------------------------------------------------------------------
 
@@ -306,6 +340,11 @@ class Watcher:
         with self._lock:
             for key, s in list(self._sessions.items()):
                 quiet = now - s.updated
+                if s.app == "mint":
+                    if not s.busy and quiet > KEEP:          # a finished job leaves the list after a while
+                        del self._sessions[key]
+                        self._dirty = True
+                    continue
                 if s.state in ("thinking", "working") and quiet > STALE and not s.approval:
                     self._set_state(s, "idle", now)
                 if quiet > KEEP_IDLE and not s.busy and not s.approval:

@@ -138,6 +138,13 @@ def send(session_key: str, text: str) -> str:
             return "Not sent: it looks like it holds a password, key or card number."
     except Exception:
         pass
+    if session_key.startswith("mint:"):
+        # One of Mint's own background jobs: the words go to it as new instructions (or the answer).
+        from mint.agents.runtime import hub
+        run = hub.find(session_key.split(":", 1)[1])
+        if run is None:
+            return "That job is gone."
+        return hub.reply(run.id, text) if run.status == "asking" else hub.steer(run.id, text)
     s = agent_watch.get(session_key)
     if s is None:
         return "That session is gone."

@@ -268,7 +268,9 @@ def _objc_class(framework: str, name: str):
     try:
         return objc.lookUpClass(name)
     except objc.nosuchclass_error:
-        objc.loadBundle(framework, {}, bundle_path=f"/System/Library/Frameworks/{framework}.framework")
+        # NSBundle, not objc.loadBundle (that wraps every class there is: ~90-230 MB kept, 6 Oct)
+        from Foundation import NSBundle
+        NSBundle.bundleWithPath_(f"/System/Library/Frameworks/{framework}.framework").load()
         return objc.lookUpClass(name)
 
 

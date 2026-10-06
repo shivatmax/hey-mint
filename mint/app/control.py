@@ -13,12 +13,19 @@ import threading
 
 _stopped = threading.Event()
 _generation = 0          # bumped by every stop; long background waits compare it
+_stopped_at = 0.0        # time.monotonic() of the last stop
 
 
 def stop() -> None:
-    global _generation
+    global _generation, _stopped_at
+    import time
     _generation += 1
+    _stopped_at = time.monotonic()
     _stopped.set()
+
+
+def stopped_at() -> float:
+    return _stopped_at
 
 
 def generation() -> int:

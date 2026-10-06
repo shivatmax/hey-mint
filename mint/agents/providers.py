@@ -251,6 +251,10 @@ def _mark(provider, model, error) -> bool:
         # A daily quota ("...PerDay...") will not come back in five minutes.
         _dead[(provider, model)] = time.monotonic() + (3600 if "PerDay" in text else 300)
         return True
+    if any(code in text for code in ("504", "DEADLINE_EXCEEDED", "Deadline expired")):
+        # It hung for the whole timeout: asking it again costs that long every time.
+        _dead[(provider, model)] = time.monotonic() + 600
+        return True
     if kind == "busy" or any(code in text for code in ("503", "529", "UNAVAILABLE", "500", "502", "INTERNAL",
                                                        "timed out", "Timeout", "overloaded", "unreachable")):
         # Overloaded - "high demand" blips pass quickly. Benching for five

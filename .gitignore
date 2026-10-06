@@ -17,6 +17,7 @@ __pycache__/
 /settings.json
 /agents.json
 /history.jsonl
+/history-archive/
 /summary.md
 /memory.md
 /memories.md
@@ -27,6 +28,9 @@ __pycache__/
 /browser_rules.json
 /made_files.json
 /agents-experience.jsonl
+/automations.json
+/automations-next
+/automation-state/
 
 # Large or downloaded
 /models/*.onnx

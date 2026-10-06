@@ -138,5 +138,126 @@ def test_claude_code_hook_guard(tmp_path):
     assert run("mv a b") is None and run("rm x") is not None
     settings.write_text(json.dumps({"guard": "off"}))
     assert run("rm -rf /") is None
+    assert run("rm -rf ~/.claude")["permissionDecision"] == "ask"             # Mint's floor: asked even when off
+    assert run("echo x > ~/Library/Application\\ Support/Mint/settings.json")["permissionDecision"] == "ask"
+    assert run("ls ~/.claude && cat ~/.codex/config.toml") is None             # reading is fine
     groups = agent_hooks._merged({}, True)["hooks"]["PreToolUse"]
     assert groups[0]["matcher"] == "Bash"
+
+
+# --- the circuit breaker, Mint's own files, answering several questions at once ----------------------------
+
+@pytest.fixture
+def fresh(monkeypatch):
+    monkeypatch.setattr(guard, "_refused", {})
+    monkeypatch.setattr(guard, "_tg_msgs", {})
+    monkeypatch.setattr(guard, "_telegram_done", lambda p: guard._tg_msgs.pop(p.ident, None))
+    monkeypatch.setattr(guard, "_request_key", lambda who: "delete the old builds")
+
+
+def test_breaker_stops_asking_after_three_noes(fresh, tmp_path):
+    f = tmp_path / "x.txt"
+    f.write_text("x")
+    args = {"action": "trash", "path": str(f)}
+    shown = []
+
+    def say_no(p):
+        shown.append(p.ident)
+        guard.answer(p.ident, False)
+    for n in range(3):
+        _answer_soon(say_no)
+        said = asyncio.run(guard.check("file_action", args))
+        assert said.startswith("NOT DONE") and ("will not ask again" in said) == (n == 2)
+    assert len(shown) == 3
+    started = time.monotonic()
+    said = asyncio.run(guard.check("file_action", args))                  # no card, no wait
+    assert "will not ask again" in said and "ask the user" in said.lower() and time.monotonic() - started < 0.5
+    assert len(shown) == 3 and guard.current() is None
+    guard._request_key = lambda who: "something new"                        # another request: asked again
+    _answer_soon(lambda p: guard.answer(p.ident, True))
+    assert asyncio.run(guard.check("file_action", args)) == ""
+
+
+def test_breaker_resets_on_a_yes(fresh):
+    d = guard.Danger("delete", "delete a note", ["Groceries"])
+    for yes in (False, False, True, False, False):
+        _answer_soon(lambda p, y=yes: guard.answer(p.ident, y))
+        assert guard.ask(d, timeout=5) is yes
+    assert not guard.tripped("delete the old builds")
+
+
+def test_mints_own_files_ask_even_when_off(monkeypatch):
+    monkeypatch.setattr(guard, "level", lambda: "off")
+    app = "~/Library/Application Support/Mint"
+    for name, args in [("file_action", {"action": "trash", "path": f"{app}/memory/bank.json"}),
+                       ("file_action", {"action": "trash", "path": f"{app}/.venv"}),
+                       ("file_action", {"action": "move", "path": "/Applications/Mint.app", "to": "~/Desktop"}),
+                       ("file_action", {"action": "trash", "path": "~/Library"}),
+                       ("write_file", {"path": f"{app}/settings.json", "mode": "overwrite"}),
+                       ("write_file", {"path": "~/.claude/settings.json", "mode": "append"}),
+                       ("run_applescript", {"script": f'do shell script "rm -rf {app}/skills"'}),
+                       ("run_shell", {"command": "rm -rf ~/.codex"})]:
+        d = guard.assess(name, args)
+        assert d is not None and d.kind == "protect" and guard.wanted(d), (name, args)
+    for command in ["rm -rf ~/Library/Application\\ Support/Mint/.venv", 'rm -rf "$HOME/Library/Application Support/Mint"',
+                    "echo {} > ~/.claude/settings.json", "mv ~/.codex ~/old", "rm -rf /Applications/Mint.app",
+                    "cp /tmp/x ~/.claude.json", "rm -rf ~"]:
+        why, kind = guard.shell_danger(command)
+        assert kind == "protect" and guard.wanted(guard.Danger(kind, why)), command
+    # Reading or copying them out, and everything else, as before.
+    for command in ["ls -la ~/.claude", "cat ~/.claude/settings.json", "cp ~/.claude/settings.json /tmp/backup"]:
+        assert guard.shell_danger(command) == ("", ""), command
+    assert guard.shell_danger("rm ~/Documents/Mint/report.pdf")[1] == "delete"
+    assert not guard.wanted(guard.assess("file_action", {"action": "trash", "path": "~/Documents/old.pdf"}))
+    assert guard.protected("~/Documents/Mint/report.pdf") == ""
+
+
+def _two_open(answer_with):
+    """Two questions open at once (two background jobs); `answer_with` is called once both are showing."""
+    d = guard.Danger("delete", "move this to the Trash", ["~/a.pdf"])
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(guard.ask(d, timeout=5))) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for _ in range(100):
+        with guard._lock:
+            if len(guard._pending) == 2:
+                break
+        time.sleep(0.02)
+    answer_with()
+    for t in threads:
+        t.join(6)
+    return results
+
+
+def test_yes_to_all_by_voice(fresh):
+    assert _two_open(lambda: guard.heard("yes to all")) == [True, True]
+    assert _two_open(lambda: guard.heard("no, none of them - not all")) == [False, False]
+    # One "yes" answers one question only.
+    results = _two_open(lambda: (guard.heard("yes"), time.sleep(0.1), guard.heard("no")))
+    assert sorted(results) == [False, True]
+
+
+def test_telegram_allow_all(fresh):
+    try:
+        from mint.app import telegram
+    except ImportError:
+        from mint import telegram
+    seen = {}
+
+    def press():
+        with guard._lock:
+            idents = list(guard._pending)
+        for ident in idents:
+            guard._tg_msgs[ident] = 100 + len(guard._tg_msgs)
+        seen["markup"] = guard._tg_markup(idents[0])
+        toast, act, used = guard.telegram_plan("all:y")
+        seen["toast"], seen["used"] = toast, used
+        act()
+    assert _two_open(press) == [True, True]
+    rows = seen["markup"]["inline_keyboard"]
+    assert rows[-1][0]["text"] == "✅ Allow all (2)" and rows[-1][0]["callback_data"] == "gd:all:y"
+    assert seen["toast"] == "✅ Doing all 2" and seen["used"] == "✅ Allowed all"
+    assert guard.telegram_plan("all:y")[1] is None                          # nothing open any more
+    assert len(guard._tg_markup("zz")["inline_keyboard"]) == 1               # one question: just Yes / No
+    assert telegram.keys([("a", "b")])["inline_keyboard"][0][0]["callback_data"] == "b"

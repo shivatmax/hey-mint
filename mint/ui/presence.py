@@ -198,6 +198,14 @@ class Presence:
         self._row(menu, "Open chat…" + (f"   {shortcut}" if shortcut else ""), "console")
         self._row(menu, "Wake now", "wake")
         self._row(menu, "Go to sleep", "sleep")
+        try:
+            from mint.tools import automations
+            if automations.halted():
+                self._row(menu, "Paused — Resume everything", "halt:off")
+            else:
+                self._row(menu, "Pause everything", "halt:on")
+        except Exception:
+            pass
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         try:
             from mint.tools import meetings
@@ -246,6 +254,9 @@ class Presence:
         elif kind == "onboarding":
             from mint.ui import onboarding
             onboarding.onboarding.show()
+        elif kind == "halt":
+            from mint.tools import automations       # stops running jobs: off the main thread
+            threading.Thread(target=automations.halt, args=(value == "on", "menu"), daemon=True).start()
         elif kind == "brain":
             from mint.ui import brain as brain_window
             brain_window.open_window(value or "skills")

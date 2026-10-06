@@ -114,6 +114,8 @@ def match(said: str) -> tuple[str, dict, str] | None:
     if full(r"stop (?:the )?(?:screen|video) recording|stop recording (?:the |my )?screen"):
         return "screen_record", {"action": "stop"}, "Stopping the recording"
     from mint.app import meet_call
+    if meet_call.wants_end(t):
+        return "google_meet", {"action": "end"}, "Leaving the call"
     if meet_call.wants_call(t):
         return "google_meet", {"action": "start"}, "Starting a Google Meet"   # (the session runs it: _meet_request)
     return None

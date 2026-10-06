@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.5.8 (2026-10-06)
+
+- **Much lighter at rest:** idle CPU went from 35-45% of a core to about 6%, with nothing looking different.
+  - Claude mode's session list was deep-copied ~90 times a second; it is now copied only when a session changes.
+  - The audio engine stops while the microphone is off, and comes back to speak or when the mic is turned on.
+  - The notch looks 10 times a second instead of 30 while nothing on it moves (back to full speed the moment the
+    pointer comes near or Mint wakes).
+- **Memory stays low after big jobs:** ~255 MB at rest, instead of ~600 MB kept after a helper agent or
+  background job. The shelf's first thumbnail used to load a framework in a way that wrapped every Objective-C
+  class: 232 MB, never freed. Night Shift and the privacy checks had the same pattern; also fixed. The system
+  dictionary is no longer kept in memory either (19 MB).
+- **Google Meet:**
+  - "End the call" ends it directly; the model had tried clicking around Chrome instead.
+  - A crash when a call started (two audio rebuilds at once) is fixed.
+  - The "who joined" message shows the person's name.
+
+## 0.5.8 (unreleased)
+
+- **Several things at once:** hand Mint a job, then another, and keep talking. Long or multi-step requests
+  ("research…and put it in a note", "tidy my Downloads", "also…", "meanwhile…") become background jobs that run
+  side by side with Mint's own tools, each in its own context, and report when they end - when Mint is quiet,
+  never over your words. Quick questions are still answered at once (`mint/app/background.py`).
+  - The screen takes turns: jobs that only search, read, write files or mail run in parallel; clicking and typing
+    are taken in turns (a job keeps the screen for its consecutive steps, your own request goes first, and a job
+    waits while you type).
+  - Nothing is thrown away: a tool that runs long, or that you talk over, carries on in the background instead of
+    being cancelled, and Mint is told when it finishes. A second plan no longer pauses the one in progress.
+  - Jobs show in the notch's Agents tab with Claude Code and Codex, step by step; reply there to change one or
+    answer its question. `agent_status`, `message_agent`, `answer_agent` and `stop_agent` work on jobs (task-N).
+    "Stop" stops what is in front of you (and a job clicking at that moment); jobs working off-screen go on.
+- **Memory, rebuilt:** three kinds - about you (how you like things), facts, and a daily journal.
+  - Every conversation starts with the facts that matter most, ranked and never cut mid-line (before, the most
+    important pinned facts could be dropped by a length limit). The rest is found by words and by meaning, with
+    no model call per question; typed, phone and email requests carry what's relevant.
+  - Saying a thing twice confirms it; a change supersedes the old fact and keeps it as history; only lasting
+    things are saved (not prices, battery levels or clicks). A daily pass merges duplicates and retires facts
+    unused for three months (still findable).
+  - Conversations are summarised from disk, so a crash or restart loses nothing; history is rotated past 4 MB
+    (`mint/knowledge/memory.py`, `mint/knowledge/conversation.py`).
+- **Fix:** in the notch's Agents card, the time label no longer runs under the minimize button.
+- **Pages and emails can't give Mint orders:** web pages, email, files, search results, window and screen text reach
+  the AI fenced as outside data; fake fence markers and invisible characters are removed and a fast pattern scan
+  flags likely prompt injections (`mint/core/untrusted.py`). Memory and skills refuse instruction-like or
+  data-sending notes; one already saved shows as [BLOCKED] until you fix it.
+- **Guard:** Mint's own memory, skills, settings and app, and Claude Code's / Codex's settings, always ask first -
+  even with the guard off, and in the Claude Code hook too. Three noes to the same task and Mint stops and asks
+  what to do instead. "Yes to all" by voice and an "Allow all (N)" Telegram button when several jobs ask at once.
+- **Skills that learn safely:** after a task, one cheap review learns from corrections, long tasks and
+  recoveries - patching the skill it used first, writing rules not logs, refusing one-off or broken-setup lessons,
+  and judging whether the skills used worked. Automatic learning only rewrites Mint's own skills (yours get
+  "Suggested" notes; pinned ones are never touched). Every change is recorded with before/after text and can be
+  undone ("undo what you learned about X", or Undo change in Skills & Memory) (`mint/knowledge/skill_ledger.py`).
+  Unused skills go stale after a month; Mint's own are archived after three. The full skill list is in every
+  conversation; skills can carry reference files; "learn this" turns a page, window, clipboard or the
+  conversation into a skill; background jobs use and feed skills.
+- **History search, indexed:** a private SQLite full-text index of every conversation; "what did I ask about…"
+  answers in 1-3 s from just the matching moments, and can read a conversation word for word
+  (`mint/knowledge/history_index.py`).
+- **Long conversations keep your instructions:** near the voice model's limit Mint compacts at a quiet moment into
+  a sectioned summary with your rules and requests quoted verbatim, the files/apps/links involved and the task in
+  progress; plans and background jobs carry on (`mint/app/compaction.py`, setting `auto_compact`).
+- **Lighter sessions:** 68 tools declared instead of 143 (about half the tokens per connect); rarer tools are found
+  with `find_tools` and run with `use_tool` through the same safety checks (`mint/tools/diet.py`, setting
+  `tool_diet`). A repeated identical call with nothing changing is stopped; results over 20k characters are
+  trimmed with the full text saved under ~/Library/Logs/Mint/results/.
+- **Outages explained:** a one-line caption (quota, Google's side, network, key) and a countdown to the next try;
+  a short spoken notice if you were waiting.
+- **Automations:** "tell me when this page/file changes" (no AI call until it changes), quiet runs when there's
+  nothing new, notes kept between runs, natural schedules ("every weekday at 9", "every 2 hours", "tomorrow at 7"),
+  no double runs after a crash, stalled runs stopped, an offer to pause after three failures, and an offer to
+  automate a request made three days running. Work automations run as background jobs.
+- **Pause everything / resume everything:** by voice or the menu bar; holds automations, background jobs and helper
+  agents, even across a restart.
+
 ## 0.5.7 (2026-10-06)
 
 - **Google Meet with Mint:** "start a Google Meet" (by voice, Telegram `/meet`, or email). Mint makes a meeting,

@@ -380,8 +380,9 @@ _thumbs: dict = {}                   # (path, mtime) -> NSImage
 def _generator():
     if not _ql:
         try:
-            objc.loadBundle("QuickLookThumbnailing", {},
-                            bundle_path="/System/Library/Frameworks/QuickLookThumbnailing.framework")
+            # The framework itself, then just the two classes. objc.loadBundle() made a Python wrapper for every
+            # class in the process - 1.3 million objects, 232 MB kept for good after the first thumbnail (6 Oct).
+            AppKit.NSBundle.bundleWithPath_("/System/Library/Frameworks/QuickLookThumbnailing.framework").load()
             objc.registerMetaDataForSelector(
                 b"QLThumbnailGenerator", b"generateBestRepresentationForRequest:completionHandler:",
                 {"arguments": {3: {"callable": {"retval": {"type": b"v"},

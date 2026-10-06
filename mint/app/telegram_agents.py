@@ -65,6 +65,8 @@ def _wanted(bridge, kind: str, s) -> bool:
     if not getattr(bridge, "bot", None) or not bridge._state.get("user_id"):
         return False
     mode = str(bridge.setting("agent_telegram") or "away")
+    if getattr(s, "app", "") == "mint":
+        return False          # Mint's own jobs reach the phone through Mint's words (hub notice)
     if mode == "off" or kind not in ("waiting", "asking", "finished", "failed"):
         return False
     following = time.time() < bridge.agent_follow.get(s.key, 0)
