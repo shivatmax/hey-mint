@@ -1,16 +1,18 @@
 """Onboarding: the first thing a new user sees, and the "Welcome tour…" in the menu bar.
 
-Seven pages in one dark window, each fading and springing in:
+Eight pages in one window, each fading and springing in:
 
   welcome      Mint's face (it follows your pointer), what Mint is, Get started.
-  about        your name, what to call Mint (a new name gets its own wake word), what you do and
-               anything else, shown back in a live preview. Saved to Settings ▸ You.
+  about        your name, what to call Mint (a new name gets its own wake word), where Mint lives (in the notch
+               or floating), what you do - shown back in a live preview. Saved to Settings ▸ You.
+  connect      the Gemini API key: where to get it (three steps, AI Studio opens in one click), paste, and a
+               check with Google that it works. Saved to .env (mode 600); the session waits for it.
   voice        six voices to tap and hear (voices.preview); the pick is Settings ▸ Voice.
   permissions  Microphone, Accessibility, Screen Recording, Input Monitoring, Calendars and
                Reminders: why each is needed, Allow (macOS's own prompt, or its Settings pane), and
                the status, checked every second.
   shortcuts    the four keys, as keycaps; click one and press new keys (settings_window.record_keys).
-  tour         fifteen things Mint does, each with its clip from the guide, playing one after another.
+  tour         ten things Mint does, each with its clip from the guide, playing one after another.
   done         you're set; three first things to try (a click sends it to Mint).
 
 Esc, Skip or the close button ends it at any page; prefs "onboarded" then keeps it from showing
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 
@@ -36,7 +39,8 @@ from mint.core import prefs
 log = logging.getLogger("mint.ui.onboarding")
 
 W, H = 980, 660
-PAGES = ("welcome", "about", "voice", "permissions", "shortcuts", "tour", "done")
+PAGES = ("welcome", "about", "connect", "voice", "permissions", "shortcuts", "tour", "done")
+STUDIO = "https://aistudio.google.com/apikey"
 TOP, BOTTOM = (0.95, 0.97, 1.0), (0.80, 0.87, 1.0)       # a pale sky, lighter at the top
 INK = (0.07, 0.11, 0.22)                                    # deep navy text
 DIM = (0.36, 0.42, 0.56)
@@ -76,53 +80,38 @@ TOUR = (
     ("doing", "cursorarrow.click.2", "Talk, and it's done",
      "Ask in plain words. I open apps, click, type and fill things in while you watch, and stop the moment you say “stop”.",
      ("reply to Priya's email", "open my last invoice")),
+    ("notch-meet", "video.fill", "Your Mac, from anywhere",
+     "Start a Google Meet from your phone, Telegram or email: I share the screen and you talk to me while I work.",
+     ("start a Google Meet", "end the call")),
+    ("notch-jobs", "square.stack.3d.down.right", "Several things at once",
+     "Long jobs run in the background while we keep talking. Each one tells you when it's done.",
+     ("research standing desks and put it in a note", "also tidy my Downloads")),
+    ("notch-agents", "chevron.left.forwardslash.chevron.right", "Claude Code in the notch",
+     "Claude Code and Codex, live: every step, the diff and the tests. Allow or Deny from the notch or your phone.",
+     ("what is Claude Code doing?", "tell Claude to push")),
+    ("notch-guard", "checkmark.shield", "Nothing deleted without your yes",
+     "Before anything is deleted, overwritten or changed, I show exactly what and wait for your answer.",
+     ("delete last year's invoices",)),
     ("island-schedule", "calendar", "Your day at a glance",
-     "I change shape to show what matters right now: your next meetings, reminders, a call, a download.",
+     "Your next meetings, reminders and what's playing, right at the notch.",
      ("what's on my calendar today?", "put lunch with Sam on Friday")),
     ("island-meeting", "record.circle", "Meeting notes",
      "On a call I turn into a recorder. When it ends you get the notes, the decisions and who does what.",
-     ("record this meeting", "summarize the call so far")),
+     ("record this meeting",)),
     ("dictation", "mic.fill", "Dictate anywhere",
-     "Hold the dictate key, talk, let go. Clean, punctuated text lands wherever your cursor is, in any app.",
+     "Hold the dictate key, talk, let go. Clean, punctuated text lands wherever your cursor is.",
      ("um, looks good, no wait, ship it Thursday",)),
     ("clipboard-window", "doc.on.clipboard", "A clipboard that remembers",
-     "Everything you copy and every screenshot, kept. Pick several, pin up to 20, paste them in order.",
-     ("paste the last 5 screenshots in the chat", "open my clipboard")),
+     "Everything you copy and every screenshot, kept. Pick several and paste them in order.",
+     ("open my clipboard",)),
     ("convert", "doc.richtext", "Documents",
-     "Copy the text off anything, turn a table into Excel, or an English PDF into a Hindi Word document.",
-     ("make an Excel of this table", "convert this PDF to a Hindi doc")),
-    ("video-edit", "film", "Edit videos by voice",
-     "Trim, reframe for Reels, add captions, cut the silences. I check the result before I say it's done.",
-     ("make it vertical and add captions", "cut the first 10 seconds")),
-    ("translate", "character.bubble", "Translate in place",
-     "Text in another language is translated right where it is on screen, in a colour and size that fit.",
-     ("translate what's on my screen",)),
-    ("drop", "tray.and.arrow.down", "Drop files on me",
-     "Drag a PDF, a video or a folder to me and pick what to do with it.",
-     ("summarize this", "translate it into Hindi")),
-    ("agent", "sparkles", "Agents for long jobs",
-     "Hand off research, writing or building. Agents work in the background and report back when they're done.",
-     ("research the best CRM for a small team",)),
-    ("island-teach", "graduationcap", "Teach me a task",
-     "Show me once while I watch. Next time, just ask and I'll do it the same way.",
-     ("watch how I do this", "do my expense report")),
-    ("image-card", "photo.on.rectangle.angled", "Make and edit pictures",
-     "Describe a picture and Apple's Image Playground draws it on your Mac. Say a change to redraw it, then save it.",
-     ("make an illustration of a lighthouse at sunset", "add a sailing boat")),
-    ("music", "music.note", "Music, by voice",
-     "Any song, artist or mood in Spotify or Apple Music, with a little player that shows what's on.",
-     ("play some lo-fi", "next song")),
-    ("apple-shortcuts", "square.stack.3d.up", "Shortcuts, made for you",
-     "Say what a shortcut should do. I plan the steps, you say yes, and it lands in the Shortcuts app.",
-     ("make a shortcut that turns on dark mode", "run Hello and Date")),
-    ("island-trackers", "bell.badge", "Let me know when…",
-     "I keep an eye on downloads, uploads, long commands and Claude sessions, and tell you when they finish.",
-     ("tell me when the download finishes",)),
+     "Copy the text off anything, turn a table into Excel, or a PDF into a Word document in another language.",
+     ("make an Excel of this table",)),
 )
 
 TRY = (
-    ("calendar", "What's on my calendar today?", "Your day, on the island"),
-    ("photo.on.rectangle.angled", "Make an illustration of a lighthouse at sunset", "Then say a change to redraw it"),
+    ("calendar", "What's on my calendar today?", "Your day, at the notch"),
+    ("video.fill", "Start a Google Meet", "Then join from your phone"),
     ("waveform.badge.mic", "Train my voice", "So only you can wake me"),
 )
 
@@ -190,6 +179,36 @@ def _media(name: str, ext: str):
         if path.exists():
             return AppKit.NSURL.fileURLWithPath_(str(path))
     return AppKit.NSURL.URLWithString_(f"{SITE}/{name}.{ext}")
+
+
+def _verify_key(key: str) -> tuple[str, str]:
+    """("ok" | "bad" | "offline", words for the user): Google's own answer to listing models with this key. The key
+    goes in a header, never the URL."""
+    import json
+    import urllib.error
+    import urllib.request
+    request = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+                                     headers={"x-goog-api-key": key})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            json.loads(reply.read() or b"{}")
+        return "ok", ""
+    except urllib.error.HTTPError as error:
+        try:
+            detail = json.loads(error.read() or b"{}").get("error", {})
+        except Exception:
+            detail = {}
+        reason = " ".join(str(d.get("reason", "")) for d in detail.get("details", []) if isinstance(d, dict))
+        if error.code in (400, 401, 403) and ("API_KEY_INVALID" in reason or "API key not valid" in str(detail)):
+            return "bad", "Google says this key isn't valid. Copy it again from AI Studio (no spaces)."
+        if error.code == 403:
+            return "bad", ("Google refused it: " + str(detail.get("message") or "permission denied")[:120] +
+                           ". Make a new key in AI Studio.")
+        if error.code == 429:
+            return "ok", ""                     # valid, just busy
+        return "bad", f"Google answered {error.code}: {str(detail.get('message') or '')[:120]}"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "offline", "Couldn't reach Google to check it - saved anyway. I'll connect when you're online."
 
 
 def _caps(value: str) -> list[str]:
@@ -349,6 +368,9 @@ class _OnbTarget(AppKit.NSObject):
 
     def controlTextDidEndEditing_(self, note):
         self.owner.focus(note.object(), False)
+        info = note.userInfo() or {}
+        if int(info.get("NSTextMovement", 0) or 0) == AppKit.NSReturnTextMovement:
+            self.owner.returned(note.object())
 
     def windowWillClose_(self, note):
         self.owner.closed()
@@ -497,7 +519,10 @@ class Onboarding:
         self.skip_button.setHidden_(name == "done")
         self.back_button.setHidden_(page <= 1)
         self.next_button.setHidden_(name in ("welcome", "done"))
-        self.next_button.label.setStringValue_({"permissions": "Continue", "tour": "Finish tour"}.get(name, "Continue"))
+        label = {"permissions": "Continue", "tour": "Finish tour"}.get(name, "Continue")
+        if name == "connect" and not self._has_key():
+            label = "Skip for now"
+        self.next_button.label.setStringValue_(label)
         self._center(self.next_button)
 
     # --- reusable pieces ----------------------------------------------------------------------------
@@ -733,7 +758,19 @@ class Onboarding:
         items.append(self._field(page, "assistant_name", 80, y + 20, 420, "Mint", "" if name == "Mint" else name))
         self.wake_note = self._label(page, "", 80, y + 70, 420, size=12, rgb=DIM, alpha=0.85)
         items.append(self.wake_note)
-        y += 104
+        y += 100
+        # Where Mint lives: in the camera notch (like a Dynamic Island) or as a little floating face.
+        items.append(self._label(page, "Where I live", 80, y, 300, size=12, weight=AppKit.NSFontWeightSemibold,
+                                 rgb=DIM))
+        self.home_chips = {}
+        for i, (home, title, symbol) in enumerate((("notch", "In the notch", "rectangle.topthird.inset.filled"),
+                                                     ("float", "Floating on screen", "circle.fill"))):
+            chip = self._pill(page, title, 80 + i * 214, y + 22, 206, 40, lambda h=home: self._home(h),
+                              primary=False, symbol=symbol, size=14)
+            self.home_chips[home] = chip
+            items.append(chip)
+        self._paint_home()
+        y += 84
         items.append(self._label(page, "What do you do?", 80, y, 300, size=12, weight=AppKit.NSFontWeightSemibold,
                                  rgb=DIM))
         x, row_y = 80, y + 22
@@ -748,11 +785,7 @@ class Onboarding:
             self._paint_role(role)
             items.append(chip)
             x += width + 8
-        y = row_y + 52
-        items.append(self._label(page, "Anything else I should know?", 80, y, 300, size=12,
-                                 weight=AppKit.NSFontWeightSemibold, rgb=DIM))
-        items.append(self._field(page, "about_me", 80, y + 20, 420, "e.g. I run a design studio. Keep answers short.",
-                                 extra.strip()))
+        self._about_extra = extra.strip()        # (more about you: Settings ▸ You - kept as it is)
         # The preview: Mint meets you.
         card = self._card(page, 560, 196, 340, 330, radius=24)
         self._orb(card, 170, 92, 64, halo=True)
@@ -771,6 +804,26 @@ class Onboarding:
         items.append((card, 0.18, 0.94))
         self._greet(pop=False)
         return items
+
+    def _home(self, home: str) -> None:
+        prefs.set("notch_mode", home == "notch")   # applies at once: the face flies into the notch, or out
+        self._paint_home()
+        _pop(self.home_chips[home])
+
+    def _paint_home(self) -> None:
+        current = "notch" if prefs.get("notch_mode") else "float"
+        mint = _accent()
+        for home, chip in self.home_chips.items():
+            on = home == current
+            chip.chosen = on
+            _tint(chip, mint, 0.22) if on else _tint(chip)
+            chip.layer().setBorderColor_(_cg(mint, 0.85) if on else _cg(WHITE, 0.0))
+            chip.layer().setBorderWidth_(1.2 if on else 0)
+            chip.label.setTextColor_(_ns(DEEP if on else INK))
+            if getattr(chip, "icon", None) is not None:
+                chip.icon.setContentTintColor_(_ns(DEEP if on else DIM))
+            chip.on_hover = None if on else (lambda over, c=chip: getattr(c, "chosen", False) or _tint(
+                c, WHITE, 0.55 if over else 0.0))
 
     def _role(self, role: str) -> None:
         self.roles ^= {role}
@@ -806,6 +859,152 @@ class Onboarding:
                                        else f"Wake me with “Hey {me}”.")
         if pop:
             _pop(self.bubble)
+
+    # connect: the Gemini API key
+
+    def _page_connect(self, page) -> list:
+        items = self._heading(page, "Connect", "Connect me to Gemini.",
+                              "I think and speak with Google's Gemini, on your own API key. It's free, takes a "
+                              "minute, and stays on this Mac.")
+        steps = (("Open Google AI Studio", "Sign in with any Google account."),
+                 ("Click “Create API key”", "The free tier is enough to start. Copy the key it shows."),
+                 ("Paste it here", "I'll check it with Google and connect."))
+        y = 206
+        for n, (title, text) in enumerate(steps, 1):
+            badge = gfx.number_badge(str(n), 26, _cg(SKY), _cg(WHITE), 13)
+            holder = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(80, y + 2, 26, 26))
+            holder.setWantsLayer_(True)
+            badge.setPosition_(Quartz.CGPointMake(13, 13))
+            holder.layer().addSublayer_(badge)
+            page.addSubview_(holder)
+            items.append(holder)
+            items.append(self._label(page, title, 120, y, 300, size=16, weight=AppKit.NSFontWeightSemibold))
+            items.append(self._label(page, text, 120, y + 24, 400, size=13, rgb=DIM))
+            if n == 1:
+                items.append(self._pill(page, "aistudio.google.com", 364, y - 2, 210, 36, self._open_studio,
+                                        primary=False, symbol="arrow.up.right", size=13, trailing=True))
+            y += 64
+        box = self._secret_field(page, "gemini_key", 80, y + 4, 380,
+                                 "Saved ✓ - paste a new key to replace it" if self._has_key()
+                                 else "Paste your Gemini API key")
+        items.append(box)
+        items.append(self._pill(page, "Paste", 470, y + 4, 104, 46, self._paste_key, primary=True,
+                                symbol="doc.on.clipboard", size=14))
+        self.key_status = self._label(page, "", 80, y + 60, 494, size=13, weight=AppKit.NSFontWeightMedium,
+                                      lines=2)
+        items.append(self.key_status)
+        if self._has_key():
+            self._key_said("ok", "Connected. Your Gemini key is set.")
+        # Beside it: what to know, briefly.
+        card = self._card(page, 620, 196, 280, 300, radius=22)
+        self._tile(card, "lock.fill", (0.22, 0.49, 1.0), 24, 24, size=38)
+        self._label(card, "Good to know", 24, 76, 232, size=15, weight=AppKit.NSFontWeightSemibold)
+        notes = ("The key stays on this Mac, in a file only you can read.",
+                 "Gemini's free tier covers everyday use; a second key in Settings doubles it.",
+                 "Change it any time in Settings ▸ Models & agents.")
+        ny = 104
+        for note in notes:
+            dot = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(24, ny + 3, 12, 12))
+            dot.setImage_(gfx.symbol("checkmark", 10, weight="bold"))
+            dot.setContentTintColor_(_ns(OK))
+            card.addSubview_(dot)
+            label = self._label(card, note, 44, ny, 214, size=13, rgb=DIM, lines=3, h=54)
+            used = label.cell().cellSizeForBounds_(AppKit.NSMakeRect(0, 0, 214, 200)).height
+            ny += used + 14
+        items.append((card, 0.18, 0.94))
+        return items
+
+    def _secret_field(self, view, key, x, y, w, placeholder):
+        box = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, 46))
+        box.setWantsLayer_(True)
+        box.layer().setCornerRadius_(14)
+        box.layer().setBorderColor_(_cg(WHITE, 0.0))
+        box.layer().setBorderWidth_(1.5)
+        _glass(box, 14)
+        field = AppKit.NSSecureTextField.alloc().initWithFrame_(AppKit.NSMakeRect(14, 12, w - 28, 24))
+        field.setBezeled_(False)
+        field.setDrawsBackground_(False)
+        field.setFocusRingType_(AppKit.NSFocusRingTypeNone)
+        field.setFont_(_font(15, AppKit.NSFontWeightMedium))
+        field.setTextColor_(_ns(INK))
+        field.setPlaceholderAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
+            placeholder, {AppKit.NSForegroundColorAttributeName: _ns(DIM, 0.75),
+                          AppKit.NSFontAttributeName: _font(15, AppKit.NSFontWeightMedium)}))
+        field.cell().setUsesSingleLineMode_(True)
+        field.cell().setScrollable_(True)
+        field.setDelegate_(self.target)
+        box.addSubview_(field)
+        view.addSubview_(box)
+        self.fields[key] = field
+        self.boxes[objc.pyobjc_id(field)] = box
+        return box
+
+    @staticmethod
+    def _has_key() -> bool:
+        return bool(os.environ.get(config.API_KEY_ENV))
+
+    def _open_studio(self) -> None:
+        AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(STUDIO))
+        self._key_said("info", "AI Studio is open in your browser. Create a key, copy it, then press Paste.")
+
+    def _paste_key(self) -> None:
+        text = AppKit.NSPasteboard.generalPasteboard().stringForType_(AppKit.NSPasteboardTypeString) or ""
+        text = "".join(str(text).split())
+        if not text:
+            self._key_said("bad", "The clipboard is empty. Copy the key in AI Studio first.")
+            return
+        field = self.fields.get("gemini_key")
+        if field is not None:
+            field.setStringValue_(text)
+        self._check_key(text)
+
+    def _key_said(self, kind: str, words: str) -> None:
+        if getattr(self, "key_status", None) is None:
+            return
+        rgb = {"ok": OK, "bad": (0.85, 0.22, 0.2), "info": DIM, "busy": DEEP}.get(kind, DIM)
+        mark = {"ok": "✓  ", "bad": "✕  ", "busy": "…  "}.get(kind, "")
+        self.key_status.setStringValue_(mark + words)
+        self.key_status.setTextColor_(_ns(rgb))
+        _enter(self.key_status, 0.0, rise=6)
+        if kind == "ok":
+            self._paint_chrome(animated=False)
+
+    def _check_key(self, key: str) -> None:
+        """Ask Google whether the key works (a list of models), then save it. Off the main thread."""
+        key = "".join(str(key or "").split())
+        if len(key) < 20:
+            self._key_said("bad", "That doesn't look like a whole key. Copy it again from AI Studio.")
+            return
+        self._key_said("busy", "Checking the key with Google…")
+
+        def run():
+            verdict, words = _verify_key(key)
+            if verdict in ("ok", "offline"):
+                try:
+                    from mint.agents import catalog
+                    catalog.write_key(config.API_KEY_ENV, key)
+                    from mint.core import gemini_keys
+                    from mint.core import llm
+                    gemini_keys._bench.clear()
+                    llm._client_cache = None
+                except Exception as error:
+                    verdict, words = "bad", f"Couldn't save it: {error}"
+            AppHelper.callAfter(self._key_checked, verdict, words)
+        threading.Thread(target=run, name="onboarding-key", daemon=True).start()
+
+    def _key_checked(self, verdict: str, words: str) -> None:
+        if self.view is None or PAGES[self.page] != "connect":
+            return
+        if verdict == "ok":
+            self._key_said("ok", "Connected. I can hear and talk now.")
+            for orb, _host in self.orbs:
+                orb.celebrate()
+        elif verdict == "offline":
+            self._key_said("info", words)
+        else:
+            field = self.fields.get("gemini_key")
+            self._bad_key = "".join(str(field.stringValue()).split()) if field is not None else None
+            self._key_said("bad", words)
 
     def _page_voice(self, page) -> list:
         items = self._heading(page, "Voice", "Pick my voice.",
@@ -1362,7 +1561,7 @@ class Onboarding:
         if name == "about" and self.fields:
             you = str(self.fields["user_name"].stringValue()).strip()
             me = str(self.fields["assistant_name"].stringValue()).strip() or "Mint"
-            extra = str(self.fields["about_me"].stringValue()).strip()
+            extra = getattr(self, "_about_extra", "")
             roles = sorted(self.roles, key=ROLES.index)
             about = (f"Role: {', '.join(roles)}.\n" if roles else "") + extra
             if you != str(prefs.get("user_name") or ""):
@@ -1371,6 +1570,15 @@ class Onboarding:
                 prefs.set("about_me", about.strip())
             if me != prefs.name():
                 prefs.set("assistant_name", me)
+        elif name == "connect" and self.fields.get("gemini_key") is not None:
+            typed = "".join(str(self.fields["gemini_key"].stringValue()).split())
+            if len(typed) >= 20 and typed != (os.environ.get(config.API_KEY_ENV) or "") \
+                    and typed != getattr(self, "_bad_key", None):        # (Google already said no to this one)
+                try:
+                    from mint.agents import catalog
+                    catalog.write_key(config.API_KEY_ENV, typed)
+                except Exception:
+                    log.exception("saving the Gemini key")
         elif name == "voice" and self.voice and self.voice != str(prefs.get("voice_name") or config.VOICE):
             prefs.set("voice_name", self.voice)
         elif name == "shortcuts" and self.recording:
@@ -1425,6 +1633,10 @@ class Onboarding:
         code = int(event.keyCode())
         name = PAGES[self.page]
         if code in (36, 76):                                      # Return
+            if name == "connect" and self.fields.get("gemini_key") is not None and \
+                    str(self.fields["gemini_key"].stringValue()).strip():
+                self._check_key(str(self.fields["gemini_key"].stringValue()))
+                return True
             if name == "done":
                 self.finish()
             else:
@@ -1441,6 +1653,12 @@ class Onboarding:
     def typed(self, field) -> None:
         if PAGES[self.page] == "about":
             self._greet(pop=False)
+
+    def returned(self, field) -> None:
+        """Return in a text field (the field takes the key, so the window never sees it)."""
+        if PAGES[self.page] == "connect" and field is self.fields.get("gemini_key"):
+            if str(field.stringValue()).strip():
+                self._check_key(str(field.stringValue()))
 
     def focus(self, field, on: bool) -> None:
         box = self.boxes.get(objc.pyobjc_id(field))

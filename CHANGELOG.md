@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.9 (2026-10-06)
+
+- **No more lost questions when the connection ends:** Google ends every voice connection after about an hour (and
+  the backup voice model after ~2.5 idle minutes). Mint now reconnects ahead of Google's warning at a quiet moment,
+  keeping the conversation; an ordinary drop reconnects in half a second with just "Reconnecting…" instead of an
+  outage message, and words you said just before a drop that got no answer are sent again, so you don't have to
+  repeat them. The outage caption and spoken notice now come only when reconnecting fails twice in a row.
+- **Easier first run:** the welcome window has a Connect page - get a free Gemini key at Google AI Studio, paste it,
+  and Mint checks it right there (a refused key says why and is never saved). Mint waits for the key instead of
+  showing an alert. You also choose where Mint lives (in the notch or floating), and the tour is shorter.
+
 ## 0.5.8 (2026-10-06)
 
 - **Much lighter at rest:** idle CPU went from 35-45% of a core to about 6%, with nothing looking different.

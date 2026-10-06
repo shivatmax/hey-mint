@@ -6,7 +6,7 @@
 // first launch, and after an update, the code is copied out to a data folder that the
 // app can write to, and `.venv` there points at the bundled Python - so the Python
 // side, the Ear and the settings all find things exactly where install.sh would put
-// them. The first launch also asks for the API keys (hold ⌥ while opening to change them).
+// them. The Gemini key is added in Mint's welcome window (hold ⌥ while opening to change the keys here).
 
 import AppKit
 import Foundation
@@ -92,11 +92,13 @@ enum Packaged {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
     }
 
-    /// Ask for the keys when the Gemini key is missing (or ⌥ was held). false = the user quit.
+    /// The keys, asked here only when ⌥ is held while opening (to change them). A first run without a Gemini key
+    /// goes straight on: Mint's welcome window has a Connect page that explains where to get the key and checks
+    /// it, and Mint waits for it. false = the user quit.
     static func ensureKeys() -> Bool {
         var values = readEnv()
         let optionHeld = NSEvent.modifierFlags.contains(.option)
-        if !(values["GEMINI_API_KEY"] ?? "").isEmpty && !optionHeld { return true }
+        if !optionHeld { return true }
         NSApp.activate(ignoringOtherApps: true)
         var warning = ""
         while true {

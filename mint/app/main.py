@@ -275,7 +275,8 @@ def main() -> int:
     if args.allow_search:
         config.ALLOW_SEARCH = True
 
-    problems = config.preflight()
+    # The app (hands-free) starts without a key on a first run: onboarding asks for it, and the session waits.
+    problems = [] if args.hands_free and not args.text else config.preflight()
     if problems:
         print("Cannot start:\n", file=sys.stderr)
         for problem in problems:

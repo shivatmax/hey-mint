@@ -1224,6 +1224,9 @@ class Mint:
             if getattr(update, "resumable", False) and getattr(update, "new_handle", None):
                 self._resume_handle = update.new_handle
             return
+        if (going := getattr(response, "go_away", None)) is not None:
+            self._go_away(going)
+            return
         self._last_active = self._server_at = time.monotonic()
         self._unanswered = ""
 
@@ -1462,6 +1465,41 @@ class Mint:
                  tokens, 100 * tokens / compaction.TRIGGER_TOKENS)
         self._print(f"[context {tokens} tokens: compacting at the next quiet moment]")
         asyncio.create_task(self._auto_compact())
+
+    def _lost_words(self) -> str:
+        """What the user said just before the connection dropped, if nothing had come back for it yet (no reply,
+        no tool): the new connection never heard it, so it is sent again rather than the user asked to repeat."""
+        spoken = " ".join((self._heard or "").split())
+        spoke_at = getattr(self, "_spoke_at", 0.0)
+        if (spoken and not (self._said or "").strip() and not self.asleep and time.monotonic() - spoke_at < 20
+                and getattr(self, "_model_active_at", 0.0) < spoke_at):
+            return spoken
+        return ""
+
+    def _go_away(self, going) -> None:
+        """Google ends every Live connection after a while (about an hour; "1011 Deadline expired") and warns
+        first. Reconnect before that, at a quiet moment, with the resumption handle: the conversation goes on
+        and nothing the user says is lost in the drop (6 Oct: a user's question died with the connection)."""
+        left = _seconds(getattr(going, "time_left", None))
+        if getattr(self, "_go_away_task", None) is not None and not self._go_away_task.done():
+            return
+        self._print(f"[Google will end this connection in {left:.0f} s: reconnecting at a quiet moment]")
+        self._go_away_task = asyncio.create_task(self._reconnect_before(left, self.session))
+
+    async def _reconnect_before(self, left: float, session) -> None:
+        from mint.app import compaction
+        try:
+            deadline = time.monotonic() + max(0.0, left - 3.0)
+            await self._quiet_for(1.5, deadline)              # a quiet moment, or the last safe second
+            while compaction.busy_reason(self) and time.monotonic() < deadline:
+                await asyncio.sleep(0.25)
+            if self.session is not session or session is None:
+                return                                     # it dropped or was replaced meanwhile
+            log.info("reconnecting before Google's go-away (handle kept: %s)", bool(self._resume_handle))
+            self._restarting = True                        # _backoff: reconnect at once, quietly
+            await session.close()
+        except Exception:
+            log.debug("reconnecting before the go-away failed", exc_info=True)
 
     async def _quiet_for(self, seconds: float, deadline: float) -> bool:
         """True once nothing has happened for `seconds` (compaction.busy_reason); False at the deadline."""
@@ -2547,6 +2585,13 @@ class Mint:
             self._own_mic.set()
         self._unload_task = asyncio.create_task(self._unload_watch())
         self._date_task = asyncio.create_task(self._date_watch())
+        if not os.environ.get(config.API_KEY_ENV):
+            # A first run: the key is added in the welcome window (onboarding's Connect page) or Settings.
+            self._print("[waiting for a Gemini API key - add it in the welcome window or Settings ▸ Models & agents]")
+            self._state("offline", "Add a Gemini key")
+            while not os.environ.get(config.API_KEY_ENV):
+                await asyncio.sleep(1.0)
+            self._print("[Gemini key added - connecting]")
         while True:
             try:
                 settings = _live_config()
@@ -2566,6 +2611,8 @@ class Mint:
                     else:
                         print(f"\nMint is listening (connected to {config.MODEL}).{typing}\n", flush=True)
                     self._state(self._idle_state())
+                    self._unanswered = self._unanswered or self._lost_words()
+                    self._heard = self._said = ""
                     if self._unanswered and self._unanswered not in self._pending_text:
                         # The last session dropped (1011) before answering: it never heard it. Send it again.
                         self._print(f"[sending again after the drop: {self._unanswered[:80]}]")
@@ -2609,6 +2656,13 @@ class Mint:
             return
         message = str(error)
         why = _outage_caption(message)
+        if attempt == 1 and _routine_drop(message):
+            # Google's hourly end of a connection, or one blip: reconnect at once without alarming anyone.
+            # Only a second failure in a row is an outage worth a caption and a spoken word.
+            log.info("session ended (%s); reconnecting", _short_error(message))
+            self._state("offline", "Reconnecting…")
+            await asyncio.sleep(0.5)
+            return
         self._state("offline", why)
         self._tell_outage(why)
         from mint.core import gemini_keys
@@ -2996,6 +3050,31 @@ def _duration(seconds: float) -> str:
     if minutes < 90:
         return f"{minutes:g} minutes".replace(".0 ", " ")
     return f"{minutes / 60:.1f} hours"
+
+
+def _seconds(value) -> float:
+    """A protobuf Duration, a timedelta or "50s" in seconds (60 when unknown)."""
+    try:
+        if value is None:
+            return 60.0
+        if hasattr(value, "total_seconds"):
+            return float(value.total_seconds())
+        if hasattr(value, "seconds"):
+            return float(value.seconds) + float(getattr(value, "nanos", 0) or 0) / 1e9
+        return float(str(value).strip().rstrip("s"))
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def _routine_drop(message: str) -> bool:
+    """A connection that ended the ordinary way - Google's time limit, a going-away close, a network blip -
+    rather than a refused key, quota or bad settings."""
+    lowered = " ".join(str(message).split()).lower()
+    if any(word in lowered for word in ("api key", "permission_denied", "quota", "resource_exhausted", "429",
+                                        "1007", "invalid argument", "suspended")):
+        return False
+    return any(word in lowered for word in ("deadline expired", "1000", "1001", "going away", "1006", "1011",
+                                            "1008", "aborted", "internal error", "connection reset", "closed"))
 
 
 def _short_error(message: str) -> str:
