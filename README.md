@@ -24,7 +24,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 
 <br>
 
-https://github.com/user-attachments/assets/0ba21b27-d906-49d5-9c69-f29ad3a530ee
+https://github.com/user-attachments/assets/165b3c07-b49e-4b4e-9660-080de831b36c
 
 <p align="center">
   <sub>▶ <b>Meet Mint</b>, the launch film (1:43) · unmute for the voiceover · also on <a href="https://youtu.be/0FxY1O4VvE8">YouTube</a></sub>
