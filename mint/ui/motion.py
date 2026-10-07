@@ -32,6 +32,7 @@ import AppKit
 import Quartz
 from PyObjCTools import AppHelper
 
+from mint.ui import kinetics
 from mint.core import prefs
 
 log = logging.getLogger("mint.ui.motion")
@@ -651,7 +652,7 @@ class Motion:
 
     def _maybe_wander(self) -> None:
         AppHelper.callLater(WANDER_CHECK, self._maybe_wander)
-        if prefs.get("wander") is False or random.random() > WANDER_CHANCE:
+        if prefs.get("wander") is False or random.random() > WANDER_CHANCE or kinetics.calm():
             return
         self.wander(force=False)
 

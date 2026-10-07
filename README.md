@@ -7,12 +7,14 @@ Say “Hey Mint” and it talks back, clicks and types in your apps, browses, ma
 marks things on your screen, and hands long jobs to a family of background agents.
 
 [**Illustrated guide**](https://hey-mint.pages.dev/) ·
+[What's new](#new-in-05) ·
 [Install](#install) ·
 [What it can do](#what-it-can-do) ·
 [How it works](#how-it-works) ·
 [Development](#development) ·
 [Contributing](CONTRIBUTING.md)
 
+[![CI](https://github.com/shivatmax/hey-mint/actions/workflows/ci.yml/badge.svg)](https://github.com/shivatmax/hey-mint/actions/workflows/ci.yml)
 ![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-2EC4B6)
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-172033)
 ![Python](https://img.shields.io/badge/python-3.11%2B-8B7CFF)
@@ -25,7 +27,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 https://github.com/user-attachments/assets/0ba21b27-d906-49d5-9c69-f29ad3a530ee
 
 <p align="center">
-  <sub>▶ <b>Meet Mint v0.3.0</b>, the launch film (1:43) · unmute for the voiceover · also on <a href="https://youtu.be/0FxY1O4VvE8">YouTube</a></sub>
+  <sub>▶ <b>Meet Mint</b>, the launch film (1:43) · unmute for the voiceover · also on <a href="https://youtu.be/0FxY1O4VvE8">YouTube</a></sub>
 </p>
 
 <br>
@@ -33,6 +35,30 @@ https://github.com/user-attachments/assets/0ba21b27-d906-49d5-9c69-f29ad3a530ee
 <p align="center">
   <img src="docs/media/talk.gif" alt="Asking Mint to open Slack: captions, the orb turning into the Slack icon, a check mark, and the spoken reply" width="560">
 </p>
+
+## New in 0.5
+
+- **Google Meet calls with Mint.** Say “start a Google Meet” (or send `/meet` on Telegram, or email it). Mint
+  creates a meeting, joins it, shares your Mac's screen and sends you the link. Join from your phone and talk to
+  Mint as on a phone call while you watch it work, or type in the call's chat. [Guide](https://hey-mint.pages.dev/docs#meet)
+- **Control Mint by email.** Give Mint an address to watch (a separate Gmail account is best) and mail it a request
+  whose subject starts with `Mint:`. Only senders on your allowlist are acted on (or anyone who includes your secret
+  word), and only when the mail server confirms the sender is genuine. The answer comes back in the same thread,
+  with the steps, files and screenshots. [Guide](https://hey-mint.pages.dev/docs#email)
+- **Checks on your coding agents' work.** Mint reads Claude Code's and Codex's own test output, so "did Claude's
+  tests pass?" gets the real answer ("2 of 48 failed, expected 3, got -1; changed invoice.ts since"), not the agent's
+  word. Risky steps, retries and two agents on one file are flagged, Telegram's done messages carry the verdict, and
+  "hand this to Codex" passes the work on with a note. An optional fix loop sends Claude back when it tries to finish
+  or push with failing tests, and Claude Code or Codex can ask Mint to check their work themselves (MCP).
+  [Guide](https://hey-mint.pages.dev/docs#agent-checks)
+- **An easier first run.** The welcome window has a Connect page: it takes you to Google AI Studio for a free
+  Gemini key, and when you paste it, Mint checks it with Google before saving it. [Install](#install)
+- **A pool of voice models.** Mint finds the Gemini Live models your key can use and moves to the next one when one
+  is slow, near its per-minute limit or failing, then moves back when the better one is ready. When your words
+  show on screen but no answer follows, Mint tells the voice service you have finished and, if needed, sends your
+  words again as text, so a question no longer goes unanswered. [Guide](https://hey-mint.pages.dev/docs#talking)
+
+Every change, release by release, is in the [changelog](CHANGELOG.md).
 
 ## What it can do
 
@@ -124,43 +150,70 @@ Optional extras, each unlocking one thing:
 
 | Extra | Unlocks |
 |---|---|
-| OpenAI API key (asked for on first launch) | Background agents: research, documents, code |
+| OpenAI API key (Settings ▸ Accounts & keys) | Background agents: research, documents, code |
 | The [ChatGPT app](https://openai.com/chatgpt/desktop/) (it brings Codex) | The agent that builds websites and code projects |
-| TypeSafe key (asked for on first launch) | Jev: the `desktop` tool (multi-step clicking and typing in any app, by the engine built into Mint) and surer picks of which button, skill or memory is meant |
+| TypeSafe key (Settings ▸ Accounts & keys) | Jev: the `desktop` tool (multi-step clicking and typing in any app, by the engine built into Mint) and surer picks of which button, skill or memory is meant |
 
-**The one-line way (recommended).** Open Terminal, paste this and press Return:
+**Way 1: download the app (no Terminal).**
+
+1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest).
+   Everything it needs is inside: no Python, Homebrew or Xcode.
+2. Open the DMG and drag **Hey Mint** onto **Applications**. (If you open it straight from the DMG or your
+   Downloads folder, Hey Mint offers to move itself into Applications: click **Move to Applications**.)
+3. Open **Hey Mint** from Applications. The first time, macOS says *“Apple could not verify ‘Hey Mint’ is free of
+   malware…”*. Click **Done**, then:
+   - open **System Settings ▸ Privacy & Security**, scroll down to *“Hey Mint” was blocked…*, click **Open Anyway**,
+     type your Mac password, and click **Open Anyway** again;
+   - on macOS 14, right-click **Hey Mint** in Applications, choose **Open**, then **Open**.
+
+   **This happens once per Mac, never again:** new versions install themselves (see Updates below), so don't
+   download the DMG again. Why it asks at all: Hey Mint is free and open source, and Apple only lets an app skip this
+   question if its developer pays Apple a yearly fee for notarization.
+
+**Way 2: one line in Terminal (no question from macOS at all).** Open Terminal, paste this and press Return:
 
 ```bash
-curl -fsSL https://hey-mint.pages.dev/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shivatmax/hey-mint/main/packaging/install.sh | bash
 ```
 
-(If `hey-mint.pages.dev` can't be reached from your network, use the same script from GitHub: `curl -fsSL https://raw.githubusercontent.com/shivatmax/hey-mint/main/packaging/install.sh | bash`.)
+It downloads the latest release, checks its checksum, puts Hey Mint in Applications, approves it with macOS (it
+removes the “downloaded from the internet” mark from the copy it installs, exactly what **Open Anyway** does) and
+opens it. The script is [`packaging/install.sh`](packaging/install.sh), short enough to read first; it is also at
+`https://hey-mint.pages.dev/install.sh` (some networks block `pages.dev`, so GitHub comes first).
 
-It downloads the latest release, checks its checksum, installs Hey Mint in Applications, approves it with macOS
-and opens it: no "cannot check for malware" box and nothing to find in System Settings. (The script is
-[`packaging/install.sh`](packaging/install.sh), short enough to read first. Release builds are not notarized by
-Apple, which costs a yearly fee; the script removes the "downloaded from the internet" mark from the copy it
-installs, exactly what **Open Anyway** does.)
+**Then, either way:**
 
-**Or by hand.**
-
-1. Download the latest **Hey-Mint-…-arm64.dmg** from [Releases](https://github.com/shivatmax/hey-mint/releases/latest)
-   (Apple silicon Macs, macOS 14.2 or later). Everything it needs is inside: no Python, Homebrew or Xcode.
-2. Open the DMG and drag **Hey Mint** into **Applications**, then open it.
-3. First time only: if macOS says it cannot check the app for malware, open **System Settings ▸ Privacy &
-   Security** and click **Open Anyway**.
-4. Paste your free [Gemini API key](https://aistudio.google.com/apikey); the OpenAI and Jev keys are optional.
-   Hold <kbd>⌥</kbd> while opening Hey Mint to change keys later.
-5. The welcome window takes it from there (about two minutes, Esc skips): your name and what to call Mint, a
-   voice, each permission with why it's needed and an Allow button (Microphone is the one it needs), your
-   shortcuts, and a tour of what Mint can do. It's in the menu bar as **Welcome tour…** any time later.
+1. The welcome window takes it from there (about two minutes): your name, what to call Mint and where it lives
+   (in the notch or floating); then **Connect**, where you open Google AI Studio, create a free
+   [Gemini API key](https://aistudio.google.com/apikey) and paste it, and Mint checks it with Google before saving
+   it; then a voice, each permission with why it's needed and an Allow button (Microphone is the one it needs),
+   your shortcuts, and a tour of what Mint can do. It's in the menu bar as **Welcome tour…** any time later.
+2. The OpenAI and TypeSafe (Jev) keys are optional: add them in **Settings ▸ Accounts & keys**, or hold
+   <kbd>⌥</kbd> while opening Hey Mint to change keys.
 
 <p align="center">
   <img src="docs/media/onboarding.gif" alt="The welcome window: Mint says hi, asks your name, and you pick a voice" width="560">
 </p>
 
-Your keys, settings, memory and skills live in `~/Library/Application Support/Hey Mint`. To update,
-replace the app with a newer one; your data stays.
+Your keys, settings, memory and skills live in `~/Library/Application Support/Hey Mint` (some feature files,
+such as the clipboard history and the Google Meet browser profile, are in `~/Library/Application Support/Mint`).
+Updating or reinstalling the app keeps them.
+
+### Updates
+
+The downloaded app updates itself, so you approve it with macOS only once: an update is downloaded by Hey Mint
+itself (not by a browser), so macOS never asks about it, and it keeps your Microphone, Accessibility and Screen
+Recording permissions. At launch and every 12 hours it asks GitHub for the latest release. A newer
+version is downloaded in the background and checked before anything changes: its checksum must match the
+release's `latest.json`, its `.sha256` file and GitHub's own digest, and it must be signed by the same certificate
+as the app you have. It is installed when the Mac has been left alone for about ten minutes: the new app takes
+the old one's place, the old one goes to the Trash, and Mint reopens. Your data and permissions stay.
+
+- **Settings ▸ Updates & Help** shows your version, turns **Update automatically** on or off, and has
+  **Check for updates** and **Install** buttons. You can also ask Mint to “check for updates”.
+- **Beta channel:** set `"update_channel": "beta"` in the settings file (Settings ▸ Updates & Help ▸ The settings
+  file ▸ Edit…) to get pre-releases too. The default is `"stable"`.
+- A build from source (below) does not update itself: `git pull`, then `./install.sh` again.
 
 ### Build from source
 
@@ -238,7 +291,8 @@ tool is in [docs/usage.md](docs/usage.md); working on Mint is in [docs/developme
 
 - Never enters passwords or card numbers, never fills password fields, never stores
   secrets in files, skills or memory.
-- Never sends email (drafts only); messages, posts and forms go out only when you asked.
+- Never sends email for you (drafts only); messages, posts and forms go out only when you asked. With email
+  control on, the only mail Mint sends is its answer to a request you emailed it, back to the verified sender.
 - “Delete” means the Trash; files are backed up before being overwritten; private folders
   (keys, keychains, browser profiles, Mail, Messages) are off limits.
 - Invisible in screen shares by default (“Mint, be visible” to show it in a Google Meet).
@@ -334,9 +388,20 @@ five minutes.
 
 | Workflow | Runs on | Does |
 |---|---|---|
-| [CI](.github/workflows/ci.yml) | every push and pull request | lint and offline tests on macOS |
+| [CI](.github/workflows/ci.yml) | every push and pull request | lint and offline tests on macOS, Python 3.11 to 3.13 |
 | [Release](.github/workflows/release.yml) | a `v*` tag | builds, signs (if set up) and publishes the DMG |
 | [Guide](.github/workflows/cloudflare.yml) | changes to `guide/` on `main` | deploys [hey-mint.pages.dev](https://hey-mint.pages.dev/) (needs the Cloudflare secrets) |
+
+## Roadmap
+
+What's planned next, roughly in order:
+
+- **A richer notch:** an alert queue (what needs you first, nothing lost while you're away) and a status ring on
+  the notch for busy, waiting, done and error.
+- **Mint's hooks as a Claude Code plugin,** installable with `/plugin`.
+- **A wider accuracy suite:** recorded examples for routing and the guard, next to the test-reading one.
+
+Want one of these sooner, or something else? [Open an issue](https://github.com/shivatmax/hey-mint/issues/new/choose).
 
 ## Contributing
 

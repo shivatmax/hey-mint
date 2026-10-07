@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture · Hey Mint docs</title><meta name="description" content="How Hey Mint is built: the big picture, the packages, how a request flows, the helper apps, safety by construction, and every tool.">
+<link rel="canonical" href="https://hey-mint.pages.dev/docs/architecture"><meta name="theme-color" content="#F3F6FB">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="../assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Architecture · Hey Mint docs"><meta property="og:description" content="How Hey Mint is built: the big picture, the packages, how a request flows, the helper apps, safety by construction, and every tool.">
+<meta property="og:url" content="https://hey-mint.pages.dev/docs/architecture"><meta property="og:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Architecture · Hey Mint docs">
+<meta name="twitter:description" content="How Hey Mint is built: the big picture, the packages, how a request flows, the helper apps, safety by construction, and every tool."><meta name="twitter:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta name="twitter:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Hey Mint", "item": "https://hey-mint.pages.dev/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://hey-mint.pages.dev/docs"}, {"@type": "ListItem", "position": 3, "name": "Architecture", "item": "https://hey-mint.pages.dev/docs/architecture"}]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/guide.css"></head>
+<body data-hello="Click a ▶ example and I&#x27;ll act it out." data-page="docs" data-doc="architecture" data-root="../">
+<header class="top"><div class="top-in"><a class="brand" href="../"><span class="dot"></span>Hey Mint</a>
+<nav aria-label="Site"><a href="../docs" class="on">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
+<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings">Settings and updates</a><a href="configuration">Configuration</a><a href="troubleshooting">Troubleshooting</a><a href="architecture" class="cur" aria-current="page">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#arch-overview">The big picture</a><a href="#arch-packages">The packages</a><a href="#arch-flow">How a request flows</a><a href="#arch-helpers">The helper apps</a><a href="#arch-safety">Safety by construction</a><a href="#tools">Every tool</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 12 of 12</div><h1>Architecture</h1><p>How Hey Mint is built: the big picture, the packages, how a request flows, the helper apps, safety by construction, and every tool.</p></div><section id="arch-overview" data-group="Architecture">
+  <h2>The big picture</h2>
+  <p class="lead">One process, one conversation. Gemini Live listens, speaks and decides which tool to call; everything else is there to make those calls quick, sure and safe.</p>
+<pre>
+ microphone ─▶ wake word (on device) ─▶ voice lock ─▶ Gemini Live ─▶ speaker
+                                                        │   ▲
+                                              tool calls│   │results
+                                                        ▼   │
+                            mint.tools ── mint.screen ── mint.knowledge ── mint.agents
+                                                        │
+                                                        ▼
+                                  mint.ui: the orb, captions, chat, marks, critters
+</pre>
+  <p><b>Gemini Live</b> listens, speaks and picks tools. <b>Jev</b>, a fast chooser, picks from real lists wherever a guess would be risky: which control to press, which skill fits, which memories matter, which app was meant. Long jobs go to <a href="agents#agents">agents</a> that run in the background and report back.</p>
+  <ul class="plain">
+    <li><b>Direct routes first.</b> Menus, the accessibility tree, AppleScript and web APIs before pixels; the pointer moves only when nothing else can do the job.</li>
+    <li><b>On device where it matters.</b> The wake word, the voice lock and speaker checks run locally; nothing leaves the Mac while Mint is asleep.</li>
+    <li><b>Learns.</b> Tasks that took many steps or needed your correction become <a href="learning#skills">skills</a>, ranked by how often they work.</li>
+    <li><b>Cheap to watch.</b> A video becomes a transcript and about 12 keyframes on one contact sheet: about 6k tokens for a 15-minute talk instead of about 180k.</li>
+  </ul>
+</section>
+
+<section id="arch-packages" data-group="Architecture">
+  <h2>The packages</h2>
+  <p class="lead">The Python side is the <code>mint</code> package, in eight parts.</p>
+  <div class="table"><table><tr><th>Package</th><th>What it does</th></tr>
+    <tr><td><code>mint.app</code></td><td>Startup, the Live session and its lifecycle: audio in and out, tool calls, wake and sleep, reconnects; finishing multi-part requests; “stop”; quitting and the login item; plans that survive restarts; simple voice commands run locally; Telegram; updates; Report a problem.</td></tr>
+    <tr><td><code>mint.core</code></td><td>Shared configuration and services: keys, models and the system instruction; <code>settings.json</code> and <code>custom.json</code>; Jev; Gemini requests for background jobs, with retries across models; global shortcuts; token usage per model per day.</td></tr>
+    <tr><td><code>mint.voice</code></td><td>Listening and speaking: the audio engine with voice processing, the “Hey Mint” detector, the voice lock and enrolment, words it gets wrong, the voices, dictation, and training a custom wake phrase on this Mac.</td></tr>
+    <tr><td><code>mint.knowledge</code></td><td>What Mint knows: the conversation and its rolling summary, memory (one fact per block, keeping earlier values, tidied daily), the journal of what happened when, the opt-in timeline, skills, teaching, and the learner that writes skills from experience.</td></tr>
+    <tr><td><code>mint.tools</code></td><td>Everything Gemini can call: files, web, browser, menus, AppleScript, calendar and reminders, the clipboard, videos, automations, meetings, documents, the Mac's switches, screen recording, trackers, undo and more. See <a href="#tools">Every tool</a>.</td></tr>
+    <tr><td><code>mint.screen</code></td><td>Seeing and acting on the screen: Accessibility, finding the control you meant, on-device text recognition, screenshots for the model, finding words and marking them.</td></tr>
+    <tr><td><code>mint.ui</code></td><td>Everything drawn: the menu bar, the orb and its face, the island, chat, Settings, the skills and memory window, effects, expressions, 60 fps motion, marks, critters, screen-share visibility, on-screen lessons, the welcome window.</td></tr>
+    <tr><td><code>mint.agents</code></td><td>Background agents: the hub and each agent's tool loop, the agents list, model providers, the Codex runner, agents asking agents, and the tools Gemini uses to delegate.</td></tr></table></div>
+</section>
+
+<section id="arch-flow" data-group="Architecture">
+  <h2>How a request flows</h2>
+  <ol class="steps">
+    <li><b>Wake.</b> The wake word detector scores 80 ms frames on the Mac. With a trained voice, the voice lock checks who is speaking before any audio leaves the Mac.</li>
+    <li><b>Understand.</b> Audio streams to Gemini Live. The phrase “Hey Mint” itself is cut out so it is not transcribed as a word.</li>
+    <li><b>Act.</b> Gemini calls tools. Direct routes come first: menus and the accessibility tree, AppleScript, the browser's own scripting, file and web APIs. The pointer moves only when nothing else can do the job, and every action is checked by comparing the window before and after.</li>
+    <li><b>Show.</b> Each tool call becomes an orb morph, a caption and a small flourish. None of it appears in Mint's own screenshots.</li>
+    <li><b>Remember.</b> Turns go into the conversation history and facts into memory; tasks that took many steps or needed correcting become skills. Plans are saved as they go, so “where were we?” works after a restart, and the journal answers questions about any of it by date.</li>
+  </ol>
+  <h3>Running by itself</h3>
+  <p><a href="using#automations">Automations</a> check their schedules and watchers every 15 seconds and hand what is due to the session as a message Mint acts on. When the Python process has unloaded, it has already written the next due time down; Mint Ear checks it every 30 seconds and starts Mint in time.</p>
+  <h3>Watching a video</h3>
+  <p>Two jobs run side by side. Speech: the site's captions, or the audio transcribed (on the Mac, or by Gemini in two-minute pieces). Pictures: about 100 small frames are sampled, the ones where the picture changes are kept, and about 12 are laid out on one contact sheet with their times. A Flash model then writes the digest from the transcript, the sheet and the measured pace and colours. Everything is cached per video.</p>
+</section>
+
+<section id="arch-helpers" data-group="Architecture">
+  <h2>The helper apps</h2>
+  <p class="lead">Mint.app is a small Swift launcher with a few native helpers inside it.</p>
+  <div class="table"><table><tr><th>Helper</th><th>What it does</th></tr>
+    <tr><td>Mint Ear</td><td>Keeps the wake word running in about 70 MB while the Python process is unloaded, and starts Mint when you call it or an automation is due.</td></tr>
+    <tr><td>MintEngine</td><td>The screen-control engine (adapted from <a href="https://github.com/savka777/jev-use">jev-use</a>). Started on the first <code>desktop</code> goal as a child of Mint, so it shares Mint's Accessibility permission and quits with it. It reads the front app's accessibility tree, lets Jev choose each action, performs it and checks the result, step by step until the goal is met.</td></tr>
+    <tr><td>MintScreen</td><td>Records the screen, one window or an area with ScreenCaptureKit into an H.264 .mp4, optionally with the Mac's sound and the microphone, leaving Mint's own orb out. The window or area is shown as a box first and recorded only after you say yes.</td></tr>
+    <tr><td>MintRecorder</td><td>The meeting recorder: the call's audio (through a Core Audio process tap) and the microphone, to two tracks on one clock. Both are transcribed in parallel, speech detection on the Mac sets the times, and Gemini writes the notes.</td></tr></table></div>
+</section>
+
+<section id="arch-safety" data-group="Architecture">
+  <h2>Safety by construction</h2>
+  <ul class="plain">
+    <li>Password fields are never typed into, and secrets are refused by the file, memory and skill writers.</li>
+    <li>Sending, submitting, deleting and quitting need an explicit request, and the same message is never sent twice within two minutes. <a href="safety#guard">The guard</a> asks before anything is deleted or changed.</li>
+    <li>What Mint reads (pages, emails, files) is information, never instructions: <a href="safety#outside-text">pages and emails can't give Mint orders</a>.</li>
+    <li>AppleScript cannot run shell commands; the shell tool is off unless <a href="configuration#env-mint-allow-shell"><code>MINT_ALLOW_SHELL=1</code></a>.</li>
+    <li>“Stop” cancels queued clicks and keys immediately.</li>
+  </ul>
+  <h3>Data on your Mac</h3>
+  <p>Keys (<code>.env</code>, readable only by you), <code>settings.json</code>, <code>custom.json</code>, the agents list, memory, skills, your voice enrolment, the conversation history, plans, automations and, when it is on, the timeline all stay in Mint's folder on your Mac (see <a href="configuration#config-files">Where settings live</a>). The log is at <code>~/Library/Logs/Mint/mint.log</code>. None of it is in the repository.</p>
+  <p>For working on Mint itself, see the <a href="https://github.com/shivatmax/hey-mint/blob/main/docs/architecture.md">architecture notes</a> and the <a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">developer handbook</a>.</p>
+</section>
+
+<section id="tools" data-group="Architecture">
+  <h2>Every tool</h2>
+  <p class="lead">What Mint can call, for the curious. You never need these names.</p>
+  <details><summary>Show all tools</summary><div class="table"><table><tr><th>Tool</th><th>What it does</th></tr><tr><td><code>open_app</code></td><td>Instantly launch or switch to a Mac application by name.</td></tr>
+<tr><td><code>open_url</code></td><td>Instantly open a web address in a new browser tab (reuses a tab already showing it).</td></tr>
+<tr><td><code>open_folder</code></td><td>Instantly open a folder in Finder.</td></tr>
+<tr><td><code>scroll</code></td><td>Instantly scroll the window under the pointer.</td></tr>
+<tr><td><code>press_key</code></td><td>Instantly press a key, optionally with modifiers.</td></tr>
+<tr><td><code>set_volume</code></td><td>Instantly set the Mac&#x27;s output volume.</td></tr>
+<tr><td><code>media_key</code></td><td>Instantly send a media key: play/pause, next or previous track.</td></tr>
+<tr><td><code>frontmost_app</code></td><td>Which application is in front right now.</td></tr>
+<tr><td><code>list_windows</code></td><td>List the visible windows as app name and title.</td></tr>
+<tr><td><code>quit_app</code></td><td>Ask an application to quit.</td></tr>
+<tr><td><code>type_text</code></td><td>Instantly insert text at the cursor in whatever field is focused, in any app.</td></tr>
+<tr><td><code>get_selected_text</code></td><td>Read the text the user has selected in the front app, to answer about it (&#x27;summarise this&#x27;, &#x27;what does this mean&#x27;).</td></tr>
+<tr><td><code>get_status</code></td><td>Current local time and date, battery level, and volume.</td></tr>
+<tr><td><code>set_timer</code></td><td>Start a timer.</td></tr>
+<tr><td><code>notify</code></td><td>Show a macOS notification.</td></tr>
+<tr><td><code>system_action</code></td><td>Lock the screen, sleep the display, switch dark mode, or mute.</td></tr>
+<tr><td><code>calendar_events</code></td><td>The user&#x27;s calendar events from today onwards.</td></tr>
+<tr><td><code>create_reminder</code></td><td>Create a reminder in the Reminders app, optionally due at a time, in the list the user names.</td></tr>
+<tr><td><code>create_event</code></td><td>Add an event to the Calendar app (instant, EventKit).</td></tr>
+<tr><td><code>create_note</code></td><td>Create a note in the Notes app, in the folder the user names.</td></tr>
+<tr><td><code>compose_email</code></td><td>Make a pre-filled email draft for the user to review and send.</td></tr>
+<tr><td><code>list_emails</code></td><td>List the newest messages in the macOS MAIL APP&#x27;s inbox.</td></tr>
+<tr><td><code>read_email</code></td><td>Read one message from the macOS Mail app&#x27;s inbox in full (see list_emails).</td></tr>
+<tr><td><code>open_chrome</code></td><td>Open Google Chrome as one particular account (Chrome profile), optionally at a URL.</td></tr>
+<tr><td><code>open_slack</code></td><td>Open Slack, optionally switch to a workspace, and optionally jump to a channel, DM or person by name.</td></tr>
+<tr><td><code>list_accounts</code></td><td>List the Chrome profiles and Slack workspaces available.</td></tr>
+<tr><td><code>read_window</code></td><td>Read ALL the text in the front window - a web page, a Gmail inbox or open email, a document, an app - exactly, including parts scrolled out of view.</td></tr>
+<tr><td><code>list_open</code></td><td>What is open right now: the app in front, and every Chrome window with its profile and tabs (* = the selected tab).</td></tr>
+<tr><td><code>switch_to</code></td><td>Bring an already-open Chrome tab or window to the front, by words from its title, e.g.</td></tr>
+<tr><td><code>export_doc_pdf</code></td><td>Export the open Google Doc itself as a PDF, exactly as Docs renders it, and open it.</td></tr>
+<tr><td><code>plan_task</code></td><td>Start a multi-step task: state the goal and the ordered steps BEFORE doing any of them.</td></tr>
+<tr><td><code>step_done</code></td><td>Mark a step of the current task finished (or failed), with a one-line result saying what you checked (what the window, file or page showed).</td></tr>
+<tr><td><code>create_pdf</code></td><td>Write a nicely formatted PDF and open it.</td></tr>
+<tr><td><code>run_routine</code></td><td>Run one of the user&#x27;s saved routines by name.</td></tr>
+<tr><td><code>desktop</code></td><td>Drive the screen to do something that the instant tools cannot: click a specific button or link, type into a particular field, choose a menu item, pick a search result.</td></tr>
+<tr><td><code>set_preference</code></td><td>Change how you (Mint) behave or look, when the user asks: &#x27;don&#x27;t speak, just chat&#x27; -&gt; spoken_replies off; &#x27;talk to me again&#x27; / &#x27;speak&#x27; -&gt; spoken_replies on; &#x27;turn off the mic&#x27; -&gt; microphone off (then they can only type); &#x27;make it purple&#x27; -&gt; theme; &#x27;move to the bottom left&#x27; -&gt; position; also the orb&#x27;s face, the on-screen effects, word-by-word captions, whether you listen while you work, and the activity timeline (&#x27;remember what I work on&#x27; -&gt; activity_timeline on; &#x27;delete my timeline&#x27; -&gt; activity_timeline clear), where Mint saves what it makes (&#x27;save everything in my Dropbox&#x27; -&gt; storage_folder = that folder&#x27;s path, e.g.</td></tr>
+<tr><td><code>chat_action</code></td><td>Manage the chat window&#x27;s conversation when the user asks: &#x27;clear the chat&#x27; -&gt; clear (window only; memory is kept); &#x27;summarise / compact our conversation&#x27; -&gt; summarize (a Flash model summarises it, a summary card appears, and you are restarted with just that summary as context - like compacting); &#x27;start a new session / start fresh / new conversation&#x27; -&gt; new_session (saves this conversation to memory, then restarts you with a clean context).</td></tr>
+<tr><td><code>show_chat</code></td><td>Open or close the chat window (conversation history, typing box, settings).</td></tr>
+<tr><td><code>stop_listening</code></td><td>Go back to sleep and wait for the wake word.</td></tr>
+<tr><td><code>look</code></td><td>Capture the screen and look at it.</td></tr>
+<tr><td><code>ui_act</code></td><td>THE way to click, type into or pick anything in an app&#x27;s window.</td></tr>
+<tr><td><code>ui_elements</code></td><td>List the controls in the front window right now (numbered, with role, label and where they are; says if a dialog is open).</td></tr>
+<tr><td><code>click_text</code></td><td>Click a piece of text you can name on screen - a sidebar item, tab, button or link label - in apps the desktop tool cannot see into (Slack, some Electron apps).</td></tr>
+<tr><td><code>click_at</code></td><td>Click a point you can see in the latest look screenshot.</td></tr>
+<tr><td><code>find_skill</code></td><td>Find the saved skill (a learned how-to) for a task.</td></tr>
+<tr><td><code>skill_result</code></td><td>Report how following a skill went, so good skills rise and bad ones get fixed.</td></tr>
+<tr><td><code>create_skill</code></td><td>Save a new skill: how to do a kind of task, as steps that worked.</td></tr>
+<tr><td><code>update_skill</code></td><td>Change a saved skill: replace its steps, add a note (e.g.</td></tr>
+<tr><td><code>list_skills</code></td><td>List saved skills by category, ranked by how well they work.</td></tr>
+<tr><td><code>delete_skill</code></td><td>Remove a saved skill (a copy is archived).</td></tr>
+<tr><td><code>remember</code></td><td>Save a fact about the user for future conversations: people, accounts by name, work, schedule, preferences, places, or a word you misheard.</td></tr>
+<tr><td><code>recall</code></td><td>Look up what you remember that is relevant to a question.</td></tr>
+<tr><td><code>update_memory</code></td><td>Change a saved fact (the user says it changed or was wrong), or make it fixed / not fixed.</td></tr>
+<tr><td><code>forget</code></td><td>Forget a saved fact the user no longer wants kept.</td></tr>
+<tr><td><code>list_memories</code></td><td>List what is remembered, optionally one group.</td></tr>
+<tr><td><code>memory_used</code></td><td>Which remembered facts you were given in this conversation (and the fixed ones) - for &#x27;why did you say that?&#x27;, &#x27;which memory did you use?&#x27;, &#x27;how do you know that?&#x27;.</td></tr>
+<tr><td><code>show_skills_and_memory</code></td><td>Open the Skills &amp; Memory window on screen, where the user can see and edit every skill and every remembered fact.</td></tr>
+<tr><td><code>show_on_screen</code></td><td>Show the user where something is, in whatever app is in front (a PDF, a web page, a chat, a document, code): it finds the words on screen - or, for things without words (an icon, a button, a picture, a chart), looks at the screen for them - scrolling the window if needed, and draws a box, underline, highlight, circle or arrow around it, with an optional short note; your orb flies over beside it.</td></tr>
+<tr><td><code>mark_area</code></td><td>Mark a region with no text (an image, a chart, an icon) using 0-1000 coordinates of your latest look screenshot: x, y of its top-left corner, and its width and height.</td></tr>
+<tr><td><code>clear_marks</code></td><td>Remove the marks you drew on screen.</td></tr>
+<tr><td><code>move_orb</code></td><td>Move your orb on screen when the user asks: &#x27;go a little down&#x27;, &#x27;move up&#x27;, &#x27;move left a lot&#x27;, &#x27;you are covering that&#x27; (direction away), &#x27;go to the middle&#x27;.</td></tr>
+<tr><td><code>screen_share_visibility</code></td><td>Show or hide Mint in screen sharing, recordings and screenshots.</td></tr>
+<tr><td><code>display_mode</code></td><td>Switch how Mint looks on screen: &#x27;orb&#x27; = the floating round orb (default); &#x27;notch&#x27; = Mint lives in the MacBook&#x27;s camera notch like the iPhone&#x27;s Dynamic Island (it grows out of the notch to show words, tasks and controls).</td></tr>
+<tr><td><code>express</code></td><td>Play an expression on your orb body.</td></tr>
+<tr><td><code>set_voice</code></td><td>Change your speaking voice and/or style when the user asks (&#x27;use a deeper voice&#x27;, &#x27;sound more cheerful&#x27;, &#x27;talk slower&#x27;, &#x27;use Puck&#x27;).</td></tr>
+<tr><td><code>list_agents</code></td><td>List your sub-agents: name, what each is for, its model, and what each is doing now.</td></tr>
+<tr><td><code>delegate_task</code></td><td>Hand a substantial task to a sub-agent, which works in the background while you keep talking.</td></tr>
+<tr><td><code>delegate_tasks</code></td><td>Start several sub-agent tasks at once (in parallel), e.g.</td></tr>
+<tr><td><code>agent_status</code></td><td>What your sub-agents are doing, or have finished, right now.</td></tr>
+<tr><td><code>message_agent</code></td><td>Send new or changed instructions to a running sub-agent - when the user changes what they want mid-task (&#x27;tell Luna to use pytest&#x27;, &#x27;make it shorter&#x27;).</td></tr>
+<tr><td><code>answer_agent</code></td><td>Pass the user&#x27;s answer to a sub-agent that asked a question.</td></tr>
+<tr><td><code>stop_agent</code></td><td>Stop a running sub-agent, or &#x27;all&#x27;.</td></tr>
+<tr><td><code>create_agent</code></td><td>Create (or update) a named sub-agent when the user asks for one: its name, what it is for, how it should work, and optionally which model.</td></tr>
+<tr><td><code>wait_until_done</code></td><td>Wait until an app has FINISHED what it is doing before you use the result: ChatGPT (or any AI chat) still writing its answer, a page loading, something generating.</td></tr>
+<tr><td><code>preview_site</code></td><td>Show a web page or site that was built on this Mac (e.g.</td></tr>
+<tr><td><code>edit_selection</code></td><td>Rewrite the text the user has selected, in any app, and replace it in place: more formal, friendlier, shorter, fix grammar, bullet points, translate, expand, as a reply...</td></tr>
+<tr><td><code>make_spreadsheet</code></td><td>Read many documents (PDFs, Word, text, scans, photos of receipts) and put the same fields from each into one .xlsx spreadsheet, one row per document (or per item in a statement), then open it.</td></tr>
+<tr><td><code>edit_spreadsheet</code></td><td>Change an existing Excel .xlsx file in place, without opening it: add rows at the bottom, set cells, add a Total row (=SUM of every number column, below the data; an existing Total row moves below new rows).</td></tr>
+<tr><td><code>tidy</code></td><td>Organise a folder&#x27;s loose files into sub-folders (by kind, topic, project or month) with a preview: plan (nothing moves), apply (after the user agrees), undo (put the last tidy-up back).</td></tr>
+<tr><td><code>teach</code></td><td>Learn a task by watching the user do it once, then save it as a skill Mint can follow later.</td></tr>
+<tr><td><code>tutor</code></td><td>Teach the user a task on screen instead of doing it: Mint plans the steps, points at each control with an arrow and a note, waits until the user has done it, then shows the next.</td></tr>
+<tr><td><code>meeting</code></td><td>Record a meeting/call on this Mac without a bot (the user&#x27;s microphone and the call audio as two tracks), then a transcript and notes (summary, decisions, action items, quotes) saved in Mint&#x27;s Meetings folder.</td></tr>
+<tr><td><code>briefing</code></td><td>The user&#x27;s day in one spoken summary: today&#x27;s calendar, reminders due, the newest mail (what needs them), unfinished tasks, today&#x27;s meetings, the weather and a few headlines.</td></tr>
+<tr><td><code>shortcut</code></td><td>Run one of the user&#x27;s Apple Shortcuts by name (Home scenes and lights, Focus, music, their own automations), optionally with text input, and get its output; or list them.</td></tr>
+<tr><td><code>find_screenshot</code></td><td>Find screenshots by the text or things in them (an invoice number, an error, a booking, a chat), wherever they are saved.</td></tr>
+<tr><td><code>translate_screen</code></td><td>Translate the foreign text in the front window (any language or script, even in images) and show it in place: each paragraph covered in its own colours with the translation written over it, for a minute.</td></tr>
+<tr><td><code>mail</code></td><td>The Mail app&#x27;s inbox, smarter: triage (sort the newest messages into needs a reply, to do, FYI, newsletters, promos, with one line each) and draft_reply (write a reply to message number in the user&#x27;s own style, from what they say, and open it as a draft - never sent).</td></tr>
+<tr><td><code>mac</code></td><td>The Mac&#x27;s own switches: brightness (up/down/0-100), keep_awake (on with minutes, off, status), focus (Do Not Disturb on/off), window (layout of the front window or of app: left_half, right_half, top_half, bottom_half, top_left/top_right/bottom_left/bottom_right, left_third, center_third, right_third, left_two_thirds, right_two_thirds, maximize, almost_maximize, center, restore, fullscreen, next_display, larger, smaller; split = app left and app2 right), music (resume/pause/next/previous in Spotify or Music), night_shift (on/off), wifi (on/off/status), show (desktop, mission_control, launchpad, hide_others, minimize), settings (open a System Settings page: displays, sound, wifi, bluetooth, battery, notifications, focus, privacy, keyboard, trackpad, general, appearance, wallpaper, network, storage...).</td></tr>
+<tr><td><code>screen_record</code></td><td>Record a video (.mp4) of the screen, one window or a part of the screen, saved in Mint&#x27;s Videos/Recordings folder.</td></tr>
+<tr><td><code>track</code></td><td>Keep an eye on something and tell the user the moment it finishes, even hours later: a browser download, a Claude Code session finishing its turn (or waiting for approval), a reply in the ChatGPT app or a chat/session in the Claude app finishing, a command in Terminal or iTerm, an upload/render/export in any app&#x27;s window (judged from the window against the goal), or a file appearing.</td></tr>
+<tr><td><code>show_card</code></td><td>Show an answer as a card that grows out of Mint&#x27;s orb: a count as a big number, or a short list (files, emails, downloads, events, results) with icons.</td></tr>
+<tr><td><code>dictation</code></td><td>The user&#x27;s recent dictations (Wispr-style: hold a key, talk, the text is typed at the cursor).</td></tr>
+<tr><td><code>edit_video</code></td><td>Edit a video file by instruction: trim/cut parts, remove silent parts, speed up or slow down, make it vertical (9:16) / square / 4:5, crop black bars, rotate or flip, resize (720p...), burn in captions (transcribed), mute or change volume, add background music, join clips, fade in/out, compress under a size, make a GIF of a part, or extract the audio (mp3/m4a/wav).</td></tr>
+<tr><td><code>video_info</code></td><td>A video&#x27;s length, resolution, shape, frame rate, sound and file size.</td></tr>
+<tr><td><code>ocr_copy</code></td><td>Read the text of the front window, the whole screen, an image or PDF (scans too), or a picture on the clipboard, with the Mac&#x27;s own text recognition (any language), and copy it to the clipboard in reading order, paragraphs kept.</td></tr>
+<tr><td><code>data_to_sheet</code></td><td>Turn a table or list of data into an Excel .xlsx (numbers as numbers, dates as dates, a bold frozen header, one sheet per table) and open it: from the front window or screen, a PDF, image, Word, text or CSV file, a web page (its URL in path; fetched here, it does not need to be open), or what is on the clipboard (copied cells, text or a picture).</td></tr>
+<tr><td><code>convert_document</code></td><td>Convert a document (PDF, scanned PDF, Word, RTF, text, Markdown, HTML, image) into Word (docx), PDF, Markdown, text, HTML or RTF, keeping headings, lists, tables and paragraphs; optionally translate it into another language (Hindi and other scripts included).</td></tr>
+<tr><td><code>notifications</code></td><td>The user&#x27;s macOS notifications (Notification Center): what they missed, read them, filter by app or words, open one, dismiss one, clear them, or reply inline (Messages/Slack).</td></tr>
+<tr><td><code>undo</code></td><td>Undo what Mint itself did in the last 24 hours, newest first: switches (brightness, volume, mute, dark mode, Do Not Disturb, Night Shift, keep awake, Wi-Fi), window layouts, text Mint typed or rewrote, clipboard changes, files Mint moved/renamed/trashed/created/edited, tidy-ups, reminders and notes Mint created, Mint&#x27;s own settings.</td></tr>
+<tr><td><code>update</code></td><td>Hey Mint&#x27;s own updates.</td></tr>
+<tr><td><code>agent_app</code></td><td>Use the ChatGPT or Claude desktop app: see whether it is busy and which chat is open, read the latest reply or the last messages, list chats/projects/Claude Code sessions, open one, start a new chat, send a prompt (only when the user asked) and wait for the reply, or press Stop.</td></tr>
+<tr><td><code>calculate</code></td><td>Exact arithmetic: an expression (&#x27;1200.50 + 85 + 310.49&#x27;, &#x27;round(49.99 * 0.79, 2)&#x27;, &#x27;(3840 - 1200) / 4&#x27;) or a list of numbers to total (gives total, average, min, max).</td></tr>
+<tr><td><code>merge_folders</code></td><td>Merge folders into one, flat (files in subfolders too): the newest copy of each file name stays, older copies go to an &#x27;older&#x27; subfolder with their real names, emptied folders are removed.</td></tr>
+<tr><td><code>make_image</code></td><td>Make pictures with Apple&#x27;s Image Playground (on-device Apple Intelligence) and work on the picture card that shows them: create from a description in a style, change the picture by description, save a copy, draw another, improve the prompt, copy, close the card, or open it in the Image Playground app.</td></tr>
+<tr><td><code>make_shortcut</code></td><td>Make a new Apple Shortcut (Shortcuts app) from a plain description: plan the steps first and read them back, create only after the user agrees (they click &#x27;Add Shortcut&#x27; once).</td></tr>
+<tr><td><code>task</code></td><td>Manage the current multi-step task (started with plan_task): add_steps (new steps at the end, after a step, or as sub-steps under a step that turned out bigger), replan (replace the steps not done yet), note (keep a finding for later steps), pause, resume (a paused or unfinished task - after a restart, a stop, or &#x27;where were we&#x27;), list (unfinished tasks), abandon.</td></tr>
+<tr><td><code>recall_history</code></td><td>Look back at what happened: past conversations, what Mint did and found, agents&#x27; results, tasks, automations and videos watched, by date.</td></tr>
+<tr><td><code>automation</code></td><td>Things Mint does by itself: on a schedule (at a time once, daily/weekdays/some days at a time, every N minutes) or when something happens (a new file in a folder, an app opens, N minutes before calendar events).</td></tr>
+<tr><td><code>watch_video</code></td><td>Watch and understand a video in seconds: a YouTube / X / Vimeo / Loom / TikTok / Instagram link, a video or audio file, or - with no source - the video page in front, the video selected in Finder, or the newest screen recording.</td></tr>
+<tr><td><code>screenshot</code></td><td>Take a screenshot and save it as a file (and copy it to the clipboard).</td></tr>
+<tr><td><code>clipboard</code></td><td>Manage the clipboard.</td></tr>
+<tr><td><code>read_file</code></td><td>Read a file on this Mac: text, code, Markdown, CSV, JSON, PDF, Word/RTF/Pages-exported docs.</td></tr>
+<tr><td><code>write_file</code></td><td>Create or change a text file (notes, code, Markdown, CSV, HTML...).</td></tr>
+<tr><td><code>find_files</code></td><td>Find files and folders by name or content with Spotlight, newest first.</td></tr>
+<tr><td><code>file_action</code></td><td>Do something with a file or folder: open (in its default app), reveal (in Finder), info, move / copy / rename (to to), make_folder, trash (moves it to the Trash - only when the user asked to delete it; it can be restored from there).</td></tr>
+<tr><td><code>web_search</code></td><td>Search the web and get titles, links and snippets - for facts, news, prices, docs, anything current.</td></tr>
+<tr><td><code>read_url</code></td><td>Fetch a web page or text URL and get its readable text, without opening it on screen.</td></tr>
+<tr><td><code>browser</code></td><td>Full control of the web browser (Chrome, Safari, Brave, Arc, Edge) - faster and surer than clicking pixels.</td></tr>
+<tr><td><code>scroll_to</code></td><td>Scroll so something is visible, in any app: target is text or a control to bring into view (scrolls a long list or page until it appears).</td></tr>
+<tr><td><code>menu</code></td><td>Use the app&#x27;s menu bar - every command an app has is there, with its keyboard shortcut.</td></tr>
+<tr><td><code>wait_for_text</code></td><td>Short wait (seconds, at most 2 minutes) for text to appear in the front window - or to go away, with gone=true (a &#x27;Loading…&#x27; or &#x27;Exporting…&#x27; label, a dialog closing).</td></tr>
+<tr><td><code>pointer</code></td><td>The user&#x27;s mouse pointer: where (what is under it - the control, its app, nearby text) or click / double_click / right_click right where it is.</td></tr>
+<tr><td><code>quit_mint</code></td><td>Quit Mint itself completely - the assistant (you), everything you started (sub-agents, Codex, preview servers) and the screen-control engine - when the user says &#x27;quit Mint&#x27;, &#x27;turn yourself off&#x27;, &#x27;shut down Mint&#x27;, &#x27;close Mint&#x27;.</td></tr>
+<tr><td><code>run_applescript</code></td><td>Run an AppleScript for apps with a scripting dictionary: Finder, Music, Notes, Reminders, Calendar, Mail drafts, Safari/Chrome tabs, System Events UI scripting.</td></tr>
+<tr><td><code>fix_hearing</code></td><td>Remember a word or name you misheard, so it is heard right from now on.</td></tr></table></div></details>
+</section><nav class="pager" aria-label="Previous and next page"><a class="prev" href="troubleshooting"><small>Previous</small><span>Troubleshooting</span></a><span></span></nav></article></div><footer><span>Hey Mint · open-source voice assistant for macOS · GPL-3.0</span><span class="grow"></span>
+<a href="../docs">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a href="https://github.com/shivatmax/hey-mint/releases">Releases</a><a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">Contribute</a></footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<script src="../assets/docs-index.js"></script>
+<script src="../assets/guide.js"></script><script src="../assets/critters.js"></script>
+</body></html>

@@ -38,7 +38,9 @@ import Quartz
 from PyObjCTools import AppHelper
 
 from mint.ui import gfx
+from mint.ui import kinetics
 from mint.core import prefs
+from mint.ui.notch_state import NotchState
 
 log = logging.getLogger("mint.ui.notch")
 
@@ -52,13 +54,16 @@ BTN, STEP = 30, 37     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
 INNER_OPEN = 0.8                     # resting on the small row's plain part opens the full notch after this
-PEEK_AFTER = 0.3
-AWAY_HOVERED, AWAY_CLICKED = 0.6, 2.0   # an opened notch folds this long after the pointer leaves (seconds)     # a short rest peeks the controls; a clicked-open notch folds after this long unvisited
+PEEK_AFTER = 0.3                     # a short rest peeks the controls (notch_state: an opened notch folds 8 s
+                                     # after the pointer leaves, or after a quiet minute under it)
+CLOSE_LEAD = 0.12                    # folding: the content goes first, the shape follows this much later
+PANE_FACE = 2.2                      # the little Mint grown into the home tab's Mint pane (shared element)
+GLOW_D = 84                          # the closed wing's ambient glow behind the little Mint
+AMBER = (1.00, 0.72, 0.26)           # needs you (notch_agents' waiting colour)
 FACE_PULL = 30.0                     # how far (points) the little Mint is pulled before it lets go of the notch
 HOME_W, BODY_H = 640, 150          # the open notch on hover (boring.notch's size): header row + body
 AGENT_H = 196                      # the Agents tab ("Claude mode"): a coding agent's session, live
 AGENT_MINI_H = 60                  # ... minimized: one line
-AGENT_DONE_OPEN = 6.0              # a finished agent's summary stays open this long
 BIG_W, BIG_H = 760, 430            # the notch grown for search results ("show more", 3x3 / 3x2 / 3x1)
 SIDE_W = HOME_W - 32 - PLAYER_W - 12   # the right-hand pane: the week calendar or the battery
 WIN_W, WIN_H = 900, 860    # room for the notch to wrap cards (two side by side) or the chat under it
@@ -112,6 +117,46 @@ def island_path(W, H, w, h, ear=EAR, r=10.0):
     return p
 
 
+def rim_paths(W, H, w, h, ear=EAR, r=10.0):
+    """The shape's outline without its top (the screen edge): the status ring; and its bottom edge alone: the
+    busy sweep's track. The same points as island_path, so on the same spring they stay on its edge."""
+    cx = W / 2
+    x0, x1, top, bottom = cx - w / 2, cx + w / 2, H, H - h
+    r = min(r, h / 2 - 0.5, w / 2 - 0.5)
+    ring = Quartz.CGPathCreateMutable()
+    Quartz.CGPathMoveToPoint(ring, None, x0 - ear, top)
+    Quartz.CGPathAddQuadCurveToPoint(ring, None, x0, top, x0, top - ear)
+    Quartz.CGPathAddLineToPoint(ring, None, x0, bottom + r)
+    Quartz.CGPathAddQuadCurveToPoint(ring, None, x0, bottom, x0 + r, bottom)
+    Quartz.CGPathAddLineToPoint(ring, None, x1 - r, bottom)
+    Quartz.CGPathAddQuadCurveToPoint(ring, None, x1, bottom, x1, bottom + r)
+    Quartz.CGPathAddLineToPoint(ring, None, x1, top - ear)
+    Quartz.CGPathAddQuadCurveToPoint(ring, None, x1, top, x1 + ear, top)
+    edge = Quartz.CGPathCreateMutable()
+    Quartz.CGPathMoveToPoint(edge, None, x0, bottom + r)
+    Quartz.CGPathAddQuadCurveToPoint(edge, None, x0, bottom, x0 + r, bottom)
+    Quartz.CGPathAddLineToPoint(edge, None, x1 - r, bottom)
+    Quartz.CGPathAddQuadCurveToPoint(edge, None, x1, bottom, x1, bottom + r)
+    return ring, edge
+
+
+def _sfx(name: str) -> None:
+    try:
+        from mint.ui import sfx
+        sfx.play(name)
+    except Exception:
+        pass
+
+
+def _idle_seconds() -> float:
+    """Seconds since the last keyboard or mouse input anywhere (news waits while you're away)."""
+    try:
+        return float(Quartz.CGEventSourceSecondsSinceLastEventType(
+            Quartz.kCGEventSourceStateCombinedSessionState, Quartz.kCGAnyInputEventType))
+    except Exception:
+        return 0.0
+
+
 # --- AppKit pieces ------------------------------------------------------------------------------
 
 class MintNotchPanel(AppKit.NSPanel):
@@ -134,8 +179,8 @@ class MintNotchView(AppKit.NSView):
 
     def mouseDown_(self, event):
         self._moved = False
-        self._face = (self.owner is not None and self.owner.on_face(
-            self.convertPoint_fromView_(event.locationInWindow(), None)))
+        self._down = self.convertPoint_fromView_(event.locationInWindow(), None)
+        self._face = (self.owner is not None and self.owner.on_face(self._down))
         self._start = event.locationInWindow()
 
     def mouseDragged_(self, event):
@@ -159,6 +204,8 @@ class MintNotchView(AppKit.NSView):
             if self.owner is not None:
                 self.owner.face_release()
         elif self.owner is not None:
+            if getattr(self, "_face", False):
+                self.owner.poke_face(getattr(self, "_down", None))    # a tap on the little Mint: it reacts
             self.owner.clicked()
         self._face = self._moved = False
 
@@ -252,8 +299,8 @@ class Notch:
         self.mode = ""
         self.caption = None             # (shown, full) attributed strings while words are showing
         self.progress = None            # 0..1 for long tasks
-        self.hover_since = 0.0
-        self.left_at = 0.0
+        # Hover dwell, a notch you opened and when it folds, and the agents' alerts one at a time (notch_state).
+        self.st = NotchState(timing={"peek": PEEK_AFTER})
         self._acts = []
         self._ind = ""
         self._styled: dict = {}             # guest windows dressed as part of the notch -> how they were
@@ -268,17 +315,40 @@ class Notch:
         self.drag_until = 0.0                # a file is being dragged near the notch: open on the shelf
         self._carrying = False               # the little Mint was pulled out and is still being carried
         self.inner_since = 0.0               # since when the pointer has rested on the small row's plain part
-        self.pin_away = AWAY_CLICKED         # how long the pointer may be away before an opened notch folds
-        self.pinned = False                  # opened by a click: the full notch stays until clicked again
         self.search_until = 0.0              # Mint just showed files/apps: the notch stays open on Search
         self._paused_since = 0.0             # when the song in the wings was paused
         self._mint_words = ""                # what Mint is saying (the open notch's Mint pane shows it)
         self.allow_key = False
-        self.agent_until = 0.0               # an agent finished: the notch shows its summary until then
         self._calm, self._calm_skip = False, 0   # nothing moving on the notch: ticks at 10 a second (tick)
         self._agents_hooked = False
         self._search_hooked = False
         self._drag_count = -1
+        self._agent_push = False
+        self._alert_id = None                # the alert on show last frame (a new one: tab, focus, flash, sound)
+        self._sync_at = self._idle_at = 0.0  # the agents' needs-you and the idle time, looked at a few times a second
+        self._hold_until = 0.0               # folding: the shape waits this long for the content to go
+        self._open_started = 0.0             # the shape began to open: content reveals staggered after this
+        self._face_where = "wing"            # the little Mint: in the wing, or grown into the Mint pane
+        self._face_spot = (0.0, 0.0, 1.0)    # ... its centre (window points) and scale there
+        self._rim_status = None              # (kind, colour) the rim and the glow show
+        self._cd = None                      # the countdown line's (start, end)
+        self._sweep_w = 0.0
+        self._scene = None                   # (kind, view, controller): the one scene in the body (notch_fx/composer)
+        self._scene_since = 0.0
+        self._scene_shown = False
+        self._failed = None                  # (when, reason, the user's words): a failed step, for the error card
+
+    @property
+    def pinned(self) -> bool:
+        """Opened by you (a click, resting on it, the sparkles button): the full notch, until it folds."""
+        return self.st.is_open
+
+    @pinned.setter
+    def pinned(self, value: bool) -> None:
+        if value:
+            self.st.open_by("click", time.monotonic())
+        else:
+            self.st.close(time.monotonic())
 
     # --- building -------------------------------------------------------------------------------
 
@@ -333,15 +403,37 @@ class Notch:
         # The little Mint, left of the camera.
         self.face_center = (WIN_W / 2 - self.nw / 2 - WING / 2 + 3, WIN_H - self.nh / 2)
         host = Quartz.CALayer.layer()
-        host.setFrame_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        host.setBounds_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        # Anchored on the face, so moving the host moves the face and scaling it grows the face in place
+        # (the shared-element flight between the wing and the Mint pane, and the elastic pull).
+        host.setAnchorPoint_(Quartz.CGPointMake(self.face_center[0] / WIN_W, self.face_center[1] / WIN_H))
+        host.setPosition_(Quartz.CGPointMake(*self.face_center))
         box.layer().addSublayer_(host)
         self.face_host = host
+        self._face_spot = (self.face_center[0], self.face_center[1], 1.0)
         from mint.ui.orb import Orb
         self.orb = Orb(host, self.face_center, FACE)
         for layer in (self.orb.ring, self.orb.spinner, self.orb.progress_ring):   # no outer rings in a tight spot
             layer.removeAllAnimations()
             layer.setHidden_(True)
         self.orb.in_notch = True                # expressions float their extras downwards, inside the notch
+        self._crisp(host, 2.0 * PANE_FACE)      # grown into the pane it stays sharp
+        # The wing's ambient light: a soft state-coloured glow behind the face, bleeding into the black (clipped
+        # to the island with everything in the box). Under the face, and it flies with it.
+        glow = Quartz.CAGradientLayer.layer()
+        glow.setType_(Quartz.kCAGradientLayerRadial)
+        glow.setBounds_(Quartz.CGRectMake(0, 0, GLOW_D, GLOW_D))
+        glow.setPosition_(Quartz.CGPointMake(*self.face_center))
+        glow.setStartPoint_(Quartz.CGPointMake(0.5, 0.5))
+        glow.setEndPoint_(Quartz.CGPointMake(1.0, 1.0))
+        glow.setLocations_([0.0, 0.42, 1.0])
+        wrap = Quartz.CALayer.layer()               # fades in and out; the glow inside breathes
+        wrap.setFrame_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        wrap.setOpacity_(0.0)
+        wrap.addSublayer_(glow)
+        host.insertSublayer_atIndex_(wrap, 0)
+        self.glow, self.glow_wrap = glow, wrap
+        self._crisp(wrap, 2.0 * PANE_FACE)
 
         # Right of the camera: what is going on.
         self.ind_center = (WIN_W / 2 + self.nw / 2 + WING / 2 - 3, WIN_H - self.nh / 2)
@@ -384,6 +476,7 @@ class Notch:
             box.addSubview_(button)
             self.buttons.append((symbol, button))
 
+        self._build_rim(box.layer())
         self._resize(self.nw + 2 * WING, self.nh, animate=False)
         self.ticker = MintNotchTicker.alloc().initWithOwner_(self)
         timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -401,6 +494,99 @@ class Notch:
                                                                lambda note: menu(-1))]
         self._screens = center.addObserverForName_object_queue_usingBlock_(
             AppKit.NSApplicationDidChangeScreenParametersNotification, None, None, lambda note: self._moved())
+        self._watch_esc()
+
+    def _crisp(self, layer, scale: float) -> None:
+        """Render a layer tree at `scale` points per pixel, so a transform that grows it doesn't blur it."""
+        try:
+            layer.setContentsScale_(max(layer.contentsScale(), scale))
+            for sub in layer.sublayers() or []:
+                self._crisp(sub, scale)
+        except Exception:
+            pass
+
+    def _build_rim(self, parent) -> None:
+        """Status on the shape itself, inside its edge (the box clips the outer half): a ring (needs you: amber,
+        pulsing), a one-shot flash (done: green, error: red), a light sweeping along the bottom edge (busy), and
+        the countdown line of a notch about to fold. All follow the shape's spring (_resize)."""
+        def ring_layer(into):
+            layer = Quartz.CAShapeLayer.layer()
+            layer.setFillColor_(None)
+            layer.setLineWidth_(3.0)                # 1.5 pt shows: the outer half is clipped
+            layer.setLineJoin_(Quartz.kCALineJoinRound)
+            layer.setLineCap_(Quartz.kCALineCapRound)
+            layer.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+            layer.setShadowRadius_(5.0)
+            layer.setShadowOpacity_(0.9)
+            into.addSublayer_(layer)
+            return layer
+        rim_wrap = Quartz.CALayer.layer()           # fades in and out; the ring inside pulses
+        rim_wrap.setFrame_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        rim_wrap.setOpacity_(0.0)
+        parent.addSublayer_(rim_wrap)
+        self.rim, self.rim_wrap = ring_layer(rim_wrap), rim_wrap
+        self.flash_rim = ring_layer(parent)
+        self.flash_rim.setOpacity_(0.0)
+        sweep = Quartz.CALayer.layer()
+        sweep.setFrame_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        sweep.setOpacity_(0.0)
+        track = Quartz.CAShapeLayer.layer()
+        track.setFrame_(Quartz.CGRectMake(0, 0, WIN_W, WIN_H))
+        track.setFillColor_(None)
+        track.setStrokeColor_(AppKit.NSColor.blackColor().CGColor())
+        track.setLineWidth_(4.0)                    # 2 pt inside the edge
+        track.setLineCap_(Quartz.kCALineCapRound)
+        sweep.setMask_(track)
+        band = Quartz.CAGradientLayer.layer()
+        band.setBounds_(Quartz.CGRectMake(0, 0, 150, WIN_H))
+        band.setPosition_(Quartz.CGPointMake(WIN_W / 2, WIN_H / 2))
+        band.setStartPoint_(Quartz.CGPointMake(0.0, 0.5))
+        band.setEndPoint_(Quartz.CGPointMake(1.0, 0.5))
+        sweep.addSublayer_(band)
+        parent.addSublayer_(sweep)
+        self.sweep, self.sweep_track, self.sweep_band = sweep, track, band
+        line = Quartz.CALayer.layer()
+        line.setBounds_(Quartz.CGRectMake(0, 0, 100, 2))
+        line.setCornerRadius_(1.0)
+        line.setBackgroundColor_(_white(0.42).CGColor())
+        line.setOpacity_(0.0)
+        parent.addSublayer_(line)
+        self.cd_line = line
+
+    def _watch_esc(self) -> None:
+        """Esc with the pointer on the notch (or its Search field focused): the alert on show is snoozed."""
+        def seen(event):
+            try:
+                if event.keyCode() == 53:
+                    AppHelper.callAfter(self._esc)
+            except Exception:
+                pass
+
+        def local(event):
+            seen(event)
+            return event
+        mask = AppKit.NSEventMaskKeyDown
+        try:
+            # (the global one only hears keys once Mint may monitor input; it never sees what is typed, only Esc)
+            self._esc_monitors = [AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(mask, seen),
+                                  AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(mask, local)]
+        except Exception:
+            log.debug("no Esc monitor", exc_info=True)
+
+    def _esc(self) -> None:
+        if not _live[0] or self.phase != "on":
+            return
+        if (self.tab == "search" and self.panel.isKeyWindow()) or self._composing():
+            return                                  # Esc belongs to the search field / the composer (it cancels)
+        if not (self._inside(AppKit.NSEvent.mouseLocation()) or self.panel.isKeyWindow()):
+            return
+        self.snooze()
+
+    def snooze(self) -> None:
+        """Esc (or "dismiss"): the notch folds at once; news on show goes, needs-you alerts wait until it's opened."""
+        if self.st.is_open or self.st.shown() is not None:
+            self.st.snooze(time.monotonic())
+            _sfx("close")
 
     def _label(self, size, color, weight, lines=1):
         field = MintNotchLabel.wrappingLabelWithString_("")
@@ -461,7 +647,7 @@ class Notch:
 
     def global_face(self):
         """The little Mint's centre in screen points (the HUD's orb_center while in notch mode)."""
-        x, y = self.face_center
+        x, y = self._face_spot[:2] if self._face_spot[0] else self.face_center
         return self.cx - WIN_W / 2 + x, self.top - WIN_H + y
 
     def bottom(self) -> float:
@@ -487,42 +673,229 @@ class Notch:
         ear, radius = (19.0, 24.0) if opened else (6.0, 14.0)
         self.ear = ear
         path = island_path(WIN_W, WIN_H, w, h, ear=ear, r=radius)
-        for layer in (self.shape, self.mask):
+        ring, edge = rim_paths(WIN_W, WIN_H, w, h, ear=ear, r=radius)
+        # An unhurried drop (kinetics "gentle": critically damped, ~0.45 s), nothing swinging out past where the
+        # shape is going. Wrapping a card the shape leads ("snappy"), so the card never shows outside it while
+        # both grow; folding back is quick too. The status rim and the sweep's track ride the same spring, so
+        # they stay on the edge. (Reduce motion: kinetics makes it a short ease.)
+        growing = w * h > self.size[0] * self.size[1] + 1
+        preset = "snappy" if lead or not growing else "gentle"
+        layers = ((self.shape, path), (self.mask, path), (self.rim, ring), (self.flash_rim, ring),
+                  (self.sweep_track, edge))
+        for layer, new in layers:
             old = (layer.presentationLayer() or layer).path() if animate else None
-            Quartz.CATransaction.begin()
-            Quartz.CATransaction.setDisableActions_(True)
-            layer.setPath_(path)
-            Quartz.CATransaction.commit()
-            if animate and old is not None:
-                spring = Quartz.CASpringAnimation.animationWithKeyPath_("path")
-                spring.setFromValue_(old)
-                spring.setToValue_(path)
-                # An unhurried drop and rise, settling without overshoot (critically damped): nothing
-                # swings out past where the shape is going. Wrapping a card, the shape leads (faster),
-                # so the card never shows outside it while both grow.
-                stiffness = 300.0 if lead else 230.0          # response about 0.5 s (boring.notch's close spring)
-                ratio = 1.0
-                growing = w * h > self.size[0] * self.size[1] + 1
-                if not growing:
-                    stiffness = 330.0                         # folding back is quicker, never bouncy
-                elif not lead and opened and prefs.get("notch_playful") is not False:
-                    ratio = 0.8                               # opening: a breath of overshoot, then it settles
-                spring.setStiffness_(stiffness)
-                spring.setDamping_(2.0 * ratio * math.sqrt(stiffness))
-                spring.setMass_(1.0)
-                spring.setDuration_(spring.settlingDuration())
-                layer.addAnimation_forKey_(spring, "path")
+            if old is not None:
+                kinetics.spring(layer, "path", old, new, preset, anim_key="path")
+            else:
+                layer.removeAnimationForKey_("path")
+                Quartz.CATransaction.begin()
+                Quartz.CATransaction.setDisableActions_(True)
+                layer.setPath_(new)
+                Quartz.CATransaction.commit()
         self.shape.setShadowOpacity_(0.7 if opened else 0.0)     # black 0.7, radius 6, only when open
         self.shape.setShadowRadius_(6)
         self.size = (w, h)
+        if self._rim_status and self._rim_status[0] == "busy" and abs(w - self._sweep_w) > 4:
+            self._sweep_travel()                    # the sweep crosses the new width
+        if self._cd:
+            self._place_cd_line()
 
     # --- the HUD's hooks ------------------------------------------------------------------------
 
     def show_words(self, shown, full) -> None:
         self.caption = (shown, full) if full is not None and full.length() else None
 
-    def set_progress(self, fraction) -> None:
+    def set_progress(self, fraction, label: str = "") -> None:
+        """hud.progress: the small bar in the open notch; a long job (or one while the notch is open) gets the
+        progress scene, Mint riding the bar, instead - quick jobs never fling the notch open."""
         self.progress = fraction
+        now = time.monotonic()
+        scene = self._scene_ctl("progress")
+        if fraction is None:
+            self._prog_since = 0.0
+            if scene is not None:
+                scene.finish(True)
+                AppHelper.callLater(1.2, lambda: self._hide_scene("progress", scene))
+            return
+        self._prog_since = getattr(self, "_prog_since", 0.0) or now
+        self._prog_at = now
+        if scene is None and _live[0] and (self.st.is_open or self.mode == "home" or now - self._prog_since > 3.0):
+            symbol = "sparkles"
+            try:
+                from mint.ui import activity as act
+                kind = (getattr(self.hud, "_activity", None) or {}).get("kind", "")
+                symbol = act.SYMBOLS.get(kind, "sparkles") if kind else symbol
+            except Exception:
+                pass
+            from mint.ui import notch_fx
+            scene = self._show_scene("progress", lambda w, h: notch_fx.progress_bar(w, h, label or "Working on it",
+                                                                                      symbol))
+        if scene is not None:
+            scene.set(fraction, title=label or None)
+
+    # --- scenes in the open notch's body (notch_fx, notch_composer) -------------------------------
+
+    def _scene_ctl(self, kind: str):
+        return self._scene[2] if self._scene is not None and self._scene[0] == kind else None
+
+    def _show_scene(self, kind: str, make, w: float = HOME_W - 24, h: float = BODY_H):
+        """One scene at a time in the body: make(w, h) -> (view, controller). It's added hidden; the tick reveals it
+        (the notch opens into the home layout around it, the other panes step aside, the header stays)."""
+        if self._scene is not None:
+            if self._scene[0] == kind:
+                return self._scene[2]
+            self._hide_scene()
+        try:
+            view, ctl = make(w, h)
+        except Exception:
+            log.exception("notch scene %s failed", kind)
+            return None
+        view.setHidden_(True)
+        self.box.addSubview_(view)
+        self._scene = (kind, view, ctl)
+        self._scene_since = time.monotonic()
+        return ctl
+
+    def _hide_scene(self, kind: str | None = None, ctl=None) -> None:
+        """The scene goes (only the one asked for, if `kind`/`ctl` say which): content out, then closed."""
+        scene = self._scene
+        if scene is None or (kind is not None and scene[0] != kind) or (ctl is not None and scene[2] is not ctl):
+            return
+        self._scene = None
+        _, view, ctl = scene
+        self._conceal(view)
+
+        def close():
+            try:
+                ctl.close()
+            except Exception:
+                log.debug("scene close failed", exc_info=True)
+        AppHelper.callLater(0.2, close)
+
+    def _scenes(self, now: float, mouse, inside: bool, state: str, alert) -> bool:
+        """Start and end the scenes the tick looks after; True while one should show (an alert on show beats the
+        greeting and the progress bar, not the composer, a drop or the error card)."""
+        # The greeting: the first wake of the day.
+        previous, self._last_state = getattr(self, "_last_state", state), state
+        if state == "awake" and previous in ("sleeping", "starting") and self._scene is None:
+            try:
+                from mint.ui import notch_fx
+                if notch_fx.should_greet():
+                    holder = {}
+
+                    def done():
+                        self._hide_scene("greeting", holder.get("ctl"))
+                    holder["ctl"] = self._show_scene("greeting", lambda w, h: notch_fx.greeting(w, h, on_done=done))
+            except Exception:
+                log.debug("greeting failed", exc_info=True)
+        kind = self._scene[0] if self._scene is not None else None
+        if kind == "greeting" and now - self._scene_since > 4.5:
+            self._hide_scene("greeting")             # (in case its on_done never came)
+        # The error card: a failed step, once the turn has settled (nothing running any more).
+        failed = getattr(self, "_failed", None)
+        if failed and state not in ("thinking", "working") and getattr(self.hud, "_activity", None) is None:
+            self._failed = None
+            if now - failed[0] < 8.0 and kind not in ("composer", "drop"):
+                self.show_error("Mint couldn't finish that", failed[1], failed[2])
+                kind = "error"
+        if kind == "error":
+            pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+            if now - self._scene_since > 8.0 or (pressed and not inside and now - self._scene_since > 0.4):
+                self._hide_scene("error")            # 8 s, or a click somewhere else
+        # The composer: empty, it goes with a click somewhere else or when the notch folds.
+        if kind == "composer" and not self._composer_text() and now - self._scene_since > 0.4:
+            pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+            if (pressed and not inside) or not self.st.is_open:
+                self._hide_scene("composer")
+        # The drop zone goes with the drag.
+        if kind == "drop" and now > self.drag_until and not getattr(self, "_drop_done", False):
+            self._hide_scene("drop")
+        # A progress bar nobody updates any more (stopped mid-way).
+        if kind == "progress" and now - getattr(self, "_prog_at", now) > 20.0 and state not in ("thinking", "working"):
+            self.progress, self._prog_since = None, 0.0
+            self._hide_scene("progress")
+        if self._scene is None:
+            return False
+        return alert is None or self._scene[0] in ("composer", "drop", "error")
+
+    def step_ended(self, ok: bool, text: str) -> None:
+        """A step of Mint's turn ended (hud.activity_end). A failure is remembered with the user's words; the tick
+        shows the error card once the turn settles. A later success in the same turn forgets it."""
+        if ok:
+            self._failed = None
+            return
+        words = " ".join(w[0] for w in getattr(getattr(self.hud, "_you", None), "words", []) or [])
+        reason = f"{text} didn't work." if text else "Something went wrong on the way."
+        self._failed = (time.monotonic(), reason, words.strip())
+
+    def show_error(self, title: str, reason: str = "", request: str = "") -> None:
+        """The error card: sad red Mint, the reason, a round retry that sends `request` again the way the chat
+        does. A red rim flash and a shake. Goes after 8 s or a click elsewhere."""
+        from mint.ui import notch_fx
+        if self._scene_ctl("error") is not None:
+            self._hide_scene("error")
+        retry = None
+        if request:
+            def retry():
+                self.hud._fire("submit", request)
+                AppHelper.callLater(0.5, lambda: self._hide_scene("error"))
+        self._show_scene("error", lambda w, h: notch_fx.error_card(w, h, title, reason, on_retry=retry))
+        self.flash(gfx.RED, shake=True)
+
+    def compose(self) -> None:
+        """The header's "+": the island becomes an input. Enter sends to Mint like the chat does, then the notch
+        goes back to its working card; Esc or "+" again puts it away."""
+        if self._scene_ctl("composer") is not None:
+            self._hide_scene("composer")
+            return
+        from mint.ui import notch_composer
+        holder = {}
+
+        def send(text):
+            self.hud._fire("submit", text)
+            AppHelper.callLater(0.3, lambda: self._hide_scene("composer", holder.get("ctl")))
+
+        def cancel():
+            self._hide_scene("composer", holder.get("ctl"))
+
+        def mic():
+            prefs.toggle("mic")
+        ctl = self._show_scene("composer", lambda w, h: notch_composer.composer(w, h, send, cancel, on_mic=mic))
+        holder["ctl"] = ctl
+        if ctl is None:
+            return
+        if not self.st.is_open:
+            _sfx("open")
+        self.st.open_by("click", time.monotonic())        # afterwards it stays open on the working card
+        self.allow_key = True
+        ctl.focus(self.panel)
+
+    def _composing(self) -> bool:
+        return self._scene is not None and self._scene[0] == "composer"
+
+    def _composer_text(self) -> str:
+        ctl = self._scene_ctl("composer") if self._scene is not None else None
+        try:
+            return (ctl.text() or "").strip() if ctl is not None else ""
+        except Exception:
+            return ""
+
+    def _put_away_scene(self) -> None:
+        """The user chose something else in the notch (a tab, the chat): the scenes they can dismiss go - the
+        composer, the error card, the greeting."""
+        if self._scene is not None and self._scene[0] in ("composer", "error", "greeting"):
+            self._hide_scene()
+
+    def poke_face(self, point) -> None:
+        """A plain click on the little Mint: orb.poke with the offset from its centre (y up)."""
+        poke = getattr(getattr(self, "orb", None), "poke", None)
+        if poke is None or point is None:
+            return
+        x, y = self._face_spot[:2]
+        try:
+            poke(point.x - x, point.y - y)
+        except Exception:
+            log.debug("poke failed", exc_info=True)
 
     # --- every frame ---------------------------------------------------------------------------
 
@@ -542,19 +915,22 @@ class Notch:
         island = self._island()
         inside = self._inside(mouse)
         near_notch = (abs(mouse.x - self.cx) < self.nw / 2 + WING and mouse.y > self.top - self.nh - 4)
-        if inside or near_notch:
-            self.left_at = now
-            if not self.hover_since:
-                self.hover_since = now
-        elif now - self.left_at > 0.1:                  # closes a beat after the pointer leaves
-            self.hover_since = 0.0
-        # The full notch opens and closes by CLICKING it (a click anywhere on it but a button); hovering only
-        # ever shows the small row. Left alone for a while, an opened notch folds back by itself.
-        if self.pinned and not (inside or near_notch) and now - self.left_at > self.pin_away:
-            self.pinned = False
+        st = self.st
+        if not self._agents_hooked:
+            self._hook_agents()                 # coding agents: the wing, and their alerts (notch_state)
+        if now - self._idle_at > 1.0:
+            self._idle_at = now
+            st.idle(_idle_seconds())            # away (3 min without input): news waits
+        if self._agents_hooked and now - self._sync_at > 0.25:
+            self._sync_agents(now)
+        # notch_state keeps the timing: the peek's dwell (starting over while the pointer wanders), a notch you
+        # opened folding 8 s after the pointer leaves or after a quiet minute under it, `armed`, the alerts.
+        st.pointer(inside or near_notch, now, (mouse.x, mouse.y))
+        if st.is_open and (self._typing() or self._holding()):
+            st.keep(now)                        # typing in Search, a menu, Quick Look or a share sheet from it
         # Resting on the small row's plain part (not on a button) for a moment is meant: it opens in full.
-        # Passing over, or reaching for a button, never does.
-        if inside and self.mode == "hover" and not self.pinned:
+        # Passing over, reaching for a button, or a notch that just folded under the pointer never does.
+        if inside and self.mode == "hover" and not st.is_open and st.armed:
             frame = self.panel.frame()
             px, py = mouse.x - frame.origin.x, mouse.y - frame.origin.y
             on_button = any(not b.isHidden() and AppKit.NSPointInRect(AppKit.NSMakePoint(px, py),
@@ -563,16 +939,17 @@ class Notch:
             if on_button:
                 self.inner_since = 0.0
             else:
-                self.inner_since = self.inner_since or now
+                self.inner_since = max(self.inner_since or now, st.still_at)    # wandering starts it over
                 if now - self.inner_since > INNER_OPEN:
-                    self.pinned, self.inner_since, self.pin_away = True, 0.0, AWAY_HOVERED
+                    self.inner_since = 0.0
+                    st.open_by("hover", now)
+                    _sfx("open")
         else:
             self.inner_since = 0.0
         # Two stages, so crossing the notch on the way somewhere doesn't throw the whole thing open:
-        # a short rest shows the few controls that matter; staying on it opens the full notch.
-        rested = now - self.hover_since if self.hover_since else 0.0
-        peeking = rested > PEEK_AFTER
-        hovering = self.pinned
+        # a short rest shows the few controls that matter; staying on it (or a click) opens the full notch.
+        peeking = st.peeking(now)
+        hovering = st.is_open
         chat_open = getattr(getattr(hud, "chat", None), "is_open", False)
         state = getattr(hud, "_state", "")
         activity = getattr(hud, "_activity", None)
@@ -587,16 +964,19 @@ class Notch:
         shown_island = island is not None and island.shown and island.rect is not None
         if not self._search_hooked:
             self._hook_search()                 # Mint's file/app results open the notch on Search
-        if not self._agents_hooked:
-            self._hook_agents()                 # coding agents: the wing, and the notch opens when they need you
-        agent_push = (self._agents_need_you() and prefs.get("agent_approvals") is not False) or \
-            now < self.agent_until
+        # One alert at a time, from the queue: needs-you first (held until answered), then done (5 s) / failed (8 s).
+        alert = st.shown()
+        self._follow_alert(alert)
+        scene = self._scenes(now, mouse, inside, state, alert)    # greeting, error card, drop zone, progress, composer
+        self._scene_shown = scene
+        agent_push = alert is not None and not scene
         self._agent_push = agent_push
         if agent_push and self.tab != "agents" and not hovering:
             self.tab = "agents"
         music = self._music()                 # something playing: the notch becomes the player
         self._no_music_card(music)
         controls = prefs.get("notch_controls") is not False
+        bar_info = self._bar_info()
         # What Mint just brought up (found files, a song starting) opens at once, even while it's still
         # talking: the notch grows into it for a few seconds, then folds back (hover brings it all back).
         pushed = (now < self.search_until and self.tab == "search" or agent_push and self.tab == "agents") \
@@ -604,6 +984,9 @@ class Notch:
         if shown_island or guests:
             mode = "wrap"
             width, height = self._wrap(island.rect if shown_island else None, guests, compact_w)
+        elif scene:
+            mode = "home"                       # a scene: the home layout around it, header on top
+            width, height = HOME_W, self.nh + 8 + self._scene[1].frame().size.height + 10
         elif pushed and self._search_big():
             mode = "home"
             width, height = BIG_W, self.nh + 8 + BIG_H + 10
@@ -648,6 +1031,10 @@ class Notch:
         elif self._emoting(now):
             mode = "emote"                      # an expression: room under the little Mint for its extras
             width, height = compact_w + 48, self.nh + 46
+        elif bar_info is not None and not getattr(hud, "hidden", False) and state in ("sleeping", "awake", "paused") \
+                and not activity and not chat_open:
+            mode = "bar"                        # Mint idle, agents at work: their lead's step under the camera
+            width, height = max(compact_w, self._bar_width(bar_info) + 16), self.nh + 30
         elif (prefs.get("notch_idle_face") is False or getattr(hud, "hidden", False)) \
                 and state in ("sleeping", "awake", "paused") and not activity:
             mode = "plain"                      # just the notch until something happens
@@ -656,9 +1043,20 @@ class Notch:
             mode = "compact"
             width, height = compact_w, self.nh
         self._watch_drag(mouse)
-        if playful and mode in ("open", "hover", "wrap", "music", "home") and self.mode in ("compact", "plain"):
+        if playful and mode in ("open", "hover", "wrap", "music", "home", "bar") and self.mode in ("compact", "plain"):
             self.orb.hop()                      # the little Mint hops as the shape opens
-        self._resize(width, height, lead=(mode == "wrap"))
+        if mode != self.mode and mode in ("home", "hover", "open", "music", "bar"):
+            self._open_started = now            # the shape starts to open: its content follows, staggered
+        # Folding: the content goes first (~0.12 s), then the shape - never the black closing over content still
+        # showing. Growing (and wrapping a guest, where the shape leads) is at once.
+        shrinking = width * height < self.size[0] * self.size[1] - 1 and mode != "wrap"
+        if not shrinking:
+            self._hold_until = 0.0
+        elif mode != self.mode and self.mode in ("home", "hover", "open", "music", "bar") and not self._hold_until:
+            self._hold_until = now + CLOSE_LEAD
+        if not (self._hold_until and now < self._hold_until):
+            self._hold_until = 0.0
+            self._resize(width, height, lead=(mode == "wrap"))
         self._breathe(state, mode, playful)
         self._mint_words = caption[1] if caption else ""
         self._layout_content(mode, caption, width, height)
@@ -677,16 +1075,24 @@ class Notch:
         self._home(mode, music)
         self._battery_wings(mode == "battery")
         self._music_player(mode == "music" or (mode == "home" and self.tab == "home" and bool(music)
-                                               and not self._mint_words), height,
+                                               and not self._mint_words and not scene), height,
                            home=(mode == "home"))
         if mode == "battery":
             wings = True                        # the battery owns both wings for the moment
         if not wings or agent_wing:
             self._indicator(state, activity, now)    # (with music on: the agent takes the right wing)
-        showing_face = mode != "plain" and not wings
+        else:
+            self._wing_faces(False)
+        self._agents_bar(mode == "bar", width)
+        # One Mint on screen: a scene with its own (greeting, error, drop, progress) has the face for now.
+        showing_face = mode != "plain" and not wings and not (scene and self._scene[0] != "composer")
+        # The little Mint, a shared element: grown into the Mint pane while it shows, back in the wing otherwise.
+        self._place_face("pane" if mode == "home" and getattr(self, "_mint_pane_on", False) else "wing")
+        self._show_status(state, activity, alert, mode)
+        self._countdown(now, mode)
         self._calm = (mode in ("compact", "plain") and not music and not activity and not caption and not guests
                       and not shown_island and not agent_push and not pushed and not self.progress
-                      and not self.pinned and not self.hover_since and state in ("sleeping", "paused", "offline"))
+                      and not st.is_open and not st.hover and state in ("sleeping", "paused", "offline"))
         if (self.face_host.opacity() > 0.5) != showing_face:
             Quartz.CATransaction.begin()
             # Gone at once when something else takes the wing (the battery's words were drawn under a
@@ -707,9 +1113,11 @@ class Notch:
             return True
         if abs(mouse.x - self.cx) < self.nw / 2 + WING + 160 and mouse.y > self.top - self.nh - 160:
             return True                         # the pointer is coming (hover must feel instant)
-        if now < max(self.battery_peek_until, self.search_until, self.agent_until, self.drag_until,
-                     self.music_peek_until):
+        if now < max(self.battery_peek_until, self.search_until, self.drag_until, self.music_peek_until):
             return True
+        st = getattr(self, "st", None)
+        if st is not None and st.next_wake(now) < 0.2:
+            return True                         # an alert is about to show, run out or fold the notch
         try:
             from mint.ui.emotes import emotes
             return now - getattr(emotes, "last_played", 0.0) < 4.0
@@ -900,6 +1308,8 @@ class Notch:
                                      left + 72, top_y)}
         h["tabs"]["agents"] = button("sparkles", "Claude mode: your coding agents", lambda: self._set_tab("agents"),
                                      left + 108, top_y)
+        h["tabs"]["compose"] = button("plus", "Type to Mint here (Enter sends, Esc cancels)", self.compose,
+                                      left + 144, top_y)
         h["gear"] = button("gearshape.fill", "Menu and Settings", self._menu_from_button, right - 32, top_y)
         h["chat"] = button("bubble.left.and.bubble.right.fill", "Open the chat", self._chat, right - 64, top_y)
         battery = self._mod("notch_battery") if prefs.get("notch_battery") is not False else None
@@ -958,6 +1368,7 @@ class Notch:
         AppHelper.callLater(0.4, paint)
 
     def _set_tab(self, tab: str) -> None:
+        self._put_away_scene()
         self.tab = tab
         if tab == "search":
             self._focus_search()
@@ -983,25 +1394,77 @@ class Notch:
         self._agents_hooked = True
 
         def event(kind, session):
-            # The agent needs you, or it is done: the notch opens on it (the wing tells the rest).
+            # The agents' moments become alerts, shown one at a time (notch_state): needs-you first, held until
+            # answered; then "done" (5 s) and "failed" (8 s), each timed from when it shows. The wing tells the rest.
+            now = time.monotonic()
+            key = getattr(session, "key", None)
+            if not key:
+                return
             if kind in ("waiting", "asking"):
-                self.tab = "agents"
-            elif kind in ("finished", "failed") and prefs.get("agent_open_on_done") is not False:
-                self.tab = "agents"
-                self.agent_until = time.monotonic() + AGENT_DONE_OPEN
-            elif kind == "started" and getattr(self, "orb", None) is not None and self.mode in ("compact", "plain"):
-                self.orb.hop()
+                if prefs.get("agent_approvals") is not False:
+                    self.st.alert("need:" + key, "need", now, session=key)
+            elif kind in ("finished", "failed"):
+                self.st.resolve(now, session=key, kind="need")
+                if prefs.get("agent_open_on_done") is not False:
+                    news = "done" if kind == "finished" else "error"
+                    self.st.alert(f"{news}:{key}:{getattr(session, 'since', now)}", news, now, session=key)
+            elif kind == "started":
+                self.st.resolve(now, session=key)        # it moved on: its old news isn't worth showing
+                if getattr(self, "orb", None) is not None and self.mode in ("compact", "plain"):
+                    self.orb.hop()
         try:
             mod.on_event(event)
         except Exception:
             log.debug("agents hook failed", exc_info=True)
 
-    def _agents_need_you(self) -> bool:
-        mod = self._agents_mod() if self._agents_hooked else None
+    def _sync_agents(self, now: float) -> None:
+        """A few times a second: the sessions that need you (also those asking from before Mint started) are
+        alerts, and the ones answered are resolved."""
+        self._sync_at = now
         try:
-            return mod is not None and mod.needs_you()
+            mod = self._agents_mod()
+            self._wing = mod.wing() if mod is not None else None     # (the rim and the glow read it)
         except Exception:
-            return False
+            self._wing = None
+        keys = set()
+        if self._agents_mod() is not None and prefs.get("agent_approvals") is not False:
+            try:
+                from mint.tools import agent_watch
+                keys = {s.key for s in agent_watch.sessions() if s.approval or s.state in ("waiting", "asking")}
+            except Exception:
+                return
+        self.st.sync_needs(keys, now)
+
+    def _follow_alert(self, alert) -> None:
+        """A new alert on show: the Agents tab on its session; done and failed flash the rim and sound once."""
+        ident = alert.id if alert is not None else None
+        if ident == self._alert_id:
+            return
+        had, self._alert_id = self._alert_id, ident
+        try:
+            mod = self._agents_mod()
+        except Exception:
+            mod = None
+        if alert is None:
+            # The queue is empty: the Agents tab goes back to its own order.
+            release = getattr(mod, "release", None)
+            if had is not None and release is not None:
+                try:
+                    release()
+                except Exception:
+                    log.debug("agents release failed", exc_info=True)
+            return
+        if alert.session and mod is not None:
+            try:
+                mod.focus(alert.session)            # held on this session until the next alert or release()
+            except Exception:
+                log.debug("agents focus failed", exc_info=True)
+        if alert.kind == "done":
+            self.flash(gfx.GREEN)
+            _sfx("done")
+        elif alert.kind == "error":
+            self.flash(gfx.RED, shake=True)
+            _sfx("error")
 
     def _agents_pane(self, on: bool, body_top: float) -> None:
         h = self.home
@@ -1028,18 +1491,18 @@ class Notch:
             if view.isHidden():
                 self._repaint_soon(h.get("agents_update"))
             self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - (HOME_W - 24) / 2, body_top - height, HOME_W - 24,
-                                                 height))
+                                                 height), delay=0.06)
         elif not view.isHidden():
             self._conceal(view)
 
     def _agents_open(self) -> None:
-        """The small row's sparkles button (or "Claude mode" by voice): the full notch, on the Agents tab."""
+        """The small row's sparkles button (or "Claude mode" by voice): the full notch, on the Agents tab. Asked by
+        voice the pointer is elsewhere: it folds 8 s later unless the pointer comes (notch_state)."""
         self.tab = "agents"
         self._agents_asked = True
-        now = time.monotonic()
-        self.agent_until = max(self.agent_until, now + 10.0)    # (asked by voice the pointer is elsewhere)
-        self.left_at = now
-        self.pinned, self.pin_away = True, AWAY_CLICKED
+        if not self.st.is_open:
+            _sfx("open")
+        self.st.open_by("voice", time.monotonic())
 
     def _agents_mini(self) -> bool:
         """The Agents tab as one line: when minimized, and when it opened by itself (an agent finished or asks)
@@ -1069,11 +1532,13 @@ class Notch:
         mod = self._search_mod()
         try:
             return self.tab == "search" and mod is not None and mod.want_expanded() and \
-                (self.hover_since or self._typing() or time.monotonic() < self.search_until)
+                (self.st.hover or self._typing() or time.monotonic() < self.search_until)
         except Exception:
             return False
 
     def _typing(self) -> bool:
+        if self._composing() and self.panel.isKeyWindow() and self._composer_text():
+            return True                     # words typed: don't fold under them (an empty box doesn't hold it)
         return self.tab == "search" and (self.panel.isKeyWindow() or self._holding())
 
     def _search_dragging(self) -> bool:
@@ -1087,6 +1552,12 @@ class Notch:
         """Something opened from the notch is up (Quick Look, a menu, a share sheet): don't close under it."""
         if getattr(self, "_menus", 0) > 0 or self._search_dragging():
             return True
+        composer = self._scene_ctl("composer") if getattr(self, "_scene", None) is not None else None
+        try:
+            if composer is not None and composer.holding():
+                return True                     # its Open panel (attach) is up
+        except Exception:
+            pass
         try:
             import Quartz as _q  # noqa: F401
             from Quartz import QLPreviewPanel
@@ -1123,6 +1594,9 @@ class Notch:
         is typed, the selection and the focus survive "Show more"."""
         mod = self._search_mod()
         if mod is None:
+            self.allow_key = self._composing()
+            if not self.allow_key and self.panel.isKeyWindow():
+                self.panel.resignKeyWindow()
             return
         self._hook_search()
         h = self.home
@@ -1148,11 +1622,12 @@ class Notch:
                     self._repaint_soon(h.get("search_update"))
                 if view.isHidden():
                     self._repaint_soon(h.get("search_update"))
-                self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - size[0] / 2, body_top - size[1], *size))
+                self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - size[0] / 2, body_top - size[1], *size), delay=0.06)
             elif not view.isHidden():
                 self._conceal(view)
-        self.allow_key = on
-        if not on and self.panel.isKeyWindow():
+        composing = self._composing()
+        self.allow_key = on or composing           # (the composer's field takes typing too)
+        if not on and not composing and self.panel.isKeyWindow():
             self.panel.resignKeyWindow()
 
     def _focus_search(self) -> None:
@@ -1197,39 +1672,73 @@ class Notch:
             self.tab = "home"
         now = time.monotonic()
         if on and not self.mode == "home" and now >= self.drag_until and now >= self.search_until \
-                and not self._typing() and now >= self.agent_until and not self._agents_need_you() \
+                and not self._typing() and self.st.shown() is None \
                 and not getattr(self, "_agents_asked", False):
             # A fresh open starts at home (a drag, results or an agent pick the tab); in Claude mode, on the
             # agents while one is at work.
             mod = self._agents_mod() if agents_ok else None
             claude = mod is not None and (prefs.get("agent_mode") == "on" or mod.busy())
             self.tab = "agents" if claude else "home"
+            first = prefs.get("notch_open_to")          # Settings ▸ Appearance & Sound: the tab it opens to
+            if first in ("home", "search", "shelf", "agents") and {
+                    "home": True, "search": self._search_ok(), "shelf": shelf_ok, "agents": agents_ok}[first]:
+                self.tab = first
         self._agents_asked = False
         body_top = WIN_H - self.nh - 8
         body_bottom = body_top - BODY_H
         left = WIN_W / 2 - HOME_W / 2 + 16
         right = WIN_W / 2 + HOME_W / 2 - 16
         top_y = WIN_H - self.nh / 2
-        # header
+        # header (it arrives last as the notch opens)
         search_ok = self._search_ok()
+        composer = prefs.get("notch_composer") is not False
+        slot = 0
         for name, b in h["tabs"].items():
-            show = on and {"home": shelf_ok or search_ok or agents_ok, "shelf": shelf_ok, "search": search_ok,
-                           "agents": agents_ok}[name]
-            b.setHidden_(not show)
+            show = on and {"home": shelf_ok or search_ok or agents_ok or composer, "shelf": shelf_ok,
+                           "search": search_ok, "agents": agents_ok, "compose": composer}[name]
+            if show:                                # side by side, no gaps for the tabs that don't apply
+                if abs(b.frame().origin.x - (left + 36 * slot)) > 0.5:
+                    b.setFrameOrigin_(AppKit.NSMakePoint(left + 36 * slot, b.frame().origin.y))
+                slot += 1
+            self._top(b, show)
             if show:
-                b.layer().setBackgroundColor_(_white(0.16 if self.tab == name else 0.0).CGColor())
-                b.setContentTintColor_(_white(0.95 if self.tab == name else 0.55))
-        h["gear"].setHidden_(not on)
-        h["chat"].setHidden_(not on)
+                picked = self._composing() if name == "compose" else (self.tab == name and not self._scene_shown)
+                b.layer().setBackgroundColor_(_white(0.16 if picked else 0.0).CGColor())
+                b.setContentTintColor_(_white(0.95 if picked else 0.55))
+        self._top(h["gear"], on)
+        self._top(h["chat"], on)
         badge = h["badge"]
         if badge is not None:
             size = badge.frame().size
             badge.setFrameOrigin_(AppKit.NSMakePoint(right - 72 - size.width, top_y - size.height / 2))
-            badge.setHidden_(not on)
+            self._top(badge, on)
+        # "+2 waiting": alerts queued behind the one on show (notch_state)
+        waiting = self.st.queued() if on else 0
+        if waiting and h.get("queued") is None:
+            h["queued"] = self._label(11, gfx.ns(AMBER, 0.9), AppKit.NSFontWeightSemibold)
+        if h.get("queued") is not None:
+            if waiting:
+                after = max([AppKit.NSMaxX(b.frame()) for b in h["tabs"].values() if not b.isHidden()] or [left])
+                h["queued"].setStringValue_(f"+{waiting} waiting")
+                self._reveal(h["queued"], AppKit.NSMakeRect(after + 8, top_y - 8, 110, 16), delay=0.2, style="fade")
+            else:
+                self._fade(h["queued"], False)
+        # body: a scene takes it whole (the other panes step aside), else the tab
+        scene = self._scene if self._scene_shown else None
+        body = on and scene is None
+        if self._scene is not None:
+            view = self._scene[1]
+            if on and scene is not None:
+                size = view.frame().size
+                self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - size.width / 2, body_top - size.height,
+                                                     size.width, size.height), delay=0.06)
+            elif not view.isHidden():
+                self._conceal(view)                 # (kept: an alert or the chat has the notch for now)
         # body: home tab
-        home = on and self.tab == "home"
+        home = body and self.tab == "home"
         words = getattr(self, "_mint_words", "")
         mint_pane = home and (not music or bool(words))       # Mint talking beats the player
+        self._mint_pane_on = mint_pane
         if mint_pane:
             from mint.ui.hud import TITLES
             state = getattr(self.hud, "_state", "")
@@ -1239,9 +1748,12 @@ class Notch:
             h["hint"].setTextColor_(_white(0.85 if words else 0.55))
             h["hint"].setStringValue_(words or ("Say “Hey Mint”, or press the chat button." if prefs.get("mic")
                                                 else "Press the chat button, or turn the mic on below."))
-            self._reveal(h["title"], AppKit.NSMakeRect(left, body_top - 34, PLAYER_W, 22))
-            self._reveal(h["hint"], AppKit.NSMakeRect(left, body_top - 84, PLAYER_W, 46) if words
-                         else AppKit.NSMakeRect(left, body_top - 70, PLAYER_W, 32))
+            # The little Mint flies in on the left (_place_face); the words sit beside it and wipe in.
+            tx = left + FACE * PANE_FACE + 14
+            self._reveal(h["title"], AppKit.NSMakeRect(tx, body_top - 34, left + PLAYER_W - tx, 22),
+                         delay=0.16, style="wipe")
+            self._reveal(h["hint"], AppKit.NSMakeRect(tx, body_top - 84, left + PLAYER_W - tx, 46) if words
+                         else AppKit.NSMakeRect(tx, body_top - 70, left + PLAYER_W - tx, 32), delay=0.2, style="wipe")
         else:
             for key in ("title", "hint"):
                 self._fade(h[key], False)
@@ -1250,19 +1762,20 @@ class Notch:
             if home:
                 if side.isHidden():
                     self._repaint_soon(h.get("side_update"))
-                self._reveal(side, AppKit.NSMakeRect(right - SIDE_W, body_bottom + 8, SIDE_W, BODY_H - 16))
+                self._reveal(side, AppKit.NSMakeRect(right - SIDE_W, body_bottom + 8, SIDE_W, BODY_H - 16), delay=0.08)
             elif not side.isHidden():
                 self._conceal(side)
-        self._search_pane(on and self.tab == "search", body_top)
-        self._agents_pane(on and self.tab == "agents", body_top)
+        self._search_pane(body and self.tab == "search", body_top)
+        self._agents_pane(body and self.tab == "agents", body_top)
         # body: shelf tab
         shelf = h["shelf"]
         if shelf is not None:
-            if on and self.tab == "shelf":
+            if body and self.tab == "shelf":
                 if getattr(self, "_shelf_dirty", False) or shelf.isHidden():
                     self._shelf_dirty = False
                     self._repaint_soon(h.get("shelf_update"))
-                self._reveal(shelf, AppKit.NSMakeRect(WIN_W / 2 - (HOME_W - 24) / 2, body_bottom, HOME_W - 24, BODY_H))
+                self._reveal(shelf, AppKit.NSMakeRect(WIN_W / 2 - (HOME_W - 24) / 2, body_bottom, HOME_W - 24, BODY_H),
+                             delay=0.06)
             elif not shelf.isHidden():
                 self._conceal(shelf)
 
@@ -1288,6 +1801,18 @@ class Notch:
             self.drag_until = time.monotonic() + 0.6
             self.tab = "shelf"
             self.panel.setIgnoresMouseEvents_(False)
+            self._drop_zone()
+
+    def _drop_zone(self):
+        """A file coming: the body becomes the drop zone (notch_fx: a dashed marching border, Mint as a folder)."""
+        if self._composing():
+            return None
+        ctl = self._scene_ctl("drop")
+        if ctl is None:
+            from mint.ui import notch_fx
+            self._drop_done = False
+            ctl = self._show_scene("drop", notch_fx.drop_zone)
+        return ctl
 
     def dragged_in(self, pasteboard) -> bool:
         if self._search_dragging():
@@ -1298,12 +1823,18 @@ class Notch:
         shelf.set_drag_over(True)
         self.tab = "shelf"
         self.drag_until = time.monotonic() + 0.6
+        ctl = self._drop_zone()
+        if ctl is not None:
+            ctl.hover(True)
         return True
 
     def dragged_out(self) -> None:
         shelf = self._mod("notch_shelf")
         if shelf is not None:
             shelf.set_drag_over(False)
+        ctl = self._scene_ctl("drop")
+        if ctl is not None:
+            ctl.hover(False)                    # (it goes with the drag: the tick, once it's no longer near)
 
     def dropped(self, pasteboard) -> bool:
         shelf = self._mod("notch_shelf")
@@ -1311,7 +1842,12 @@ class Notch:
             return False
         added = shelf.add_paths(shelf.paths_from(pasteboard))
         shelf.set_drag_over(False)
-        self.tab, self.drag_until = "shelf", time.monotonic() + 2.5       # stay open to show it landed
+        self.tab, self.drag_until = "shelf", time.monotonic() + 3.7       # stay open to show it landed
+        ctl = self._scene_ctl("drop")
+        if ctl is not None:
+            self._drop_done = True
+            ctl.dropped()                       # "Got it", then the shelf with the file on it
+            AppHelper.callLater(1.2, lambda: self._hide_scene("drop", ctl))
         print(f"  [notch shelf: {added} file(s) added]", flush=True)
         return added > 0
 
@@ -1432,7 +1968,7 @@ class Notch:
                 y = WIN_H - self.nh - 8 - BODY_H + (BODY_H - PLAYER_H) / 2
             else:
                 x, y = WIN_W / 2 - PLAYER_W / 2, WIN_H - self.nh - 4 - PLAYER_H
-            self._reveal(player, AppKit.NSMakeRect(x, y, PLAYER_W, PLAYER_H))
+            self._reveal(player, AppKit.NSMakeRect(x, y, PLAYER_W, PLAYER_H), delay=0.06)
         elif not player.isHidden():
             self._conceal(player)
 
@@ -1473,7 +2009,7 @@ class Notch:
             if shown is not getattr(self, "_shown", None):
                 self._shown = shown
                 self.words.setAttributedStringValue_(shown)
-            self._reveal(self.words, AppKit.NSMakeRect(left - 2, y - th, inner + 4, th))
+            self._reveal(self.words, AppKit.NSMakeRect(left - 2, y - th, inner + 4, th), delay=0.06, style="wipe")
             y -= th + 4
         self._fade(self.status, False)
         if not (show_text and caption):
@@ -1490,7 +2026,7 @@ class Notch:
         self.track.setOpacity_(1.0 if visible else 0.0)
         self.fill.setOpacity_(1.0 if visible else 0.0)
         # Controls: one row along the bottom, popping in one after another.
-        hover = mode == "hover" or (mode == "home" and self.tab == "home"
+        hover = mode == "hover" or (mode == "home" and self.tab == "home" and not self._scene_shown
                                     and (not self._music() or bool(getattr(self, "_mint_words", ""))))
         # (also when the row is simply not showing: folding the full notch from its Shelf or Search tab
         # leaves the buttons faded out, and the small row came up as an empty black shape)
@@ -1512,7 +2048,9 @@ class Notch:
             if entering:
                 button.setHidden_(False)
                 button.setAlphaValue_(0.0)
-                AppHelper.callLater(0.04 + 0.035 * i, lambda b=button: self.mode in ("hover", "home") and self._pop(b))
+                # (opening, after the pane they sit in)
+                AppHelper.callLater((0.14 if self._fresh() else 0.04) + 0.035 * i,
+                                    lambda b=button: self.mode in ("hover", "home") and self._pop(b))
             elif not hover:
                 self._fade(button, False)
         self._paint_buttons()
@@ -1530,37 +2068,62 @@ class Notch:
         return [(sym, b) for sym, b in self.buttons
                 if (sym != "sparkles" or agents) and (sym != "stop.fill" or busy)]
 
-    def _reveal(self, view, frame) -> None:
-        """Content arriving as the notch opens: a beat after the shape starts to grow it settles down a few
-        points, grows from 96% and fades in, as boring.notch's and Coucou's content do. Already showing:
-        it just takes its new frame."""
+    def _fresh(self) -> bool:
+        """The shape just started to open: content arrives staggered behind it (else at once, e.g. a tab change)."""
+        return time.monotonic() - self._open_started < 0.15
+
+    def _reveal(self, view, frame, delay: float = 0.0, style: str = "blur") -> None:
+        """Content arriving as the notch opens (Grok Bot's entrance, kinetics): panes rise from 96% out of a blur
+        ("blur"), text rows wipe in left to right ("wipe"), small things fade ("fade") - each `delay` after the
+        shape starts to grow, so they come in one after another. Already showing: it just takes its new frame.
+        (Reduce motion: kinetics turns all of it into short fades.)"""
         concealing = getattr(self, "_concealing", {})
         if view.isHidden() or view.alphaValue() < 0.05 or id(view) in concealing:
             concealing.pop(id(view), None)
+            delay = delay if self._fresh() else 0.0
+            if frame is not None:
+                view.setFrame_(frame)
             view.setHidden_(False)
-            view.setFrame_(AppKit.NSOffsetRect(frame, 0, 8))
-            view.setAlphaValue_(0.0)
-            AppKit.NSAnimationContext.beginGrouping()
-            context = AppKit.NSAnimationContext.currentContext()
-            context.setDuration_(0.38)
-            context.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithControlPoints____(0.2, 0.9, 0.3, 1.0))
-            view.animator().setFrame_(frame)
-            view.animator().setAlphaValue_(1.0)
-            AppKit.NSAnimationContext.endGrouping()
+            view.setAlphaValue_(1.0)
+            if view.layer() is None:
+                view.setWantsLayer_(True)           # (a new subview's layer only comes with the next display)
             layer = view.layer()
-            if layer is not None and prefs.get("notch_playful") is not False:
-                grow = Quartz.CABasicAnimation.animationWithKeyPath_("transform.scale")
-                grow.setFromValue_(0.96)
-                grow.setToValue_(1.0)
-                grow.setDuration_(0.42)
-                grow.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithControlPoints____(0.2, 0.9, 0.3, 1.0))
-                layer.addAnimation_forKey_(grow, "reveal")
-        elif not AppKit.NSEqualRects(view.frame(), frame):
+            if layer is None:
+                return
+            layer.removeAnimationForKey_("reveal")
+            if style == "wipe":
+                kinetics.wipe_in(layer, 0.3, delay)
+            elif style == "fade":
+                kinetics.basic(layer, "opacity", 0.0, 1.0, 0.2, delay, anim_key="reveal-o")
+            else:
+                if not kinetics.reduce_motion():
+                    view.setLayerUsesCoreImageFilters_(True)          # (for the blur)
+                    # AppKit pins a view's layer by its corner: grow from the middle by sliding 2% with the scale.
+                    size = layer.bounds().size
+                    kinetics.spring(layer, "transform.translation.x", size.width * 0.02, 0.0, "snappy", delay,
+                                    anim_key="reveal-x")
+                    kinetics.spring(layer, "transform.translation.y", size.height * 0.02, 0.0, "snappy", delay,
+                                    anim_key="reveal-y")
+                kinetics.blur_in(layer, 0.32, delay)
+
+                def unblur():
+                    if layer.filters():
+                        layer.setFilters_(None)       # a blur left at 0 still costs a pass every frame
+                AppHelper.callLater(delay + 0.45, unblur)
+        elif frame is not None and not AppKit.NSEqualRects(view.frame(), frame):
             view.setFrame_(frame)
 
+    def _top(self, view, show: bool) -> None:
+        """The header's tabs, buttons and badge: they fade in last as the notch opens, and go with the content."""
+        if show:
+            if view.isHidden() or id(view) in getattr(self, "_concealing", {}):
+                self._reveal(view, None, delay=0.22, style="fade")
+        elif not view.isHidden():
+            self._conceal(view)
+
     def _conceal(self, view) -> None:
-        """Content leaving (a tab change, the notch folding): a quick fade and a slight shrink (0.14 s), then
-        hidden - unless it was asked back meanwhile."""
+        """Content leaving (a tab change, the notch folding): a quick fade and a slight shrink (0.12 s), before the
+        shape folds (tick holds it CLOSE_LEAD) - then hidden, unless it was asked back meanwhile."""
         if view is None or view.isHidden():
             return
         concealing = self.__dict__.setdefault("_concealing", {})
@@ -1570,16 +2133,16 @@ class Notch:
         concealing[id(view)] = token
         AppKit.NSAnimationContext.beginGrouping()
         context = AppKit.NSAnimationContext.currentContext()
-        context.setDuration_(0.14)
+        context.setDuration_(0.12)
         context.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(Quartz.kCAMediaTimingFunctionEaseIn))
         view.animator().setAlphaValue_(0.0)
         AppKit.NSAnimationContext.endGrouping()
         layer = view.layer()
-        if layer is not None:
+        if layer is not None and not kinetics.reduce_motion():
             shrink = Quartz.CABasicAnimation.animationWithKeyPath_("transform.scale")
             shrink.setFromValue_(1.0)
             shrink.setToValue_(0.97)
-            shrink.setDuration_(0.14)
+            shrink.setDuration_(0.12)
             shrink.setFillMode_(Quartz.kCAFillModeForwards)
             shrink.setRemovedOnCompletion_(False)
             layer.addAnimation_forKey_(shrink, "reveal")
@@ -1591,7 +2154,7 @@ class Notch:
                 view.setAlphaValue_(0.0)
                 if view.layer() is not None:
                     view.layer().removeAnimationForKey_("reveal")
-        AppHelper.callLater(0.16, done)
+        AppHelper.callLater(0.14, done)
 
     def _pop(self, button) -> None:
         AppKit.NSAnimationContext.beginGrouping()
@@ -1599,7 +2162,7 @@ class Notch:
         button.animator().setAlphaValue_(1.0)
         AppKit.NSAnimationContext.endGrouping()
         layer = button.layer()
-        if layer is not None and prefs.get("notch_playful") is not False:
+        if layer is not None and prefs.get("notch_playful") is not False and not kinetics.reduce_motion():
             # Each control drops in with a little spring, one after another. (Never move the layer's anchor:
             # AppKit places a layer-backed button by its corner, and a centred anchor shifted every button
             # half its size down and left, half outside the notch.)
@@ -1713,6 +2276,10 @@ class Notch:
                 self.glyph.setBackgroundColor_(gfx.cg(tint))
             Quartz.CATransaction.commit()
             self._agent_motion(kind, old)
+        # An agent at work: its pals' faces take the right wing (notch_agents.wing_view), the glyph steps aside.
+        faces = self._wing_faces(kind.startswith("agent:"))
+        if kind.startswith("agent:") and self.glyph.isHidden() != faces:
+            self.glyph.setHidden_(faces)
         if kind == "bars":
             level = float(getattr(self.hud, "_level", 0.0) or 0.0)
             speaking = state == "speaking"
@@ -1725,6 +2292,82 @@ class Notch:
                 bar.setBounds_(Quartz.CGRectMake(0, 0, 3, height))
                 bar.setBackgroundColor_(color)
             Quartz.CATransaction.commit()
+
+    def _wing_faces(self, want: bool) -> bool:
+        """The closed notch's right wing as the agents' faces (up to 4: 1 big, 2, a 2x2, or 3 and "+N"), just
+        right of the camera - never over it. True while they show."""
+        mod = self._agents_mod() if want and self._agents_hooked else None
+        try:
+            width = float(mod.wing_width()) if mod is not None and hasattr(mod, "wing_view") else 0.0
+        except Exception:
+            width = 0.0
+        view = getattr(self, "_wing_view", None)
+        if width > 0 and view is None:
+            try:
+                view, _update = mod.wing_view(self.nh)
+                view.setHidden_(True)
+                self.box.addSubview_(view)
+                self._wing_view = view
+            except Exception:
+                log.debug("agents wing failed", exc_info=True)
+                self._wing_view = view = False
+        if not view:
+            return False
+        show = width > 0
+        if show:
+            origin = AppKit.NSMakePoint(WIN_W / 2 + self.nw / 2, WIN_H - self.nh)
+            if not AppKit.NSEqualPoints(view.frame().origin, origin):
+                view.setFrameOrigin_(origin)
+        if view.isHidden() == show:
+            view.setHidden_(not show)
+        return show
+
+    def _bar_info(self):
+        """The collapsed bar's data (notch_agents.compact()) while it should show, else None."""
+        if not self._agents_hooked or prefs.get("notch_agents_bar") is False:
+            return None
+        mod = self._agents_mod()
+        try:
+            return mod.compact() if mod is not None and hasattr(mod, "compact_view") else None
+        except Exception:
+            return None
+
+    def _bar_width(self, info) -> float:
+        """Just wide enough for the lead agent's line (its step is cut with … past a cap); it grows at once but
+        only shrinks for a real difference, so the island doesn't wobble as the step text changes."""
+        mod = self._agents_mod()
+        try:
+            want = float(mod.bar_width(info))
+        except Exception:
+            want = 220.0
+        want = min(340.0, max(170.0, math.ceil(want / 4.0) * 4.0))
+        have = getattr(self, "_bar_w", 0.0)
+        if want > have or have - want >= 36:
+            self._bar_w = want
+        return self._bar_w
+
+    def _agents_bar(self, on: bool, width: float) -> None:
+        """Host notch_agents.compact_view under the camera row in "bar" mode (it updates itself)."""
+        view = getattr(self, "_bar_view", None)
+        if on:
+            w = getattr(self, "_bar_w", 200.0)
+            if view is not None and abs(view.frame().size.width - w) > 0.5:
+                view.removeFromSuperview()           # (built at a width: a new one for the new width)
+                view = None
+            if view is None:
+                mod = self._agents_mod()
+                try:
+                    view, _update = mod.compact_view(w, 24)
+                except Exception:
+                    log.debug("agents bar failed", exc_info=True)
+                    return
+                view.setHidden_(True)
+                self.box.addSubview_(view)
+                self._bar_view = view
+            self._reveal(view, AppKit.NSMakeRect(WIN_W / 2 - w / 2, WIN_H - self.nh - 27, w, 24), delay=0.06,
+                         style="fade")
+        elif view is not None and not view.isHidden():
+            self._conceal(view)
 
     def _agent_motion(self, kind: str, old: str) -> None:
         """The wing's agent mark moves with the agent: a slow twinkle-spin while it works, a pulse while it
@@ -1777,6 +2420,182 @@ class Notch:
             shake.setDuration_(0.4)
             glyph.addAnimation_forKey_(shake, "agent")
 
+    # --- the little Mint as a shared element ----------------------------------------------------
+
+    def _face_target(self, where: str):
+        """(x, y, scale) of the little Mint: in the wing, or grown at the left of the home tab's Mint pane."""
+        if where == "pane":
+            left = WIN_W / 2 - HOME_W / 2 + 16
+            return left + FACE * PANE_FACE / 2 + 2, WIN_H - self.nh - 8 - 42, PANE_FACE
+        return self.face_center[0], self.face_center[1], 1.0
+
+    def _place_face(self, where: str) -> None:
+        """The face travels between its wing spot and the Mint pane on one spring (kinetics.fly), from wherever
+        it is now - it never jumps or fades. Under Reduce motion it fades across instead."""
+        if where == self._face_where:
+            return
+        self._face_where = where
+        x, y, scale = self._face_target(where)
+        self._face_spot = (x, y, scale)
+        host = self.face_host
+        shown = host.presentationLayer() or host
+        here = shown.position()
+        try:
+            was = float(shown.valueForKeyPath_("transform.scale"))
+        except Exception:
+            was = 1.0
+        if kinetics.reduce_motion():
+            Quartz.CATransaction.begin()
+            Quartz.CATransaction.setDisableActions_(True)
+            host.setPosition_(Quartz.CGPointMake(x, y))
+            host.setAffineTransform_(Quartz.CGAffineTransformMakeScale(scale, scale))
+            Quartz.CATransaction.commit()
+            kinetics.basic(host, "opacity", 0.0, host.opacity(), 0.2, anim_key="face-fade", keep=False)
+            return
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        host.setAffineTransform_(Quartz.CGAffineTransformIdentity)    # (a pull's stretch, if any)
+        Quartz.CATransaction.commit()
+        # (snappy: it lands before the words beside it wipe in, never across them)
+        kinetics.fly(host, (here.x, here.y), (x, y), was, scale, "snappy", 0.02 if self._fresh() else 0.0)
+
+    # --- status on the shape: the rim, the sweep, the wing's glow, the countdown --------------------
+
+    def _show_status(self, state, activity, alert, mode) -> None:
+        """State said by the shape itself, redundantly with the face: needs you = an amber ring pulsing every
+        1.4 s; busy = a light sweeping along the bottom edge in Mint's (or the agent's) colour; and a soft glow
+        of the same colour behind the little Mint, breathing while busy. Done/error flash once (_follow_alert)."""
+        agent = getattr(self, "_wing", None) if self._agents_hooked else None
+        a_state = agent.get("state") if agent else ""
+        kind, rgb = None, None
+        if getattr(self.hud, "hidden", False) and mode == "plain":
+            pass                                        # hidden: just the notch
+        elif (alert is not None and alert.kind == "need") or a_state in ("waiting", "asking"):
+            kind, rgb = "waiting", AMBER
+        elif alert is not None and alert.kind == "error":
+            kind, rgb = "error", gfx.RED
+        elif alert is not None and alert.kind == "done":
+            kind, rgb = "done", gfx.GREEN
+        elif state in ("thinking", "working") or activity is not None:
+            kind, rgb = "busy", gfx.state_rgb(state if state in ("thinking", "working") else "working")
+        elif a_state in ("working", "thinking"):
+            from mint.ui.notch_agents import APP_RGB
+            kind, rgb = "busy", tuple(agent.get("hue") or APP_RGB.get(agent.get("app"), gfx.accent()))
+        if (kind, rgb) == self._rim_status:
+            return
+        self._rim_status = (kind, rgb)
+        rim, sweep, glow = self.rim, self.sweep, self.glow
+        # the ring: needs you
+        if kind == "waiting":
+            rim.setStrokeColor_(gfx.cg(rgb))
+            rim.setShadowColor_(gfx.cg(rgb))
+            kinetics.fade(self.rim_wrap, True, 0.25)
+            kinetics.pulse(rim, "rim-pulse", 1.4, 0.3, 1.0)
+        else:
+            kinetics.fade(self.rim_wrap, False, 0.25)
+        # the sweep: busy
+        if kind == "busy":
+            light = gfx.mix(rgb, (1.0, 1.0, 1.0), 0.35)
+            self.sweep_band.setColors_([gfx.cg(light, 0.0), gfx.cg(light, 0.95), gfx.cg(light, 0.0)])
+            self._sweep_travel()
+            kinetics.fade(sweep, True, 0.3)
+        else:
+            kinetics.fade(sweep, False, 0.3)
+        # the glow behind the face
+        if kind is not None:
+            strength = 0.75 if kind in ("error", "done") else 0.62
+            glow.setColors_([gfx.cg(rgb, strength), gfx.cg(rgb, strength * 0.3), gfx.cg(rgb, 0.0)])
+            kinetics.fade(self.glow_wrap, True, 0.35)
+            if kind in ("busy", "waiting"):
+                kinetics.pulse(glow, "glow-breathe", 1.4 if kind == "waiting" else 2.8, 0.55, 1.0)
+            else:
+                glow.removeAnimationForKey_("glow-breathe")
+        else:
+            kinetics.fade(self.glow_wrap, False, 0.4)
+
+        def settle(seen=self._rim_status):
+            if self._rim_status is not seen:
+                return
+            if kind != "waiting":
+                rim.removeAnimationForKey_("rim-pulse")
+            if kind != "busy":
+                self.sweep_band.removeAnimationForKey_("travel")
+            if kind is None:
+                glow.removeAnimationForKey_("glow-breathe")
+        AppHelper.callLater(0.45, settle)              # nothing left running behind a faded layer
+
+    def _sweep_travel(self) -> None:
+        """The busy light: a soft band crosses the bottom edge, rests, crosses again (the track masks it to the
+        edge). Under Reduce motion it doesn't travel: the whole edge glows faintly instead."""
+        w = float(self.size[0])
+        self._sweep_w = w
+        band = self.sweep_band
+        band.removeAnimationForKey_("travel")
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        if kinetics.reduce_motion():
+            band.setBounds_(Quartz.CGRectMake(0, 0, w * 1.6, WIN_H))
+            band.setPosition_(Quartz.CGPointMake(WIN_W / 2, WIN_H / 2))
+            Quartz.CATransaction.commit()
+            return
+        bw = max(60.0, min(150.0, w * 0.4))
+        band.setBounds_(Quartz.CGRectMake(0, 0, bw, WIN_H))
+        band.setPosition_(Quartz.CGPointMake(WIN_W / 2 - w / 2 - bw, WIN_H / 2))     # resting: off the edge
+        Quartz.CATransaction.commit()
+        cross = Quartz.CABasicAnimation.animationWithKeyPath_("position.x")
+        cross.setFromValue_(WIN_W / 2 - w / 2 - bw / 2)
+        cross.setToValue_(WIN_W / 2 + w / 2 + bw / 2)
+        cross.setDuration_(0.9 + w / 700.0)
+        cross.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
+            Quartz.kCAMediaTimingFunctionEaseInEaseOut))
+        group = Quartz.CAAnimationGroup.animation()
+        group.setAnimations_([cross])
+        group.setDuration_(cross.duration() + 0.7)       # a rest between passes
+        group.setRepeatCount_(float("inf"))
+        band.addAnimation_forKey_(group, "travel")
+
+    def flash(self, rgb, shake: bool = False) -> None:
+        """One flash of the rim: done = green, thickening with a little overshoot; error = red, and the island
+        shakes +-5 pt over 0.45 s. (Reduce motion: the flash fades, no shake.)"""
+        flash = self.flash_rim
+        flash.setStrokeColor_(gfx.cg(rgb))
+        flash.setShadowColor_(gfx.cg(rgb))
+        beat = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+        beat.setValues_([0.0, 1.0, 0.9, 0.0])
+        beat.setKeyTimes_([0.0, 0.12, 0.5, 1.0])
+        beat.setDuration_(1.0)
+        flash.addAnimation_forKey_(beat, "flash")
+        kinetics.spring(flash, "lineWidth", 0.0, 5.0, "bouncy", anim_key="flash-w")
+        if shake:
+            kinetics.shake(self.root.layer(), 5.0, 0.45)
+
+    def _countdown(self, now: float, mode: str) -> None:
+        """The last 3 s before the notch folds by itself: a 2 pt line along the bottom inner edge shrinks to nothing
+        (transform.scale.x, linear - Core Animation runs it, not the tick)."""
+        cd = self.st.countdown(now) if mode == "home" else None
+        if cd == self._cd:
+            return
+        self._cd = cd
+        line = self.cd_line
+        if cd is None:
+            kinetics.fade(line, False, 0.15)
+            return
+        start, end = cd
+        self._place_cd_line()
+        left = max(0.05, end - now)
+        kinetics.fade(line, True, 0.15)
+        kinetics.basic(line, "transform.scale.x", min(1.0, left / max(0.01, end - start)), 0.0, left,
+                       timing=Quartz.kCAMediaTimingFunctionLinear, anim_key="countdown")
+
+    def _place_cd_line(self) -> None:
+        w, h = self.size
+        radius = 24.0 if h > self.nh + 2 else 14.0
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        self.cd_line.setBounds_(Quartz.CGRectMake(0, 0, max(20.0, w - 2 * radius - 16), 2))
+        self.cd_line.setPosition_(Quartz.CGPointMake(WIN_W / 2, WIN_H - h + 4))
+        Quartz.CATransaction.commit()
+
     # --- clicks --------------------------------------------------------------------------------
 
     def clicked(self) -> None:
@@ -1785,10 +2604,12 @@ class Notch:
         if getattr(getattr(self.hud, "chat", None), "is_open", False):
             self._chat()
             return
-        self.pinned = not self.pinned
-        self.pin_away = AWAY_CLICKED
+        # Opened, it folds 8 s after the pointer leaves or after a quiet minute under it; folded by a click, it
+        # doesn't peek again until the pointer leaves (notch_state).
+        _sfx("open" if self.st.click(time.monotonic()) == "opened" else "close")
 
     def _chat(self) -> None:
+        self._put_away_scene()
         self.hud._fire("console")
 
     def _eye(self) -> None:
@@ -1801,8 +2622,8 @@ class Notch:
     # --- drag the little Mint out: the notch gives way to the orb ---------------------------------
 
     def on_face(self, point) -> bool:
-        x, y = self.face_center
-        return self.phase == "on" and (point.x - x) ** 2 + (point.y - y) ** 2 <= (FACE / 2 + 6) ** 2
+        x, y, scale = self._face_spot
+        return self.phase == "on" and (point.x - x) ** 2 + (point.y - y) ** 2 <= (FACE * scale / 2 + 6) ** 2
 
     def face_drag(self, dx: float, dy: float) -> bool:
         """The face follows the pointer a little, like something held by an elastic; pulled far enough it
@@ -1815,13 +2636,11 @@ class Notch:
         give = min(1.0, pull / FACE_PULL) * 10.0 / max(pull, 0.001)        # at most 10 pt of give
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
-        # The host layer covers the whole window and turns about its middle: scale about the face instead.
-        rx, ry = self.face_center[0] - WIN_W / 2, self.face_center[1] - WIN_H / 2
+        # The host layer is anchored on the face: it stretches about the face (at its spot's size) and gives a little.
+        scale = self._face_spot[2] * stretch
         t = Quartz.CGAffineTransformIdentity
         t = Quartz.CGAffineTransformTranslate(t, dx * give, dy * give)         # (each call acts first)
-        t = Quartz.CGAffineTransformTranslate(t, rx, ry)
-        t = Quartz.CGAffineTransformScale(t, stretch, stretch)
-        t = Quartz.CGAffineTransformTranslate(t, -rx, -ry)
+        t = Quartz.CGAffineTransformScale(t, scale, scale)
         self.face_host.setAffineTransform_(t)
         Quartz.CATransaction.commit()
         return False
@@ -1904,7 +2723,7 @@ class Notch:
             return
         _busy[0] = True
         self._carrying = True
-        self.pinned = False
+        self.st.close(time.monotonic())
         face = self.global_face()
         self._face_reset(animated=False)
         notch.phase = "leaving"
@@ -1961,7 +2780,8 @@ class Notch:
             Quartz.CATransaction.setAnimationDuration_(0.3)
             Quartz.CATransaction.setAnimationTimingFunction_(Quartz.CAMediaTimingFunction.functionWithName_(
                 Quartz.kCAMediaTimingFunctionEaseOut))
-        self.face_host.setAffineTransform_(Quartz.CGAffineTransformIdentity)
+        scale = self._face_spot[2]
+        self.face_host.setAffineTransform_(Quartz.CGAffineTransformMakeScale(scale, scale))
         Quartz.CATransaction.commit()
 
     def right_clicked(self, event, view) -> None:
@@ -2071,9 +2891,19 @@ def _hook(hud) -> None:
     def progress(done, total, label=""):
         progress_orig(done, total, label)
         if _live[0]:
-            AppHelper.callAfter(notch.set_progress, (done / total) if total and done < total else None)
+            AppHelper.callAfter(notch.set_progress, (done / total) if total and done < total else None, label)
+    end_orig = hud.activity_end
+
+    def activity_end(name, ok):
+        # A failed step: remember what it was and what the user asked, for the error card (shown once the turn
+        # settles, so one failed try that Mint recovers from mid-turn doesn't throw it open).
+        current = getattr(hud, "_activity", None)
+        end_orig(name, ok)
+        if _live[0]:
+            AppHelper.callAfter(notch.step_ended, ok, (current or {}).get("text") or "")
     hud._render_bubble, hud._hide_bubble = render, hide
     hud._chat_frame, hud._home_center, hud.progress = chat_frame, home, progress
+    hud.activity_end = activity_end
     _hook_motion()
 
 
@@ -2227,6 +3057,10 @@ def _depart() -> None:
     for _, button in notch.buttons:
         button.setHidden_(True)
         button.setAlphaValue_(0.0)
+    for view in (getattr(notch, "_wing_view", None), getattr(notch, "_bar_view", None)):
+        if view:
+            view.setHidden_(True)               # the agents' wing and bar go with the little Mint
+    notch._hide_scene()
     old = getattr(notch, "old_orb", None)
     if old is not None:
         hud.orb = old

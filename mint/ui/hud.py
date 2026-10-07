@@ -264,6 +264,11 @@ class HUD:
         effects.fx.origin = self.orb_center
         effects.fx.on_target = self._glance
         AppHelper.callLater(0.3, self.orb.boot)
+        try:
+            from mint.ui import sfx
+            sfx.prepare()            # make the little sounds now, so the first one isn't skipped
+        except Exception:
+            pass
         # Notch mode (notch.py): the orb moves into the camera notch, like a Dynamic Island.
         # Before the expressions attach, since they draw on whichever orb is self.orb.
         try:
@@ -423,6 +428,12 @@ class HUD:
     on_poke = None      # optional: callable() -> bool; True means the click was handled
 
     def _orb_clicked(self) -> None:
+        # Poke play: the face reacts to every click (a slap, dizzy, annoyed); the click still does its job.
+        try:
+            center, mouse = self.orb_center(), AppKit.NSEvent.mouseLocation()
+            self.orb.poke(mouse.x - center[0], mouse.y - center[1])
+        except Exception:
+            pass
         if self.on_poke is not None:
             try:
                 if self.on_poke():
@@ -824,6 +835,7 @@ class HUD:
         elif self._state not in ("working", "thinking"):
             look = (mouse.x - center[0], mouse.y - center[1])
         busy = self._activity is not None or self._state in ("working", "thinking", "speaking")
+        self.orb.primary = True                  # the orb Mint drives (floating or in the notch) wears the status badge
         self.orb.tick(now, self._level, look, over, busy)
 
         if self._bubble_dirty or (self._activity and int(now * 3) != int((now - 1 / 30) * 3)):

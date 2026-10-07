@@ -10,6 +10,11 @@ Hey Mint's own code is GPL-3.0.
 automatic ones, and the language it is spoken in) follows `select_caption` in
 [claude-video](https://github.com/bradautomates/claude-video) (MIT).
 
+**Adapted:** the test-output parsing rules in `agent_tests.py` (how Mint reads a coding agent's test runs: which
+runner, what passed and failed, and why) are ported from [dotpals](https://github.com/Rikinshah787/dotpals)
+(MIT, Copyright (c) 2026 dotpals contributors), whose parsers are in turn adapted from
+[claude-referee](https://github.com/ismaildasci/claude-referee) (MIT, Copyright (c) 2026 İsmail Daşcı).
+
 **Adapted design:** notch mode's look and motion - the notch shape, sizes, springs, the music, calendar,
 battery and shelf views - follow [boring.notch](https://github.com/TheBoredTeam/boring.notch) by TheBoredTeam
 (GPL-3.0, the same licence as Hey Mint), re-implemented in Python.

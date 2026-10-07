@@ -396,6 +396,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 EditMenu.install()                   // ⌘V and friends in every text field (the key prompt, below)
 if Packaged.isPackaged {
+    if Packaged.moveIntoApplications() { exit(0) }   // moved: the copy in Applications opens instead
     do {
         try Packaged.prepare()
     } catch {

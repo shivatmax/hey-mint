@@ -95,6 +95,19 @@ class Session:
     edits: int = 0
     runs: int = 0
     turn_started: float = 0.0
+    # Checks on its work (agent_tests.py; the "agent_checks" pref):
+    tests: dict | None = None   # the last test run: agent_tests.verdict() + at, cmd, since (files changed after), tail
+    tests_before: str = ""      # this turn's first test verdict before it changed anything (old failures aren't its)
+    flags: list = field(default_factory=list)       # this turn's risky steps ("changed .env", "force-push" ...)
+    files: dict = field(default_factory=dict)       # path -> time it changed it (this session, newest 80)
+    turn_files: list = field(default_factory=list)  # paths it changed this turn
+    fails: dict = field(default_factory=dict)       # command -> failed tries in a row this turn
+    weakened: str = ""          # a test edited while failing: "removed an assertion in test_x.py" (a faked pass?)
+    sent_back: int = 0          # times the fix loop sent it back this turn
+    plan: tuple | None = None   # (done, total) of its to-do list
+    plan_items: list = field(default_factory=list)  # [(status, text)]
+    context: float | None = None    # its context window's fill, 0..1 (Codex's own count; Claude from its status line)
+    context_tokens: int = 0     # tokens in its context at the last answer
 
     @property
     def project(self) -> str:
@@ -143,6 +156,7 @@ class Watcher:
         self._last_scan = 0.0
         self._first_scan = True
         self._wake = threading.Event()
+        self._passed = threading.Event()            # set after each look (refresh() waits for one)
 
     # --- public -----------------------------------------------------------------------------------
 
@@ -196,6 +210,14 @@ class Watcher:
         """Look again now (a hook said something happened)."""
         self._wake.set()
 
+    def refresh(self, timeout: float = 3.0) -> None:
+        """Look again now and wait for it (an answer about the sessions should be up to date). The watcher's own
+        thread does the reading: reading the same files from two threads at once would mix up their places."""
+        self.start()
+        self._passed.clear()
+        self._wake.set()
+        self._passed.wait(timeout)
+
     def put(self, session: Session, event: str = "") -> None:
         """A session Mint runs itself (a background job, background.py): shown like the others."""
         with self._lock:
@@ -215,6 +237,7 @@ class Watcher:
                 self._pass()
             except Exception:
                 log.exception("agent watch pass failed")
+            self._passed.set()
             self._wake.wait(POLL)
             self._wake.clear()
 
@@ -399,6 +422,12 @@ class Watcher:
             self._events.append(("started", copy.deepcopy(s)))
         elif state in ("waiting", "asking", "done", "failed"):
             self._events.append(({"done": "finished"}.get(state, state), copy.deepcopy(s)))
+        if state in ("done", "failed") and s.app != "mint" and (s.turn_steps or s.prompt):
+            try:
+                from mint.tools import agent_history
+                agent_history.record(s, when)
+            except Exception:
+                log.debug("agent history not saved", exc_info=True)
 
     def _add_step(self, s: Session, step: Step) -> None:
         if not step.target:
@@ -429,6 +458,10 @@ class Watcher:
         s.turn_steps = 0
         s.turn_started = when
         s.steps = [st for st in s.steps if st.status == "run"]    # (none, normally)
+        s.flags, s.turn_files, s.fails, s.tests_before, s.weakened, s.sent_back = [], [], {}, "", "", 0
+        if s.tests and s.tests.get("state") == "running":
+            s.tests = {**s.tests, "state": s.tests.get("prev") or "unclear",
+                       "line": s.tests.get("prev_line") or "the last test run didn't finish"}
         self._set_state(s, "thinking", when)
 
     # --- Claude Code ------------------------------------------------------------------------------
@@ -482,6 +515,11 @@ class Watcher:
             elif t == "text" and (block.get("text") or "").strip():
                 s.summary = _clip(block["text"].strip(), 600)
                 self._dirty = True
+        usage = message.get("usage") or {}
+        if usage:
+            s.context_tokens = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                                    "cache_creation_input_tokens"))
+            s.context = _claude_context(s)
         stop = message.get("stop_reason")
         if stop in ("end_turn", "stop_sequence", "max_tokens") and not tools:
             pending = [st for st in s.steps if st.status == "run"]
@@ -503,6 +541,11 @@ class Watcher:
         step = Step(id=block.get("id") or "", verb=verb, target=target, started=when,
                     detail=_claude_detail_before(name, args))
         self._add_step(s, step)
+        if name == "TodoWrite":
+            _set_plan(s, [(t.get("status") or "", t.get("content") or "") for t in (args.get("todos") or [])
+                          if isinstance(t, dict)])
+        elif name == "Bash":
+            _run_started(s, str(args.get("command") or ""), when, step.id)
         if name == "AskUserQuestion":
             qs = args.get("questions") or []
             q = qs[0] if qs and isinstance(qs[0], dict) else {}
@@ -529,7 +572,13 @@ class Watcher:
                     continue
                 failed = bool(block.get("is_error"))
                 step.status = "fail" if failed else "ok"
-                step.detail = _claude_detail_after(step, d.get("toolUseResult"), block, failed) or step.detail
+                result = d.get("toolUseResult")
+                before = step.detail or {}
+                step.detail = _claude_detail_after(step, result, block, failed) or step.detail
+                try:
+                    _claude_checks(self, s, step, before, result, block, failed, when)
+                except Exception:
+                    log.debug("agent checks failed", exc_info=True)
                 if s.question and s.question.get("step") == step.id:
                     s.question = None
                 if s.approval and s.approval.get("tool_use_id") in (step.id, None):
@@ -614,6 +663,15 @@ class Watcher:
                     self._set_state(s, "failed", when)
                 elif t == "item_completed":
                     self._codex_item(s, p.get("item") or {}, when)
+                elif t == "token_count":
+                    _codex_tokens(s, p, when)
+                elif t == "patch_apply_end" and p.get("success", True):
+                    try:
+                        for path, ch in (p.get("changes") or {}).items():
+                            lines = _diff_from_unified(path, (ch or {}).get("unified_diff") or "", cap=False)["lines"]
+                            _edited(self, s, path, lines, when, deleted=(ch or {}).get("type") == "delete")
+                    except Exception:
+                        log.debug("agent checks failed", exc_info=True)
             elif kind == "response_item":
                 if t in ("function_call", "custom_tool_call", "local_shell_call"):
                     self._codex_call(s, p, when)
@@ -621,10 +679,18 @@ class Watcher:
                     step = self._step(s, p.get("call_id") or "")
                     if step is not None and step.status == "run":
                         text = _codex_text(p.get("output"))
-                        step.status = "fail" if re.search(r"(?i)\b(error|failed|exit code [1-9])", text[:200]) \
-                            and "Script completed" not in text[:60] else "ok"
+                        code, out = _codex_exit(text)
+                        if code is not None:
+                            step.status = "ok" if code == 0 else "fail"
+                        else:
+                            step.status = "fail" if re.search(r"(?i)\b(error|failed|exit code [1-9])", text[:200]) \
+                                and "Script completed" not in text[:60] else "ok"
                         if step.detail and step.detail.get("kind") == "bash" and text:
-                            step.detail["out"] = _tail_lines(text, 6)
+                            step.detail["out"] = _tail_lines(out if code is not None else text, 6)
+                        try:
+                            _codex_output(self, s, step, text, when)
+                        except Exception:
+                            log.debug("agent checks failed", exc_info=True)
                         self._dirty = True
                 elif t == "message" and p.get("role") == "assistant":
                     text = _codex_text(p.get("content"))
@@ -644,6 +710,11 @@ class Watcher:
         verb, target, detail = _codex_label(name, args)
         self._add_step(s, Step(id=p.get("call_id") or p.get("id") or "", verb=verb, target=target,
                                started=when, detail=detail))
+        if name == "update_plan" and isinstance(args, dict):
+            _set_plan(s, [(x.get("status") or "", x.get("step") or "") for x in (args.get("plan") or [])
+                          if isinstance(x, dict)])
+        elif verb == "Run" and detail and detail.get("cmd"):
+            _run_started(s, detail["cmd"], when, p.get("call_id") or p.get("id") or "")
         if s.state not in ("waiting", "asking"):
             self._set_state(s, "working", when)
 
@@ -700,6 +771,17 @@ class Watcher:
             self._add_step(s, step)
         step.status = "ok" if ok else "stop" if (detail or {}).get("stopped") else "fail"
         step.verb, step.target, step.detail = verb, target or step.target, detail or step.detail
+        try:
+            if t == "CommandExecution":
+                code = item.get("exit_code")
+                _run_done(self, s, step, str(cmd or ""), str(item.get("aggregated_output") or item.get("stdout") or ""),
+                          int(code) if isinstance(code, int) else None, bool(detail.get("stopped")), when)
+            elif t == "FileChange" and ok:
+                for path, ch in (item.get("changes") or {}).items():
+                    lines = _diff_from_unified(path, (ch or {}).get("unified_diff") or "", cap=False)["lines"]
+                    _edited(self, s, path, lines, when, deleted=(ch or {}).get("type") == "delete")
+        except Exception:
+            log.debug("agent checks failed", exc_info=True)
         self._dirty = True
 
     # --- hooks (agent_hooks.py) -------------------------------------------------------------------
@@ -780,6 +862,278 @@ class Watcher:
                 self._set_state(s, "working" if decision in ("allow", "always") else "thinking", time.time())
             self._dirty = True
         self._wake.set()
+
+
+# --- checks on the work (agent_tests.py) --------------------------------------------------------------------
+# What a test run really said, risky steps, files two agents changed, retries, its plan, context and usage limits.
+# Read from the same logs; shown and spoken, never acted on by Mint itself (the fix loop is agent_checks + hooks).
+
+CONFLICT = 10 * 60           # another session changed the same file this recently: worth a flag
+DOCS = (".md", ".mdx", ".txt", ".rst", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf", ".csv")
+SUPPORT = os.path.expanduser("~/Library/Application Support/Mint")
+CLAUDE_LIMITS = (os.path.join(SUPPORT, "claude-limits.json"),           # Mint's status line (agent_hooks)
+                 os.path.expanduser("~/.dotpals/claude-limits.json"))   # or dotpals', when that's installed
+LIMITS: dict = {}            # "codex" -> {"5h", "5h_resets", "week", "week_resets", "at"} (percent used, epoch s)
+_claude_file = {"mtime": 0.0, "data": {}}
+
+
+def _checks() -> bool:
+    try:
+        from mint.core import prefs
+        value = prefs.get("agent_checks")
+        return True if value is None else bool(value)
+    except Exception:
+        return True
+
+
+def _flag(s: Session, text: str) -> None:
+    if text and text not in s.flags:
+        s.flags.append(_clip(text, 120))
+        del s.flags[:-8]
+
+
+def _norm(cmd: str) -> str:
+    cmd = re.sub(r"\s+", " ", str(cmd or "")).strip()
+    return re.sub(r"\s*(2>&1|\|\s*(tail|head|grep|less|cat|tee)\b.*)$", "", cmd)
+
+
+def _ago(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return "just now" if minutes < 1 else f"{minutes} min ago"
+
+
+def _set_plan(s: Session, items: list) -> None:
+    s.plan_items = [(str(st), _clip(text, 120)) for st, text in items if str(text).strip()][:20]
+    done = sum(1 for st, _ in s.plan_items if st == "completed")
+    s.plan = (done, len(s.plan_items)) if s.plan_items else None
+
+
+def _run_started(s: Session, cmd: str, when: float, step_id: str = "") -> None:
+    if not cmd or not _checks():
+        return
+    from mint.tools import agent_tests
+    if agent_tests.is_test(cmd):
+        prev = s.tests or {}
+        s.tests = {**prev, "state": "running", "line": "running the tests", "cmd": _clip(_first_line(cmd), 160),
+                   "started": when, "step": step_id,
+                   "prev": prev.get("prev", "") if prev.get("state") == "running" else prev.get("state", ""),
+                   "prev_line": prev.get("prev_line", "") if prev.get("state") == "running" else prev.get("line", "")}
+
+
+def _run_unread(s: Session, step: Step, why: str) -> None:
+    """A test run whose result never comes to the log (sent to the background, stopped, refused): back to what the
+    tests said before, not "running" forever."""
+    t = s.tests
+    if t and t.get("state") == "running" and t.get("step") == step.id:
+        s.tests = {**t, "state": t.get("prev") or "unclear", "line": t.get("prev_line") or why}
+
+
+def _run_done(w, s: Session, step: Step, cmd: str, out: str, code, interrupted: bool, when: float) -> None:
+    if not _checks() or (step.detail or {}).get("checked"):
+        return
+    if step.detail is not None:
+        step.detail["checked"] = True           # (Codex can report one command twice)
+    from mint.tools import agent_tests
+    flag = agent_tests.risk("Run", step.target, cmd=cmd)
+    if flag:
+        _flag(s, flag)
+    key = _norm(cmd)
+    tries = 0
+    if code not in (0, None) and not interrupted:
+        s.fails[key] = s.fails.get(key, 0) + 1
+        if s.fails[key] == 3:
+            _flag(s, f"{_clip(_first_line(cmd), 50)} failed 3 times")
+    elif code == 0 and s.fails.get(key):
+        tries = s.fails.pop(key) + 1
+        if step.detail is not None:
+            step.detail["note"] = f"fixed on try {tries}"
+    started = (s.tests or {}).get("state") == "running" and (s.tests or {}).get("step") == step.id
+    if not started and not agent_tests.is_test(cmd):
+        return                                  # (a long command's card shows it clipped: the start knew better)
+    v = agent_tests.verdict(cmd, out, code, interrupted)
+    if tries and v.get("state") == "passed":
+        v["line"] = f"{v.get('line') or 'passed'}, after {tries - 1} failed run{'s' if tries > 2 else ''}"
+    v.update(at=when, cmd=_clip(_first_line(cmd), 160), since=[], tail=_tail_lines(out, 25),
+             cut=agent_tests.piped(cmd))
+    if not s.turn_files and not s.tests_before:
+        s.tests_before = v.get("state", "")
+    s.tests = v
+    w._dirty = True
+
+
+def _edited(w, s: Session, path: str, lines: list, when: float, deleted: bool = False) -> None:
+    if not path or not _checks():
+        return
+    from mint.tools import agent_tests
+    if not os.path.isabs(path) and s.cwd:
+        path = os.path.normpath(os.path.join(s.cwd, path))
+    name = os.path.basename(path)
+    s.files[path] = when
+    if len(s.files) > 80:
+        del s.files[min(s.files, key=s.files.get)]
+    if path not in s.turn_files:
+        s.turn_files.append(path)
+    flag = agent_tests.risk("Delete" if deleted else "Edit", name, path=path)
+    if flag:
+        _flag(s, flag)
+    t = s.tests
+    failing = bool(t) and (t.get("state") == "failed" or (t.get("state") == "running" and t.get("prev") == "failed"))
+    code = not name.lower().endswith(DOCS)          # notes and images don't make the tests out of date
+    if code and t and t.get("state") != "running" and float(t.get("at") or 0) <= when and \
+            name not in t.setdefault("since", []):
+        t["since"] = (t["since"] + [name])[-6:]
+    if agent_tests.is_test_file(path):
+        why = agent_tests.weakened(lines, path) if failing else ""
+        if why:
+            s.weakened = f"{why} in {name}"
+            _flag(s, f"{why} in {name} while the tests were failing")
+        elif s.weakened.endswith(f" in {name}") and agent_tests.weakened(
+                [({"+": "-", "-": "+"}.get(sign, sign), n, text) for sign, n, text in lines], path):
+            s.weakened = ""                     # it put the test back (the skip it added is gone again)
+            s.flags = [f for f in s.flags if not f.endswith(f" in {name} while the tests were failing")]
+    for other in w._sessions.values():
+        if other is s or other.app == "mint":
+            continue
+        at = other.files.get(path)
+        if at and 0 <= when - at < CONFLICT and (other.busy or other.approval):   # (a finished one isn't "another agent")
+            _flag(s, f"{other.app_name} ({other.project}) also changed {name} {_ago(when - at)}")
+            break
+    w._dirty = True
+
+
+def _patch_lines(result) -> list:
+    """Every line of a Claude Edit / Write result (not just the 14 the card shows)."""
+    if not isinstance(result, dict):
+        return []
+    lines = []
+    for hunk in result.get("structuredPatch") or []:
+        n = int(hunk.get("newStart") or 1)
+        for raw in hunk.get("lines") or []:
+            sign = raw[:1] if raw[:1] in "+- " else " "
+            lines.append((sign, n, raw[1:] if raw[:1] in "+- " else raw))
+            if sign != "-":
+                n += 1
+    if not lines and result.get("type") == "create" and result.get("content"):
+        lines = [("+", i, x) for i, x in enumerate(str(result["content"]).splitlines()[:400], 1)]
+    return lines
+
+
+def _claude_checks(w, s: Session, step: Step, before: dict, result, block: dict, failed: bool, when: float) -> None:
+    if not _checks():
+        return
+    if step.verb == "Run":
+        text = _codex_text(block.get("content"))
+        if text.startswith("Command running in background") or (
+                isinstance(result, dict) and (result.get("backgroundTaskId") or result.get("backgroundedByUser"))):
+            _run_unread(s, step, "the tests run in the background")
+            return
+        m = re.match(r"(?:Error: )?Exit code (-?\d+)", text)
+        if failed and not m:
+            _run_unread(s, step, "the test run didn't finish")
+            return                              # it never ran (denied, timed out): nothing to judge
+        out, interrupted = "", False
+        if isinstance(result, dict):
+            out = (result.get("stdout") or "") + ("\n" + result["stderr"] if result.get("stderr") else "")
+            interrupted = bool(result.get("interrupted"))
+        _run_done(w, s, step, str(before.get("cmd") or step.target), out or text,
+                  int(m.group(1)) if m else 0, interrupted, when)
+    elif step.verb in ("Edit", "Write") and not failed and before.get("path"):
+        _edited(w, s, str(before["path"]), _patch_lines(result) or list(before.get("lines") or []), when)
+
+
+def _codex_exit(text: str):
+    """(exit code or None, output) from a Codex tool output: JSON with metadata, or "Exit code: N ... Output:"."""
+    text = str(text or "")
+    if text[:1] == "{":
+        try:
+            d = json.loads(text)
+            meta = d.get("metadata") or {}
+            code = meta.get("exit_code")
+            return (int(code) if isinstance(code, int) else None), str(d.get("output") or "")
+        except (ValueError, AttributeError):
+            pass
+    m = re.search(r"(?:Process exited with code|Exit code:?)\s*(-?\d+)", text[:400])
+    out = text.split("Output:\n", 1)[1] if "Output:\n" in text else text
+    if not m and out.lstrip()[:1] == "{":           # newer Codex: {"exit_code": 1, "output": "..."} after "Output:"
+        try:
+            d = json.loads(out.strip())
+            if isinstance(d, dict) and ("exit_code" in d or "output" in d):
+                code = d.get("exit_code")
+                return (int(code) if isinstance(code, int) else None), str(d.get("output") or "")
+        except ValueError:
+            pass
+    return (int(m.group(1)) if m else None), out
+
+
+def _codex_output(w, s: Session, step: Step, text: str, when: float) -> None:
+    if step.verb == "Run":
+        code, out = _codex_exit(text)
+        _run_done(w, s, step, str((step.detail or {}).get("cmd") or step.target), out, code, False, when)
+    elif step.verb == "Edit" and step.status == "ok" and (step.detail or {}).get("path"):
+        _edited(w, s, step.detail["path"], step.detail.get("lines") or [], when)
+
+
+def _codex_tokens(s: Session, p: dict, when: float) -> None:
+    info = p.get("info") or {}
+    last = info.get("last_token_usage") or {}
+    window = info.get("model_context_window")
+    if last and window:
+        s.context_tokens = int(last.get("input_tokens") or 0)
+        s.context = max(0.0, min(1.0, s.context_tokens / float(window)))
+    rl = p.get("rate_limits") or {}
+    if rl and when >= (LIMITS.get("codex") or {}).get("at", 0):
+        LIMITS["codex"] = _limit_pair(rl.get("primary"), rl.get("secondary"), "used_percent", when)
+
+
+def _limit_pair(five, week, used_key: str, when: float) -> dict:
+    out = {"at": when}
+    for name, w in (("5h", five), ("week", week)):
+        if isinstance(w, dict) and isinstance(w.get(used_key), (int, float)):
+            resets = w.get("resets_at")
+            resets = float(resets) / (1000 if resets and resets > 1e12 else 1) if isinstance(resets, (int, float)) \
+                else 0.0
+            expired = bool(resets) and resets < time.time()
+            out[name], out[name + "_resets"] = (0.0 if expired else float(w[used_key])), (0.0 if expired else resets)
+    return out
+
+
+def _claude_saved() -> dict:
+    """What a Claude Code status line saved (Mint's, or dotpals'): usage limits and context window sizes."""
+    best, mtime = None, 0.0
+    for path in CLAUDE_LIMITS:
+        try:
+            m = os.path.getmtime(path)
+        except OSError:
+            continue
+        if m > mtime:
+            best, mtime = path, m
+    if best is None:
+        return {}
+    if mtime != _claude_file["mtime"]:
+        try:
+            with open(best, encoding="utf-8") as fh:
+                data = json.load(fh)
+            _claude_file.update(mtime=mtime, data=data if isinstance(data, dict) else {})
+        except (OSError, ValueError):
+            return _claude_file["data"]
+    return _claude_file["data"]
+
+
+def _claude_context(s: Session) -> float | None:
+    size = (_claude_saved().get("sizes") or {}).get(s.id)
+    return max(0.0, min(1.0, s.context_tokens / float(size))) if size and s.context_tokens else None
+
+
+def limits() -> dict:
+    """Usage limits, percent used: {"codex": {...}, "claude": {...}} with "5h", "week", "5h_resets", "week_resets"
+    (epoch seconds) and "at". Codex's come from its logs; Claude's only from a status line (agent_hooks)."""
+    out = {k: dict(v) for k, v in LIMITS.items()}
+    saved = _claude_saved()
+    rl = saved.get("rate_limits") or {}
+    if rl:
+        out["claude"] = _limit_pair(rl.get("five_hour"), rl.get("seven_day"), "used_percentage",
+                                    float(saved.get("updatedAt") or 0) / 1000)
+    return out
 
 
 # --- labels and details ---------------------------------------------------------------------------------
@@ -903,14 +1257,41 @@ def _codex_label(name: str, args) -> tuple[str, str, dict | None]:
         path = m.group(1).strip() if m else ""
         return "Edit", os.path.basename(path), _diff_from_unified(path, patch)
     if name == "exec" and isinstance(args, str):
-        m = re.search(r"exec_command\(\{\s*cmd:\s*\"((?:[^\"\\]|\\.)*)\"", args)
-        if m:
-            cmd = m.group(1).encode().decode("unicode_escape", "ignore")
-            return "Run", _clip(_first_line(cmd), 70), {"kind": "bash", "cmd": _clip(cmd, 300), "out": [],
-                                                        "ok": None}
-        return "Run", _clip(_first_line(args), 70), {"kind": "text", "text": _clip(args, 300)}
+        return _codex_script(args)
     title = a.get("title") if isinstance(a.get("title"), str) else ""
     return _pretty_tool(name), _clip(title, 70), ({"kind": "text", "text": _clip(title, 300)} if title else None)
+
+
+def _js_string(literal: str) -> str:
+    try:
+        return json.loads(literal)
+    except ValueError:
+        return literal[1:-1].encode().decode("unicode_escape", "ignore")
+
+
+def _codex_script(script: str) -> tuple[str, str, dict | None]:
+    """Newer Codex runs its tools from a small script ("exec"): `tools.exec_command({"cmd": ...})`,
+    `tools.apply_patch("*** Begin Patch ...")`, `tools.mcp__server__tool({...})`."""
+    m = re.search(r"exec_command\(\s*(\{.*?\})\s*\)", script, re.S)
+    cmd = ""
+    if m:
+        try:
+            cmd = str(json.loads(m.group(1)).get("cmd") or "")
+        except ValueError:
+            q = re.search(r"\bcmd\"?\s*:\s*(\"(?:[^\"\\]|\\.)*\")", m.group(1))
+            cmd = _js_string(q.group(1)) if q else ""
+    if cmd:
+        return "Run", _clip(_first_line(cmd), 70), {"kind": "bash", "cmd": _clip(cmd, 300), "out": [], "ok": None}
+    if "apply_patch(" in script:
+        q = re.search(r"(\"(?:[^\"\\]|\\.)*\*\*\* Begin Patch(?:[^\"\\]|\\.)*\")", script)
+        patch = _js_string(q.group(1)) if q else script
+        f = re.search(r"\*\*\* (?:Update|Add|Delete) File: ([^\n\"]+)", patch)
+        path = f.group(1).strip() if f else ""
+        return "Edit", os.path.basename(path), _diff_from_unified(path, patch)
+    t = re.search(r"tools\.(\w+)\(", script)
+    if t:
+        return _pretty_tool(t.group(1)), "", {"kind": "text", "text": _clip(script, 300)}
+    return "Run", _clip(_first_line(script), 70), {"kind": "text", "text": _clip(script, 300)}
 
 
 def _detail_code(path: str, content: str, start: int, added: bool = False) -> dict:
@@ -924,7 +1305,7 @@ def _detail_code(path: str, content: str, start: int, added: bool = False) -> di
     return {"kind": "code", "file": os.path.basename(path), "path": path, "lines": lines, "added": added}
 
 
-def _diff_from_unified(path: str, patch: str) -> dict:
+def _diff_from_unified(path: str, patch: str, cap: bool = True) -> dict:
     lines, old_n, new_n = [], 1, 1
     for raw in patch.splitlines():
         m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)", raw)
@@ -944,7 +1325,7 @@ def _diff_from_unified(path: str, patch: str) -> dict:
             lines.append((" ", new_n, body))
             old_n += 1
             new_n += 1
-    return {"kind": "diff", "file": os.path.basename(path), "path": path, "lines": _focus_diff(lines)}
+    return {"kind": "diff", "file": os.path.basename(path), "path": path, "lines": _focus_diff(lines) if cap else lines}
 
 
 def _focus_diff(lines: list) -> list:

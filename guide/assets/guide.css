@@ -150,6 +150,35 @@ footer .grow{flex:1}
 .side .hits a b{color:var(--ink);font-weight:400}
 .side .hits .none{font-size:13.5px;color:var(--slate);padding:4px 10px}
 
+/* docs pages: the page list, this page's sections, the overview's cards, previous / next */
+.side .pages a.cur{background:var(--paper);box-shadow:0 0 0 1px var(--line);font-weight:700}
+.side .pages a.cur::before{content:"";position:absolute;left:-2px;top:9px;bottom:9px;width:3px;border-radius:3px;background:var(--mint)}
+.side .onpage{border:0;border-radius:0;background:none;margin:16px 0 0}
+.side .onpage summary{font:600 11.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--slate);padding:6px 10px}
+.side .onpage summary::after{font-size:18px}
+.side .onpage > :not(summary){margin:0}
+.side .onpage nav a{font-size:14.5px;padding:5px 10px 5px 14px}
+.side .hits a i{font-style:normal;color:var(--slate)}
+.doc-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:0 0 48px;max-width:900px;align-items:start}
+.doc-install{max-width:640px;margin:22px 0 0}
+.doc-install p{font-size:15px;margin:0 0 8px}
+.doc-card{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:22px 24px}
+.doc-card h3{margin:0 0 6px;font-size:21px}
+.doc-card h3 a{color:var(--ink);text-decoration:none}
+.doc-card h3 a:hover{color:var(--mint-deep)}
+.doc-card p{margin:0 0 10px;color:var(--slate);font-size:15.5px}
+.doc-card .secs{font-size:14px;line-height:1.75;margin:0}
+.doc-card .secs a{color:var(--ink)}
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:760px;margin:8px 0 0;padding-top:28px;border-top:1px solid var(--line)}
+.pager a{display:flex;flex-direction:column;gap:2px;padding:14px 18px;border:1px solid var(--line);border-radius:16px;background:var(--paper);color:var(--ink);
+  text-decoration:none;transition:border-color .2s,transform .2s var(--spring)}
+.pager a:hover{border-color:var(--mint);transform:translateY(-2px)}
+.pager .next{grid-column:2;text-align:right}
+.pager small{font:600 11.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--slate)}
+.pager span{font-weight:700;font-size:17px}
+tr[id]{scroll-margin-top:84px}
+tr:target td{background:#E6F8F5}
+
 .doc-head{padding:10px 0 34px;border-bottom:1px solid var(--line);margin-bottom:40px}
 .doc-head h1{font-weight:800;font-size:clamp(40px,5vw,60px);line-height:1;letter-spacing:-.04em;margin:12px 0 12px}
 .doc-head p{font-size:19px;color:var(--slate);max-width:58ch;margin:0}
@@ -387,10 +416,17 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
   .flow,.can{grid-template-columns:1fr 1fr}
   .can a:last-child:nth-child(odd){grid-column:span 2}
   .promises{grid-template-columns:1fr 1fr}
-  .docs{grid-template-columns:1fr;gap:0;padding-top:20px}
+  .docs{grid-template-columns:minmax(0,1fr);gap:0;padding-top:20px}
   .side{position:static;max-height:none;margin-bottom:24px}
   .side nav{display:flex;flex-wrap:wrap;gap:4px}.side h4{display:none}
   .side a{background:var(--paper);border:1px solid var(--line)}
+  .side .pages{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+  .side .pages::-webkit-scrollbar{display:none}
+  .side .pages a{flex:none}
+  .side .pages a.cur{border-color:var(--mint)}
+  .side .onpage{border:1px solid var(--line);border-radius:14px;background:var(--paper);margin-top:12px}
+  .side .onpage nav{padding:0 10px 12px}
+  .doc-cards{grid-template-columns:1fr}
   .pair{grid-template-columns:1fr}
   .get{padding:36px 28px}
 }

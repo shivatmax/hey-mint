@@ -91,6 +91,7 @@ class Effects:
         """A click is about to land at (x, y), in screen points from the top
         left (Quartz). Returns how long the caller should wait so the spark
         arrives as the click does."""
+        _glow(point=(x, y))
         if not self.enabled():
             return 0.0
         AppHelper.callAfter(self._click, x, y, label)
@@ -98,11 +99,13 @@ class Effects:
 
     def highlight(self, x: float, y: float, w: float, h: float, seconds: float = 2.2,
                   label: str = "") -> None:
+        _glow(point=(x + w / 2, y + h / 2), seconds=max(2.5, seconds))
         if self.enabled() and w > 3 and h > 3:
             AppHelper.callAfter(self._highlight, x, y, w, h, seconds, label)
 
     def highlight_focused(self, seconds: float = 2.2, label: str = "") -> None:
         """Outline whatever has keyboard focus: the field about to be typed into."""
+        _glow(seconds=max(2.5, seconds))      # typing goes to the front app's window
         if not self.enabled():
             return
         frame = focused_frame()
@@ -111,6 +114,7 @@ class Effects:
 
     def scroll(self, x: float, y: float, direction: str) -> None:
         """Nothing drawn: the orb's eyes glance at the pane being scrolled."""
+        _glow(point=(x, y))
         if self.enabled():
             AppHelper.callAfter(self._locate, x, y)
 
@@ -234,6 +238,17 @@ class Effects:
         root.addSublayer_(box)
         layers = [box]
         self._later(seconds + 0.1, layers)
+
+
+def _glow(**where) -> None:
+    """Light up the window Mint is acting in (window_glow.py, its own setting); never in the way."""
+    if not getattr(fx, "built", False):
+        return                              # the --tool harness and tests: no UI
+    try:
+        from mint.ui import window_glow
+        window_glow.glow(**where)
+    except Exception:
+        pass
 
 
 def focused_frame():

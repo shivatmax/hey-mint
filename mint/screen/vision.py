@@ -22,6 +22,7 @@ MAX_EDGE = 1400
 # The screen area the last screenshot covered, in global screen points - the
 # units mouse events use. click_at maps the model's coordinates through this.
 _last_area: dict | None = None
+_looks = 0           # counts looks: the description cache is per screenshot
 
 
 class Blind(Exception):
@@ -53,12 +54,13 @@ _MSS = getattr(mss, "MSS", None) or mss.mss
 
 def grab_screen(display: int = 0) -> dict[str, str]:
     """Capture a display and return an inline image part for the Live API."""
-    global _last_area
+    global _last_area, _looks
     with _MSS() as sct:
         monitors = sct.monitors
         # monitors[0] is the union of every display; 1..n are the individual ones.
         index = display if 0 <= display < len(monitors) else 0
         _last_area = dict(monitors[index])
+        _looks += 1
         shot = sct.grab(monitors[index])
         image = PIL.Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
@@ -148,16 +150,67 @@ def snap(point: tuple[float, float], target: str, lines: list[dict] | None = Non
     return centre, text
 
 
-def click_at(x: float, y: float, button: str = "left", double: bool = False, target: str = "") -> str:
-    """Click a point on the latest screenshot.
+NEAR_HINT = 90.0      # points: how far from the model's pointing a control the vision model picks may be
 
-    `x` and `y` are 0-1000 across the screenshot's width and height (1000 is
-    the right or bottom edge), which is the convention Gemini is trained to
-    point with. This is the fallback for apps whose controls are invisible to
-    Accessibility - Slack exposed 19 controls and no channel list in testing -
-    where the desktop tool has nothing to choose from. With `target` (what the
-    model means to click), the click goes to the centre of that text if it is
-    near the point: model pointing is tens of points off.
+
+def _snapshot(pid: int | None) -> tuple:
+    """What one 'screenshot' means for the description cache: the latest look and the window."""
+    title, frame = "", None
+    try:
+        from mint.screen import axkit
+        window = axkit.focused_window(pid) if pid else None
+        if window is not None:
+            title = str(axkit.attr(window, "AXTitle") or "")
+            frame = tuple(round(c) for c in (axkit.frame(window) or ()))
+    except Exception:
+        pass
+    return (_looks, pid, title, frame)
+
+
+def find_target(target: str, pointed: tuple | None = None):
+    """Where `target` is, with `pointed` (screen points) as a hint of where to search:
+    Accessibility by name, then the screen's text near the hint, then the vision model over the
+    window's controls near the hint (zooming in on small ones). The answer is kept for this
+    screenshot and window, so the same description clicks the same place. -> choose.Located or None."""
+    import AppKit
+
+    from mint.screen import choose
+    from mint.screen import ground
+    pid = None
+    try:
+        pid = ground.owner_at(*pointed) if pointed else None
+    except Exception:
+        pid = None
+    app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid) if pid else ground.front_app()
+    if app is None:
+        return None
+    pid = app.processIdentifier()
+
+    def near(e) -> bool:
+        return pointed is None or choose._distance(pointed, e["box"]) <= NEAR_HINT
+
+    def by_vision(goal, inv):
+        pool = [e for e in ground.candidates(inv, "click") if near(e)]
+        if not pool:
+            return None, "no controls near the point"
+        return ground.choose_by_vision(goal, pool, inv)
+
+    return choose.locate(target, pointed, _snapshot(pid),
+                         inventory=lambda: ground.inventory(app),
+                         read_text=lambda hint, goal: snap(hint, goal),
+                         vision=by_vision)
+
+
+def click_at(x: float | None = None, y: float | None = None, button: str = "left", double: bool = False,
+             target: str = "") -> str:
+    """Click what `target` names, using `x`, `y` only as a hint of where it is.
+
+    The Live model's pointing is 30-80 points off, so the point is not trusted: `target` is
+    found by its Accessibility name, then by the screen's text near the point, then by the vision
+    model over the window's marked controls (find_target). Only when none of them finds it is the
+    point itself clicked. `x` and `y` are 0-1000 across the latest look screenshot (1000 is the
+    right or bottom edge). This is the fallback for apps whose controls are invisible to
+    Accessibility - Slack exposed 19 controls and no channel list in testing.
     """
     import time
 
@@ -167,27 +220,40 @@ def click_at(x: float, y: float, button: str = "left", double: bool = False, tar
 
     if not fastinput.has_accessibility():
         return "Cannot click: Mint lacks Accessibility permission."
-    if _last_area is None:
+    target = (target or "").strip()
+    has_point = x is not None and y is not None
+    if not has_point and not target:
+        return "Say what to click (target), and where it is on the latest look screenshot if you can."
+    if has_point and _last_area is None and not target:
         return "Call look first; click_at uses coordinates from the latest screenshot."
-    if not (0 <= x <= 1000 and 0 <= y <= 1000):
+    if has_point and not (0 <= x <= 1000 and 0 <= y <= 1000):
         return "x and y must be between 0 and 1000."
 
     area = _last_area
-    pointed = to_point(x, y, area)
-    found = ""
+    pointed = to_point(x, y, area) if has_point and area else None
+    found, how = "", ""
+    located = None
     if target:
-        (px, py), found = snap(pointed, target)
-    else:
+        try:
+            located = find_target(target, pointed)
+        except Exception as error:
+            located = None
+            import logging
+            logging.getLogger("mint.screen.vision").info("find_target failed: %s", error)
+    if located is not None:
+        (px, py), found, how = located.point, located.label or target, located.how
+    elif pointed is not None:
         px, py = pointed
+    else:
+        return (f"NOT CLICKED: '{target}' was not found by name, by the screen's text or by the vision model. "
+                "Look, then give its rough x, y as well - or use ui_act / click_text with its exact label.")
+    if pointed is None:
+        pointed = (px, py)
     # Self-check: the point is on the screen the screenshot showed.
-    if not (area["left"] <= px <= area["left"] + area["width"] and area["top"] <= py <= area["top"] + area["height"]):
+    if area is not None and how not in ("accessibility", "vision", "cache") and not (
+            area["left"] <= px <= area["left"] + area["width"] and area["top"] <= py <= area["top"] + area["height"]):
         return f"FAILED: ({int(px)}, {int(py)}) is outside the screenshot's screen area, so nothing was clicked."
     point = Quartz.CGPointMake(px, py)
-    down, up = {
-        "left": (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp),
-        "right": (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp),
-    }.get(button, (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp))
-    mouse = Quartz.kCGMouseButtonRight if button == "right" else Quartz.kCGMouseButtonLeft
 
     # Say what is at that point, so a wrong guess shows at once ("that's the address bar, not the
     # extension") instead of the same blind click four times.
@@ -209,27 +275,44 @@ def click_at(x: float, y: float, button: str = "left", double: bool = False, tar
     if control.stopped():
         return "STOPPED by the user before clicking; nothing was clicked."
 
-    move = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, point, mouse)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)
-    time.sleep(0.05)
-    for click in range(2 if double else 1):
-        for kind in (down, up):
-            event = Quartz.CGEventCreateMouseEvent(None, kind, point, mouse)
-            Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, click + 1)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            time.sleep(0.03)
-    try:
-        from mint.screen import axkit
-        from mint.screen import ground
-        axkit.note_click(ground.owner_at(px, py), px, py, found or target)
-    except Exception:
-        pass
+    # An accessibility press on the control at the point first: no cursor, and the app may stay in
+    # the background. The real pointer for everything else (canvases, Chromium, double clicks).
+    from mint.screen import axkit
+    from mint.screen import effect
+    from mint.screen import ground
+    windows_before = effect.window_snapshot()
+    owner = ground.owner_at(px, py)
+    pressed, evidence = None, []
+    if not double:
+        try:
+            pressed = effect.press_target_at(px, py, owner, button)
+            if pressed is not None:
+                done, evidence, problem = effect.ax_deliver(pressed, "AXShowMenu" if button == "right" else "AXPress")
+                # An error after the app may already have acted: never click it again with the pointer.
+                pressed = pressed if done or effect.maybe_acted(problem) else None
+        except Exception:
+            pressed = None
+    if pressed is not None:
+        axkit.note_click(owner, px, py, found or target)
+        route, delivery = "accessibility", "background"
+    else:
+        ground.mouse_click(px, py, button="right" if button == "right" else "left", double=double,
+                           label=found or target, spark=False)
+        route, delivery = "global_input", "foreground"
+    time.sleep(0.5)
+    evidence += effect.window_changes(windows_before, effect.window_snapshot(), pids=(owner,))
     what = "Double-clicked" if double else ("Right-clicked" if button == "right" else "Clicked")
     moved = ((px - pointed[0]) ** 2 + (py - pointed[1]) ** 2) ** 0.5
     if found and moved >= 3:
-        hit = (f" - the text '{found[:40]}', {int(moved)} points from where you pointed "
+        hit = (f" - '{found[:40]}' (found by {how or 'screen text'}), {int(moved)} points from where you pointed "
                f"({int(pointed[0])}, {int(pointed[1])})" + (f"; it is {what_there}" if what_there else ""))
+    elif found and how:
+        hit = f" - '{found[:40]}' (found by {how})" + (f"; it is {what_there}" if what_there else "")
     else:
         hit = f" - that is {what_there}" if what_there else ""
-    return (f"{what} at ({int(point.x)}, {int(point.y)}) on screen{hit}. If that is not what you meant, don't "
-            "click the same point again: use ui_act with its name, or look again and pick a different point.")
+    if pressed is not None:
+        what = "Opened the menu of the control" if button == "right" else "Pressed the control"
+    return effect.Effect(effect.CONFIRMED if evidence else effect.UNVERIFIABLE,
+                         f"{what} at ({int(point.x)}, {int(point.y)}) on screen{hit}", route, delivery, evidence,
+                         escalation="if that is not what you meant, don't click the same point again: use ui_act "
+                         "with its name, or look again and pick a different point").render()

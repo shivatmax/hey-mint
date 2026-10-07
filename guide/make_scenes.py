@@ -1183,6 +1183,69 @@ def notch_agents_scene(p):
     time.sleep(4.5)
 
 
+@scene("notch-checks", 22)
+def notch_checks_scene(p):
+    """Checks on the agent's work: Claude's test run fails ("1 of 48 failed - expected 1.20, got 1.196"), it fixes
+    the code, the next run passes ("48 passed, after 1 failed run" - fixed on try 2), and the done card says so, with
+    a flag for the .env it changed."""
+    from mint.ui import notch
+    from mint.tools.agent_watch import Session, Step
+    put, emit = AGENTS
+    now = time.time()
+    s = Session(key="claude:checks", app="claude", id="checks", cwd="/srv/code/korus", where="cli",
+                state="working", since=now, updated=now, turn_started=now,
+                prompt="Use the 2026 TVA rate and round totals to the cent")
+    path = "/srv/code/korus/src/invoice.ts"
+    fail_out = ["FAIL  tests/invoice.test.ts", "  ✕ rounds totals to the cent (4 ms)",
+                "    Expected: 1.2", "    Received: 1.196", "Tests:  1 failed, 47 passed, 48 total"]
+    pass_out = ["PASS  tests/invoice.test.ts", "  ✓ rounds totals to the cent (1 ms)", "Tests:  48 passed, 48 total"]
+
+    def step(n, verb, target, status, detail):
+        return Step(id=f"c{n}", verb=verb, target=target, status=status, started=time.time(), detail=detail)
+    s.steps = [step(1, "Edit", "invoice.ts", "ok", {"kind": "diff", "file": "invoice.ts", "path": path, "lines": [
+        ("-", 12, "const TVA = 0.196"), ("+", 12, "const TVA = 0.20   // 2026")]}),
+        step(2, "Edit", ".env", "ok", {"kind": "diff", "file": ".env", "path": "/srv/code/korus/.env", "lines": [
+            ("-", 3, "TVA_YEAR=2025"), ("+", 3, "TVA_YEAR=2026")]})]
+    s.turn_steps, s.turn_files = 2, [path, "/srv/code/korus/.env"]
+    s.flags = ["changed .env"]
+    s.plan, s.plan_items = (1, 3), [("completed", "Update the TVA rate"), ("in_progress", "Round totals"),
+                                    ("pending", "Run the tests")]
+    time.sleep(0.8)
+    put([s]); emit("started", s)
+    F["mouse"] = (notch.notch.cx + 120, notch.notch.top - 120)
+    AppHelper.callAfter(notch.notch._agents_open)
+    time.sleep(1.6)
+    s.steps.append(step(3, "Run", "npm test", "run", {"kind": "bash", "cmd": "npm test", "out": [], "ok": None}))
+    s.turn_steps = 3
+    s.tests = {"state": "running", "line": "running the tests", "cmd": "npm test", "started": time.time()}
+    put([s]); time.sleep(2.0)
+    s.steps[-1].status, s.steps[-1].detail = "fail", {"kind": "bash", "cmd": "npm test", "ok": False, "out": fail_out}
+    s.tests = {"state": "failed", "line": "1 of 48 failed", "reason": "expected 1.2, got 1.196 (invoice.test.ts:18)",
+               "at": time.time(), "since": [], "passed": 47, "failed": 1, "total": 48, "cmd": "npm test"}
+    put([s]); time.sleep(3.2)
+    s.steps.append(step(4, "Edit", "invoice.ts", "ok", {"kind": "diff", "file": "invoice.ts", "path": path, "lines": [
+        ("-", 16, "  return sum * (1 + TVA)"), ("+", 16, "  return Math.round(sum * (1 + TVA) * 100) / 100")]}))
+    s.turn_steps, s.plan = 4, (2, 3)
+    s.tests["since"] = ["invoice.ts"]
+    put([s]); time.sleep(2.4)
+    s.steps.append(step(5, "Run", "npm test", "run", {"kind": "bash", "cmd": "npm test", "out": [], "ok": None}))
+    s.turn_steps = 5
+    s.tests = {**s.tests, "state": "running", "prev": "failed"}
+    put([s]); time.sleep(1.8)
+    s.steps[-1].status = "ok"
+    s.steps[-1].detail = {"kind": "bash", "cmd": "npm test", "ok": True, "out": pass_out, "note": "fixed on try 2"}
+    s.tests = {"state": "passed", "line": "48 passed, after 1 failed run", "at": time.time(), "since": [],
+               "passed": 48, "failed": 0, "total": 48, "cmd": "npm test"}
+    s.plan = (3, 3)
+    put([s]); time.sleep(2.4)
+    s.state, s.since = "done", time.time()
+    s.summary = "Switched TVA to the 2026 rate and rounded every total to the cent. The tests pass."
+    put([s]); emit("finished", s)
+    time.sleep(4.0)
+    F["mouse"] = (notch.notch.cx, notch.notch.top - 400)
+    time.sleep(2.5)
+
+
 @scene("notch-jobs", 24)
 def notch_jobs_scene(p):
     """Parallel work: two jobs handed to the background one after the other, a quick question answered at
@@ -1389,7 +1452,7 @@ def tour(p):
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_agents_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_agents_scene, notch_checks_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,

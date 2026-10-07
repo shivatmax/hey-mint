@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started · Hey Mint docs</title><meta name="description" content="Install Hey Mint, talk to it, read the orb, try notch mode, and learn the shortcuts and dictation.">
+<link rel="canonical" href="https://hey-mint.pages.dev/docs/start"><meta name="theme-color" content="#F3F6FB">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="../assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Get started · Hey Mint docs"><meta property="og:description" content="Install Hey Mint, talk to it, read the orb, try notch mode, and learn the shortcuts and dictation.">
+<meta property="og:url" content="https://hey-mint.pages.dev/docs/start"><meta property="og:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Get started · Hey Mint docs">
+<meta name="twitter:description" content="Install Hey Mint, talk to it, read the orb, try notch mode, and learn the shortcuts and dictation."><meta name="twitter:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta name="twitter:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Hey Mint", "item": "https://hey-mint.pages.dev/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://hey-mint.pages.dev/docs"}, {"@type": "ListItem", "position": 3, "name": "Get started", "item": "https://hey-mint.pages.dev/docs/start"}]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/guide.css"></head>
+<body data-hello="Click a ▶ example and I&#x27;ll act it out." data-page="docs" data-doc="start" data-root="../">
+<header class="top"><div class="top-in"><a class="brand" href="../"><span class="dot"></span>Hey Mint</a>
+<nav aria-label="Site"><a href="../docs" class="on">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
+<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start" class="cur" aria-current="page">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings">Settings and updates</a><a href="configuration">Configuration</a><a href="troubleshooting">Troubleshooting</a><a href="architecture">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#install">Install</a><a href="#talking">Talking to Mint</a><a href="#orb">Reading the orb</a><a href="#notch">Notch mode</a><a href="#shortcuts">Shortcuts and dictation</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 1 of 12</div><h1>Get started</h1><p>Install Hey Mint, talk to it, read the orb, try notch mode, and learn the shortcuts and dictation.</p></div><section id="install" data-group="Start">
+  <h2>Install</h2>
+  <p class="lead">One download with everything inside: Python, libraries and models. Apple silicon Macs on macOS 14.2 or later.</p>
+  <h3>Download it (no Terminal)</h3>
+  <ol class="steps">
+    <li>Download <b>Hey-Mint-…-arm64.dmg</b> from <a href="https://github.com/shivatmax/hey-mint/releases/latest">the latest release</a>, open it and drag <b>Hey Mint</b> onto <b>Applications</b>. (Opened straight from the DMG or Downloads, Hey Mint offers to move itself there: click <b>Move to Applications</b>.)</li>
+    <li>Open Hey Mint from Applications. The first time, macOS says <i>“Apple could not verify ‘Hey Mint’ is free of malware…”</i>: click <b>Done</b>.</li>
+    <li>Open <b>System Settings ▸ Privacy &amp; Security</b>, scroll down to <i>“Hey Mint” was blocked</i>, click <b>Open Anyway</b>, type your Mac password and click <b>Open Anyway</b> again. (On macOS 14: right-click Hey Mint ▸ <b>Open</b> ▸ <b>Open</b>.)</li>
+  </ol>
+  <p class="note"><b>Once per Mac, never again.</b> New versions install themselves, without that question and keeping Mint's permissions, so there's no need to download the DMG again. Why macOS asks at all: Hey Mint is free and open source, and Apple only skips this question for developers who pay it a yearly fee.</p>
+  <h3>Or one line in Terminal (macOS asks nothing)</h3>
+  <p>Open <b>Terminal</b> (Spotlight ▸ “Terminal”), paste this and press Return:</p>
+  <pre class="cmd"><code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/shivatmax/hey-mint/main/packaging/install.sh | bash</code><button type="button" class="copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='Copied'">Copy</button></pre>
+  <p>It downloads the latest Hey Mint, checks it, puts it in Applications, approves it with macOS (the same thing <b>Open Anyway</b> does) and opens it. It is a short script you can <a href="../install.sh">read first</a>; it's also at <code>hey-mint.pages.dev/install.sh</code>.</p>
+  <h3>Then</h3>
+  <ol class="steps">
+    <li>The welcome window takes it from there: your name, what to call Mint and where it lives (in the notch or floating), then <b>Connect</b>: open <a href="https://aistudio.google.com/apikey">Google AI Studio</a>, click <b>Create API key</b> (free), and press <b>Paste</b>. Mint checks the key with Google before saving it on this Mac. The next page is optional: a <b>Jev</b> key for faster, surer clicking - open <a href="https://console.typesafe.ai/keys">TypeSafe's console</a>, create a key, press <b>Paste</b> (or <b>Skip</b>; without Jev, Gemini makes those choices).</li>
+    <li>Then a voice, the permissions (each with why, and an Allow button), your shortcuts and a short tour. Change the key any time in Settings ▸ Models &amp; agents.</li>
+  </ol>
+  <figure class="clip"><div class="frame" style="--w:1080px"><video src="../media/onboarding.mp4" poster="../media/onboarding.jpg" width="1440" height="968" style="--ar:1440/968" preload="none" muted loop playsinline aria-label="The welcome window: hello, your name, connecting Gemini, a voice, permissions, shortcuts, the tour, and you&#x27;re set. Esc skips it; Welcome tour… in the menu bar brings it back."></video></div><figcaption>The welcome window: hello, your name, connecting Gemini, a voice, permissions, shortcuts, the tour, and you're set. Esc skips it; <b>Welcome tour…</b> in the menu bar brings it back.</figcaption></figure>
+  <details><summary>Optional keys, and what they unlock</summary>
+    <div class="table"><table><tr><th>Key</th><th>Unlocks</th></tr>
+      <tr><td>OpenAI or OpenRouter</td><td>Agents: research, reports, code</td></tr>
+      <tr><td>TypeSafe (Jev)</td><td>The <code>desktop</code> tool for multi-step clicking in any app, and surer picks of buttons, skills and memories</td></tr>
+      <tr><td>Exa or Tavily</td><td>Better web search (DuckDuckGo otherwise)</td></tr>
+      <tr><td>ChatGPT app</td><td>Codex, the agent that builds websites and apps</td></tr></table></div>
+  </details>
+  <details><summary>Build from source instead</summary>
+<pre>git clone https://github.com/shivatmax/hey-mint.git && cd hey-mint
+./set-key.sh      # your Gemini key, saved in .env
+./install.sh      # builds ~/Applications/Mint.app
+open ~/Applications/Mint.app</pre>
+    <p>Developing Mint? See the <a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">developer handbook</a>.</p>
+  </details>
+</section>
+
+<section id="talking" data-group="Start">
+  <h2>Talking to Mint</h2>
+  <p class="lead">Say “Hey Mint”, then ask. Your words and Mint's reply appear as captions beside the orb. Right after it answers you can follow up without the wake word for a few seconds; then it goes back to waiting for “Hey Mint”.</p>
+  <figure class="clip"><div class="frame" style="--w:660px"><video src="../media/talk.mp4" poster="../media/talk.jpg" width="880" height="406" style="--ar:880/406" preload="none" muted loop playsinline aria-label="A request, start to finish. Your words, the orb thinking, turning into Slack while it opens it, a ✓, the reply."></video></div><figcaption><b>A request, start to finish.</b> Your words, the orb thinking, turning into Slack while it opens it, a ✓, the reply.</figcaption></figure>
+  <ul class="say"><li><q>what's on my calendar today?</q></li><li><q>and tomorrow?</q></li><li><q>stop</q></li><li><q>bye</q></li></ul>
+  <div class="table"><table><tr><th>To</th><th>Do this</th></tr>
+    <tr><td>Wake it</td><td>“Hey Mint”, click the orb, or <kbd>⌘J</kbd> and type</td></tr>
+    <tr><td>Interrupt</td><td>Just talk while it speaks; it stops and listens</td></tr>
+    <tr><td>Stop everything</td><td>“stop”, “cancel”, “never mind”: queued clicks and keys too</td></tr>
+    <tr><td>Send it to sleep</td><td>“bye”, “that's all”: a one-line goodbye (“Bye, Boss.”), then quiet; or just stay quiet for 6 seconds after a reply</td></tr></table></div>
+  <p><strong>Only what's meant for Mint.</strong> Before Mint answers or does anything with what it heard without the wake word, it checks the words are for it and ask it something: talk with someone else, a video or call in the background, a passing phrase get no reply and no action, and don't keep it listening. A lone “hmm” or “okay” gets no answer either, unless Mint has just asked you something. “Stop”, and yes or no to the guard, always get through. <strong>Settings ▸ General ▸ Keep listening after a reply</strong>: 4 to 12 seconds, or never (always say “Hey Mint”).</p>
+  <p><strong>If Mint ever freezes.</strong> Mint watches itself: if it stops responding, a ⚠ appears in the menu bar with <em>Restart Mint</em>, and after about 40 seconds it restarts by itself, writing where it got stuck to the log. <kbd>⌃⌥⌘M</kbd> restarts it any time, and Settings ▸ General has <em>Restart Mint</em> too. No need to restart the Mac.</p>
+  <p><strong>If the voice service is down.</strong> The caption says what's wrong in a line - no quota left, Google's side, no network, the key - and counts down to the next try, instead of going quiet. If you were waiting for an answer, Mint says so out loud.</p>
+  <p><strong>Always the quickest voice.</strong> Mint can talk through several Gemini voice models, each with its own allowance per minute. If the one in use is slow, stalls, or nears its limit, Mint moves to the next at a quiet moment - or at once, asking it again, when you're left waiting - and comes back when the first is quick again. A model that keeps misbehaving rests longer each time, from minutes to a week. Newer models are picked up on their own.</p>
+  <p><strong>Light to start.</strong> Each conversation starts with Mint's everyday tools only. The rarer ones - video editing, spreadsheets, translating documents, pictures, screen recording and more - are looked up the moment you ask, which adds about a second. If Mint catches itself repeating the same step with nothing changing, it stops and tries another way or asks you.</p>
+  <details><summary>The chat window</summary>
+    <figure class="clip"><div class="frame" style="--w:320px"><video src="../media/chat.mp4" poster="../media/chat.jpg" width="920" height="1480" style="--ar:920/1480" preload="none" muted loop playsinline aria-label="⌘J opens the chat: the conversation, every action with a ✓ or ✗, and a box to type in."></video></div><figcaption><kbd>⌘J</kbd> opens the chat: the conversation, every action with a ✓ or ✗, and a box to type in.</figcaption></figure>
+    <p>The buttons along the top show or hide Mint in screen sharing, compact or clear the chat, send Mint to sleep, turn the mic or spoken replies off, and open Settings. Typing never turns the microphone on.</p>
+  </details>
+</section>
+
+<section id="orb" data-group="Start">
+  <h2>Reading the orb</h2>
+  <p class="lead">The orb turns into whatever it's doing, with a caption, then shows a ✓ or ✗. Long tasks get a plan, a progress ring and confetti.</p>
+  <figure class="clip"><div class="frame" style="--w:690px"><video src="../media/work.mp4" poster="../media/work.jpg" width="920" height="480" style="--ar:920/480" preload="none" muted loop playsinline aria-label="Searching, reading a file, a menu command, reading the window; a failed step (✗ and a tiny rain cloud); then a three-step plan."></video></div><figcaption>Searching, reading a file, a menu command, reading the window; a failed step (✗ and a tiny rain cloud); then a three-step plan.</figcaption></figure>
+  <div class="table"><table><tr><th>You see</th><th>It means</th></tr>
+    <tr><td>Eyes following your pointer</td><td>Awake and listening</td></tr>
+    <tr><td>Eyes up, swirl turning</td><td>Thinking</td></tr>
+    <tr><td>A symbol with a caption</td><td>Working: a magnifier is searching, a hand is clicking, a cursor is typing</td></tr>
+    <tr><td>Dimmed, eyes closed</td><td>Asleep; only “Hey Mint” wakes it</td></tr></table></div>
+</section>
+
+<section id="notch" data-group="Start">
+  <h2>Notch mode</h2>
+  <p class="lead">On a MacBook with a camera notch, Mint can live in the notch like a Dynamic Island instead of floating as an orb. Say <q>become the notch</q> (or <q>go into the notch</q>), or turn on “Dynamic Island at the notch” in the menu or in Settings ▸ Appearance &amp; Sound. <q>go out of my notch</q> or <q>back to the orb</q> switches back. The switch plays right away, no restart.</p>
+  <figure class="clip"><div class="frame" style="--w:1080px"><video src="../media/notch-switch.mp4" poster="../media/notch-switch.jpg" width="1440" height="1342" style="--ar:1440/1342" preload="none" muted loop playsinline aria-label="Switching looks, live: the little Mint drops out of the notch, grows as it falls and bounces home as the orb; then the orb flies back up in a spinning arc and the notch swallows it."></video></div><figcaption>Switching looks, live: the little Mint drops out of the notch, grows as it falls and bounces home as the orb; then the orb flies back up in a spinning arc and the notch swallows it.</figcaption></figure>
+  <figure class="clip"><div class="frame" style="--w:840px"><video src="../media/notch.mp4" poster="../media/notch.jpg" width="1120" height="280" style="--ar:1120/280" preload="none" muted loop playsinline aria-label="A question drops the notch down: your words, the task and its progress bar, then the reply word by word, and back to the little Mint."></video></div><figcaption>A question drops the notch down: your words, the task and its progress bar, then the reply word by word, and back to the little Mint.</figcaption></figure>
+  <div class="table"><table><tr><th>You see</th><th>It means</th></tr>
+    <tr><td>The little Mint left of the camera</td><td>Mint's real face, only smaller: blinking, watching your pointer, every expression</td></tr>
+    <tr><td>Sound bars on the right</td><td>Listening, or speaking when they're mint green</td></tr>
+    <tr><td>A spinner or a task icon</td><td>Thinking, or working on a task (the notch drops down with the step and a progress bar)</td></tr>
+    <tr><td>A moon, or a red crossed-out mic</td><td>Asleep, or the microphone is off</td></tr></table></div>
+  <p>It stays compact: it drops down only for real words, a task or progress, and only as wide as the sentence needs. A bare status like “Mic off” stays a small icon.</p>
+  <figure class="clip"><div class="frame" style="--w:840px"><video src="../media/notch-hover.mp4" poster="../media/notch-hover.jpg" width="1120" height="280" style="--ar:1120/280" preload="none" muted loop playsinline aria-label="Hover for the controls: mic, voice, chat, sleep, screen sharing and settings. Then asleep, and the mic off."></video></div><figcaption>Hover for the controls: mic, voice, chat, sleep, screen sharing and settings. Then asleep, and the mic off.</figcaption></figure>
+  <p>Hover the notch for a moment and a small row of controls drops down (mic, voice, chat, sleep, screen sharing, hide, menu - and ■ <strong>Stop</strong> first while Mint is talking or working, the same as saying “stop”). <strong>Hide</strong> (the arrow into the top bar, the menu's <em>Hide Mint</em>, <kbd>⌃⌥H</kbd> or “hide yourself”) takes the little Mint and the icons beside the camera away - the notch still opens when you point at it or tap it. It comes back by itself when you say “Hey Mint” or it has something to tell you, or with the <em>Show</em> button or <kbd>⌃⌥H</kbd> (orb mode: the orb fades out the same way). Hovering never opens more than that, so crossing the notch on your way somewhere does nothing. <strong>Click the notch</strong> (anywhere but a button) and the full notch opens; click it again and it folds back (left alone for a few seconds, it folds by itself). The chat has its own button and opens right under the notch; click the notch to close it again. <strong>Drag the little Mint</strong> away from the notch: it stretches like it is held by an elastic, springs back if you let go early, and if you pull it out, it leaves the notch and Mint becomes the floating orb. Right-click for the menu. Whatever opens - the chat, the clipboard, a picture, a calendar card, the meeting recorder, a lesson - doesn't float below the notch: the notch grows around it and it turns notch-black, so the notch itself becomes it. Two at once stack instead of overlapping. On a screen without a notch, the same shape hangs from the middle of the menu bar.</p>
+  <p><strong>It grows for what matters, then folds back.</strong> Files Mint finds open the notch as tiles at once, even while it is still answering; a song that starts shows the player for a few seconds; hovering always opens the whole notch, with Mint's words inside if it is talking. When you say “Hey Mint” while music plays, the little Mint takes the notch back from the album art so you can see it is listening, and a paused song gives the notch back after a few seconds.</p>
+  <figure class="clip"><div class="frame" style="--w:700px"><video src="../media/notch-words.mp4" poster="../media/notch-words.jpg" width="1400" height="460" style="--ar:1400/460" preload="none" muted loop playsinline aria-label="A song in the notch; “Hey Mint” brings the little Mint back; hovering while it answers opens the notch with the answer inside, next to the calendar."></video></div><figcaption>A song in the notch; “Hey Mint” brings the little Mint back; hovering while it answers opens the notch with the answer inside, next to the calendar.</figcaption></figure>
+  <p><strong>Home and Shelf.</strong> Hover the notch and it opens into a small home: the song that's playing (or Mint), your calendar - a strip of days with today's remaining events, click a day to see its events, click an event to open it in Calendar - and your battery. The Shelf tab holds files for later: drag a file onto the notch and it opens on the Shelf, ready to take it. From there drag files back out into any app, double-click to open, right-click to share, AirDrop, show in Finder or remove, or press AirDrop to send them. The shelf only remembers where your files are; it never moves or copies them, and it follows a file you rename or move.</p>
+  <figure class="clip"><div class="frame" style="--w:700px"><video src="../media/notch-home.mp4" poster="../media/notch-home.jpg" width="1400" height="460" style="--ar:1400/460" preload="none" muted loop playsinline aria-label="Hover: Mint, the controls and this week&#x27;s calendar. Then four files land on the Shelf, with AirDrop for all of them."></video></div><figcaption>Hover: Mint, the controls and this week's calendar. Then four files land on the Shelf, with AirDrop for all of them.</figcaption></figure>
+  <p><strong>Search in the notch.</strong> “Find my launch files”, “what did I download today?”: the results open in the notch as tiles with previews. Hover one to see where it is (its folder under the name; the full path in the bigger grid); double-click opens it, Space previews it, drag it out into any app, and the arrows button grows the notch into a 3 × 1, 3 × 2 or 3 × 3 grid. Type in the search field to look for something else, or press Ask Mint.</p>
+  <figure class="clip"><div class="frame" style="--w:700px"><video src="../media/notch-search.mp4" poster="../media/notch-search.jpg" width="1400" height="460" style="--ar:1400/460" preload="none" muted loop playsinline aria-label="“Find my launch files”: the notch opens with them while Mint answers; hovering the PDF shows its folder."></video></div><figcaption>“Find my launch files”: the notch opens with them while Mint answers; hovering the PDF shows its folder.</figcaption></figure>
+  <p><strong>Charging and music.</strong> Plug in or unplug the charger and the notch says so for a moment next to the battery (green while charging, red when low). When a song starts, the notch becomes the player for a few seconds - cover, time and controls - then shrinks to the cover and dancing bars.</p>
+  <figure class="clip"><div class="frame" style="--w:700px"><video src="../media/notch-music.mp4" poster="../media/notch-music.jpg" width="1400" height="460" style="--ar:1400/460" preload="none" muted loop playsinline aria-label="The charger goes in; then Midnight City starts and the notch is the player for a moment."></video></div><figcaption>The charger goes in; then Midnight City starts and the notch is the player for a moment.</figcaption></figure>
+  <p><strong>Settings ▸ Appearance &amp; Sound ▸ Notch:</strong> words in the notch, controls on hover, the little Mint when idle (off: a plain notch until something happens) and playful motion (bouncy springs, a hop as it opens, breathing with Mint's voice).</p>
+</section>
+
+<section id="shortcuts" data-group="Start">
+  <h2>Shortcuts and dictation</h2>
+  <p class="lead">No need to say “Hey Mint”: press a key. And hold a key to dictate anywhere, like Wispr Flow: talk, let go, and your words are typed where your cursor is, cleaned up.</p>
+  <figure class="clip"><div class="frame" style="--w:1080px"><video src="../media/dictation.mp4" poster="../media/dictation.jpg" width="1440" height="858" style="--ar:1440/858" preload="none" muted loop playsinline aria-label="Dictation. Hold Right ⌥, talk, let go: “um, looks good, no wait, let&#x27;s ship it Thursday” lands as clean text in the comment box."></video></div><figcaption><b>Dictation.</b> Hold Right ⌥, talk, let go: “um, looks good, no wait, let's ship it Thursday” lands as clean text in the comment box.</figcaption></figure>
+  <ul class="plain">
+    <li><kbd>⌃⌥Space</kbd> <b>Talk to Mint</b>, without the wake word.</li>
+    <li><b>Hold Right ⌥</b> <b>Dictate</b> at the cursor, in any app. Tap it twice to dictate hands-free, and once more to finish.</li>
+    <li><kbd>⌘J</kbd> <b>Open or close the chat.</b></li>
+    <li><kbd>⌃⌥V</kbd> <b>Open the <a href="using#clipboard">clipboard</a>.</b></li>
+  </ul>
+  <p>Change any of them in Settings ▸ Shortcuts: click one and press the keys you want. Dictation can be one key on its own (Right ⌥, Right ⌘, Right ⌃, Right ⇧ or fn) or a combination. It writes what you meant: punctuation, no “um”s, your corrections applied, lists as lists, Hindi, English or both in the script you'd type. It knows the app you're in, so a chat gets a chat message and Mail gets an email. Add names and jargon under “Words to spell exactly”.</p>
+  <p class="note">While you dictate, Mint doesn't listen or answer. Your clipboard is put back after the paste. “Paste my last dictation” brings back the last one if it landed nowhere.</p>
+</section><nav class="pager" aria-label="Previous and next page"><a class="prev" href="../docs"><small>Previous</small><span>Overview</span></a><a class="next" href="using"><small>Next</small><span>Using Mint</span></a></nav></article></div><footer><span>Hey Mint · open-source voice assistant for macOS · GPL-3.0</span><span class="grow"></span>
+<a href="../docs">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a href="https://github.com/shivatmax/hey-mint/releases">Releases</a><a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">Contribute</a></footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<script src="../assets/docs-index.js"></script>
+<script src="../assets/guide.js"></script><script src="../assets/critters.js"></script>
+</body></html>

@@ -75,12 +75,30 @@ DEFAULTS: dict = {
     "notch_calendar": True,     # notch mode: the week and today's events in the open notch
     "notch_battery": True,      # notch mode: battery badge, and a peek when plugged in or unplugged
     "notch_search": True,       # notch mode: Spotlight in the notch - files and apps, grids, drag out
+    # The character system (plans/grokbot-notch-overhaul.md)
+    "status_badge": True,       # a little badge on Mint's face: dots while working, red on error, green when done
+    "poke_play": True,          # poke Mint: a slap, three quick ones make it dizzy, keep going and it gets annoyed
+    "greeting": True,           # a sparkly hello when Mint wakes up for the day
+    "window_glow": True,        # a glowing border round the window Mint is working in
+    "notch_composer": True,
+    "notch_agents_bar": True,   # notch mode: a slim bar under the notch with what your coding agents are doing     # notch mode: type to Mint right in the notch
+    "ui_sounds": True,          # soft little sounds for open, done, error, pokes
+    "sound_volume": 0.7,        # how loud those sounds are, 0..1
+    "sounds_notch": True,       # sounds: the notch opening and closing
+    "sounds_tasks": True,       # sounds: a task done or failed, a message sent, a file dropped
+    "sounds_play": True,        # sounds: pokes, dizzy, the morning hello
+    "wander": True,             # the orb takes a little trip near home now and then (motion.py)
+    "motion": "full",           # animation: full (bouncy, playful) / calm (gentle, fewer extras) / minimal (fades only)
+    "notch_open_to": "auto",    # notch mode: the tab the open notch shows first - auto / home / search / shelf / agents
+    "menubar_face": True,       # the menu bar icon is Mint's face and shows its state
     # Claude mode (notch_agents): Claude Code and Codex sessions live in the notch. auto / on / off.
     "agent_mode": "auto",
     "agent_approvals": True,    # an agent's permission request or question opens the notch on it
     "agent_open_on_done": True, # a finished agent's summary shows in the notch for a few seconds
     "agent_compact": False,     # the Agents tab minimized to one line (the minimize button in the pane)
     "agent_telegram": "away",   # coding agents message you on Telegram: away (from the Mac) / always / off
+    "agent_checks": True,       # read agents' test runs, risky steps and changed files (agent_tests.py): verdicts in alerts and answers
+    "agent_fix_loop": False,    # with Mint's Claude Code hooks: send Claude back when it stops or pushes with failing / untested tests
     # The guard (guard.py): ask before deleting / changing / risky commands. all / delete / off.
     "guard": "all",
     # Google Meet calls with Mint (meet_call.py): share the whole screen ("screen") or not ("off"); the longest call.

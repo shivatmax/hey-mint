@@ -42,7 +42,7 @@ OUTSIDE: dict[str, frozenset | None] = {
     "web_search": None, "read_url": None, "fetch_url": None, "read_window": None, "read_email": None,
     "list_emails": None, "read_file": None, "get_selected_text": None, "ui_elements": None, "ocr_copy": None,
     "calendar_events": None, "watch_video": None, "briefing": None, "recall_history": None,
-    "agent_status": None,
+    "agent_status": None, "verify_state": None,
     "browser": frozenset({"read", "links", "url", "find", "tabs", "js", "go", "wait"}),
     "notes": frozenset({"search", "read", "recent"}),
     "mail": frozenset({"triage", "draft_reply"}),

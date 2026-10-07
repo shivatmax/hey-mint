@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration · Hey Mint docs</title><meta name="description" content="Every setting with its default and what it does, the files Mint keeps them in, and the environment variables for keys and models.">
+<link rel="canonical" href="https://hey-mint.pages.dev/docs/configuration"><meta name="theme-color" content="#F3F6FB">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="../assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Configuration · Hey Mint docs"><meta property="og:description" content="Every setting with its default and what it does, the files Mint keeps them in, and the environment variables for keys and models.">
+<meta property="og:url" content="https://hey-mint.pages.dev/docs/configuration"><meta property="og:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Configuration · Hey Mint docs">
+<meta name="twitter:description" content="Every setting with its default and what it does, the files Mint keeps them in, and the environment variables for keys and models."><meta name="twitter:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta name="twitter:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Hey Mint", "item": "https://hey-mint.pages.dev/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://hey-mint.pages.dev/docs"}, {"@type": "ListItem", "position": 3, "name": "Configuration", "item": "https://hey-mint.pages.dev/docs/configuration"}]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/guide.css"></head>
+<body data-hello="Click a ▶ example and I&#x27;ll act it out." data-page="docs" data-doc="configuration" data-root="../">
+<header class="top"><div class="top-in"><a class="brand" href="../"><span class="dot"></span>Hey Mint</a>
+<nav aria-label="Site"><a href="../docs" class="on">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
+<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings">Settings and updates</a><a href="configuration" class="cur" aria-current="page">Configuration</a><a href="troubleshooting">Troubleshooting</a><a href="architecture">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#config-files">Where settings live</a><a href="#config-you">You and Mint</a><a href="#config-listening">Listening and the wake word</a><a href="#config-speaking">Speaking and audio</a><a href="#config-look">Look and feel</a><a href="#config-notch">Notch mode</a><a href="#config-keys">Shortcuts, dictation and screenshots</a><a href="#config-agents">Claude mode and agents</a><a href="#config-safety">The guard</a><a href="#config-storage">Storage, meetings and the timeline</a><a href="#config-remote">Google Meet, Telegram and email</a><a href="#config-models">Voice models and reliability</a><a href="#config-updates">Updates</a><a href="#config-env">Environment variables</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 10 of 12</div><h1>Configuration</h1><p>Every setting with its default and what it does, the files Mint keeps them in, and the environment variables for keys and models.</p></div><section id="config-files" data-group="Configuration">
+  <h2>Where settings live</h2>
+  <p class="lead">You rarely need any of this: every setting below is a switch in Settings (<kbd>⌘,</kbd>), and you can just ask Mint (<q class="inline">make it pink</q>). This page is for people who like to see everything at once.</p>
+  <div class="table"><table><tr><th>File</th><th>What's in it</th></tr>
+    <tr><td><code>settings.json</code></td><td>Everything on this page. Mint writes it when you change a setting, and reads it again within a couple of seconds when you edit it by hand: changes apply at once, shortcuts included. Open it from Settings ▸ Updates &amp; Help ▸ The settings file ▸ Edit…. Only the settings you changed are stored; the rest use the defaults below.</td></tr>
+    <tr><td><code>.env</code></td><td>Your API keys and the <a href="#config-env">environment variables</a>, one <code>NAME=value</code> per line, readable only by you. Settings ▸ Accounts &amp; keys writes it for you.</td></tr>
+    <tr><td><code>custom.json</code></td><td>Your accounts, Slack workspaces, aliases and routines (copy <code>custom.example.json</code> to start).</td></tr>
+    <tr><td><code>providers.json</code></td><td>The agents' model choices from Settings ▸ Models &amp; agents: custom OpenAI-compatible endpoints, the Ollama address, backup models.</td></tr></table></div>
+  <p>The downloaded app keeps these in <code>~/Library/Application Support/Hey Mint</code>; an app built from source with <code>./install.sh</code> keeps them in <code>~/Library/Application Support/Mint</code>. Updating or reinstalling keeps them.</p>
+  <p class="note">Keys such as <code>shortcuts.toggle</code> live inside an object in the file: <code>"shortcuts": {"toggle": "cmd+j"}</code>. Values marked <i>empty</i> are <code>""</code> or <code>[]</code>, which means “use the built-in choice” as described.</p>
+</section>
+
+<section id="config-you" data-group="Configuration">
+  <h2>You and Mint</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-assistant-name"><td><code>assistant_name</code></td><td><code>Mint</code></td><td>What the assistant is called. “Hey” and this name wake it, unless you trained your own wake phrase.</td></tr>
+    <tr id="set-user-name"><td><code>user_name</code></td><td><i>empty</i></td><td>Your name, so Mint can use it.</td></tr>
+    <tr id="set-about-me"><td><code>about_me</code></td><td><i>empty</i></td><td>A few lines about you that Mint keeps in mind (Settings ▸ General).</td></tr>
+    <tr id="set-personality"><td><code>personality</code></td><td><i>empty</i></td><td>How Mint comes across, in up to 100 characters of your own words: “funny and a bit sarcastic”. Empty = its default personality. See <a href="personality#personality-tone">Personality</a>.</td></tr>
+    <tr id="set-reply-language"><td><code>reply_language</code></td><td><code>auto</code></td><td><code>auto</code> answers in the language you speak; a language name (<code>Hindi</code>, <code>Spanish</code>, <code>Japanese</code> and 20 more) makes Mint always speak and write in it.</td></tr>
+    <tr id="set-onboarded"><td><code>onboarded</code></td><td>off</td><td>Set once the welcome window has been seen, finished or skipped. While it is off, the welcome window opens at launch.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-listening" data-group="Configuration">
+  <h2>Listening and the wake word</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-mic"><td><code>mic</code></td><td>on</td><td>Off = the microphone is off; type to Mint instead (<kbd>⌘J</kbd>).</td></tr>
+    <tr id="set-wake-phrase"><td><code>wake_phrase</code></td><td><i>empty</i></td><td>Your own wake phrase, trained on this Mac in Settings ▸ Voice &amp; wake word. Empty = “Hey” plus the assistant's name.</td></tr>
+    <tr id="set-wake-models"><td><code>wake_models</code></td><td><i>empty</i></td><td>More phrases that also wake Mint, such as <code>["Hey Mint"]</code> next to your own phrase.</td></tr>
+    <tr id="set-follow-up-seconds"><td><code>follow_up_seconds</code></td><td><code>6</code></td><td>After a reply, how many seconds Mint keeps listening for a follow-up before it needs the wake word again. <code>0</code> = the wake word every time.</td></tr>
+    <tr id="set-listen-while-working"><td><code>listen_while_working</code></td><td>on</td><td>Keep hearing you while a task runs, so you can add to it or say “stop”.</td></tr>
+    <tr id="set-stop-words"><td><code>stop_words</code></td><td><code>stop</code>, <code>stop it</code>, <code>stop everything</code> and 8 more</td><td>Said on their own, any of these stops everything at once: “stop”, “cancel”, “never mind” and the like.</td></tr>
+    <tr id="set-instant-commands"><td><code>instant_commands</code></td><td>on</td><td>Simple commands (“volume 30”, “next song”) run the moment you stop talking.</td></tr>
+    <tr id="set-voice-lock"><td><code>voice_lock</code></td><td>on</td><td>Only your voice reaches Gemini. Needs <b>Train my voice</b> first; see <a href="voice#voice">Wake word and voice lock</a>.</td></tr>
+    <tr id="set-lock-strictness"><td><code>lock_strictness</code></td><td><code>balanced</code></td><td>How sure the voice lock must be that it is you: <code>relaxed</code>, <code>balanced</code> or <code>strict</code>.</td></tr>
+    <tr id="set-addressee-check"><td><code>addressee_check</code></td><td>on</td><td>Ignore follow-ups that were said to someone else in the room.</td></tr>
+    <tr id="set-vocabulary"><td><code>vocabulary</code></td><td><i>empty</i></td><td>Extra names and words for Mint to expect.</td></tr>
+    <tr id="set-hearing-fixes"><td><code>hearing_fixes</code></td><td><i>empty</i></td><td>Words Mint misheard and what you meant, added when you correct it: “you heard X, I said Y”.</td></tr>
+    <tr id="set-unload-after-minutes"><td><code>unload_after_minutes</code></td><td><code>0</code></td><td>Minutes asleep and idle before Mint unloads to free memory while the small Mint Ear listens for the wake word. <code>0</code> = stay loaded.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-speaking" data-group="Configuration">
+  <h2>Speaking and audio</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-voice"><td><code>voice</code></td><td>on</td><td>Off = silent: replies are shown, not spoken.</td></tr>
+    <tr id="set-voice-name"><td><code>voice_name</code></td><td><i>empty</i></td><td>One of the 30 <a href="personality#voices">Gemini voices</a>. Empty = Zephyr.</td></tr>
+    <tr id="set-speaking-style"><td><code>speaking_style</code></td><td><i>empty</i></td><td>How Mint speaks, in your words: “warm and calm, a little faster”.</td></tr>
+    <tr id="set-word-animation"><td><code>word_animation</code></td><td>on</td><td>Captions appear word by word.</td></tr>
+    <tr id="set-input-device"><td><code>input_device</code></td><td><i>empty</i></td><td>The microphone, as a Core Audio device ID. Empty = follow the system's choice.</td></tr>
+    <tr id="set-output-device"><td><code>output_device</code></td><td><i>empty</i></td><td>The speaker, as a Core Audio device ID. Empty = follow the system's choice.</td></tr>
+    <tr id="set-echo-cancellation"><td><code>echo_cancellation</code></td><td><code>auto</code></td><td><code>auto</code> (off with headphones), <code>on</code> or <code>off</code>.</td></tr>
+    <tr id="set-share-mic"><td><code>share_mic</code></td><td>on</td><td>Step aside while a call or meeting app uses the microphone.</td></tr>
+    <tr id="set-share-mic-apps"><td><code>share_mic_apps</code></td><td><i>empty</i></td><td>More apps to step aside for, by bundle ID (like <code>com.example.app</code>).</td></tr>
+  </table></div>
+</section>
+
+<section id="config-look" data-group="Configuration">
+  <h2>Look and feel</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-theme"><td><code>theme</code></td><td><code>mint</code></td><td>The colours: <code>mint</code>, <code>blue</code>, <code>aurora</code>, <code>sunset</code>, <code>rose</code> or <code>mono</code>.</td></tr>
+    <tr id="set-position"><td><code>position</code></td><td><code>bottom-right</code></td><td>Where the orb sits: <code>top-right</code>, <code>top-left</code>, <code>top-center</code>, <code>bottom-right</code> or <code>bottom-left</code> (<code>custom</code> once you drag it).</td></tr>
+    <tr id="set-origin"><td><code>origin</code></td><td><i>empty</i></td><td>Where you dragged the orb to, kept by Mint. Empty = use <code>position</code>.</td></tr>
+    <tr id="set-face"><td><code>face</code></td><td>on</td><td>The orb's eyes and face.</td></tr>
+    <tr id="set-cursor-effects"><td><code>cursor_effects</code></td><td>on</td><td>Sparks, ripples and highlights on screen while Mint works.</td></tr>
+    <tr id="set-cute-effects"><td><code>cute_effects</code></td><td>on</td><td>A small flourish for each action, and paw prints on clicks.</td></tr>
+    <tr id="set-cute-agents"><td><code>cute_agents</code></td><td>on</td><td>Agents show up as <a href="agents#critters">critters</a> from a toy box beside the orb.</td></tr>
+    <tr id="set-auto-emotions"><td><code>auto_emotions</code></td><td>on</td><td>The orb shows feelings on its own in conversation.</td></tr>
+    <tr id="set-status-badge"><td><code>status_badge</code></td><td>on</td><td>A little badge on Mint's face: dots while it works, red on an error, green when done.</td></tr>
+    <tr id="set-poke-play"><td><code>poke_play</code></td><td>on</td><td>Mint reacts when you poke it: three quick pokes make it dizzy, and more make it annoyed.</td></tr>
+    <tr id="set-greeting"><td><code>greeting</code></td><td>on</td><td>A sparkly hello when Mint wakes up for the day.</td></tr>
+    <tr id="set-window-glow"><td><code>window_glow</code></td><td>on</td><td>A glowing border around the window Mint is working in.</td></tr>
+    <tr id="set-ui-sounds"><td><code>ui_sounds</code></td><td>on</td><td>Soft sounds for open, done, error and pokes.</td></tr>
+    <tr id="set-sound-volume"><td><code>sound_volume</code></td><td><code>0.7</code></td><td>How loud those sounds are, from <code>0</code> to <code>1</code>.</td></tr>
+    <tr id="set-sounds-notch"><td><code>sounds_notch</code></td><td>on</td><td>Sounds for the notch opening and closing.</td></tr>
+    <tr id="set-sounds-tasks"><td><code>sounds_tasks</code></td><td>on</td><td>Sounds for a task done or failed, a message sent, a file dropped.</td></tr>
+    <tr id="set-sounds-play"><td><code>sounds_play</code></td><td>on</td><td>Sounds for pokes, dizziness and the morning hello.</td></tr>
+    <tr id="set-motion"><td><code>motion</code></td><td><code>full</code></td><td>How much Mint moves: <code>full</code> (bouncy and playful), <code>calm</code> (gentle, fewer extras) or <code>minimal</code> (fades only).</td></tr>
+    <tr id="set-wander"><td><code>wander</code></td><td>on</td><td>The orb takes a little trip near its home now and then.</td></tr>
+    <tr id="set-menubar-face"><td><code>menubar_face</code></td><td>on</td><td>The menu bar icon is Mint's face and shows what it is doing.</td></tr>
+    <tr id="set-music-player-auto"><td><code>music_player_auto</code></td><td>on</td><td>The mini music player appears by itself when Spotify or Music starts playing.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-notch" data-group="Configuration">
+  <h2>Notch mode</h2>
+  <p>On a MacBook with a camera notch. See <a href="start#notch">Notch mode</a>. Every setting but the first applies only while notch mode is on.</p>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-notch-mode"><td><code>notch_mode</code></td><td>off</td><td>Mint lives in the camera notch like a Dynamic Island, instead of floating as an orb.</td></tr>
+    <tr id="set-notch-words"><td><code>notch_words</code></td><td>on</td><td>The words show in the notch as they are spoken.</td></tr>
+    <tr id="set-notch-controls"><td><code>notch_controls</code></td><td>on</td><td>Controls appear when the pointer rests on the notch.</td></tr>
+    <tr id="set-notch-idle-face"><td><code>notch_idle_face</code></td><td>on</td><td>The little Mint beside the camera when idle (off: a plain notch).</td></tr>
+    <tr id="set-notch-playful"><td><code>notch_playful</code></td><td>on</td><td>Bouncy springs, hops, and breathing with the voice.</td></tr>
+    <tr id="set-notch-composer"><td><code>notch_composer</code></td><td>on</td><td>Type to Mint right in the notch.</td></tr>
+    <tr id="set-notch-open-to"><td><code>notch_open_to</code></td><td><code>auto</code></td><td>The tab the open notch shows first: <code>auto</code>, <code>home</code>, <code>search</code>, <code>shelf</code> or <code>agents</code>.</td></tr>
+    <tr id="set-notch-agents-bar"><td><code>notch_agents_bar</code></td><td>on</td><td>A slim bar under the notch with what your coding agents are doing.</td></tr>
+    <tr id="set-notch-music"><td><code>notch_music</code></td><td>on</td><td>What's playing: artwork, bars, and the player on hover.</td></tr>
+    <tr id="set-notch-shelf"><td><code>notch_shelf</code></td><td>on</td><td>A file shelf: drag files to the notch, then AirDrop or share them.</td></tr>
+    <tr id="set-notch-calendar"><td><code>notch_calendar</code></td><td>on</td><td>The week and today's events in the open notch.</td></tr>
+    <tr id="set-notch-battery"><td><code>notch_battery</code></td><td>on</td><td>A battery badge, and a peek when you plug in or unplug.</td></tr>
+    <tr id="set-notch-search"><td><code>notch_search</code></td><td>on</td><td>Spotlight in the notch: files and apps in a grid, drag them out.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-keys" data-group="Configuration">
+  <h2>Shortcuts, dictation and screenshots</h2>
+  <p>A shortcut is written like <code>cmd+j</code> or <code>ctrl+option+space</code>; empty means no shortcut. See <a href="start#shortcuts">Shortcuts and dictation</a>.</p>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-shortcuts-toggle"><td><code>shortcuts.toggle</code></td><td><code>cmd+j</code></td><td>Opens the chat, and closes it again (<kbd>Esc</kbd> closes it too).</td></tr>
+    <tr id="set-shortcuts-close"><td><code>shortcuts.close</code></td><td><i>empty</i></td><td>Closes the chat. Empty because <kbd>⌘H</kbd> is Hide in every app, and a global shortcut would take it from all of them.</td></tr>
+    <tr id="set-shortcuts-talk"><td><code>shortcuts.talk</code></td><td><code>ctrl+option+space</code></td><td>Wakes Mint to listen, without the wake word.</td></tr>
+    <tr id="set-shortcuts-dictate"><td><code>shortcuts.dictate</code></td><td><code>right_option</code></td><td>Hold it to dictate at the cursor; tap it twice for hands-free. A key combination, or one modifier on its own: <code>right_option</code>, <code>right_command</code>, <code>right_control</code>, <code>right_shift</code> or <code>fn</code>.</td></tr>
+    <tr id="set-shortcuts-dictate-toggle"><td><code>shortcuts.dictate_toggle</code></td><td><i>empty</i></td><td>Starts and stops hands-free dictation.</td></tr>
+    <tr id="set-shortcuts-clipboard"><td><code>shortcuts.clipboard</code></td><td><code>ctrl+option+v</code></td><td>Opens the <a href="using#clipboard">clipboard</a> history.</td></tr>
+    <tr id="set-shortcuts-hide"><td><code>shortcuts.hide</code></td><td><code>ctrl+option+h</code></td><td>Hides or shows Mint.</td></tr>
+    <tr id="set-dictation-words"><td><code>dictation_words</code></td><td><i>empty</i></td><td>Words dictation should spell exactly (names, jargon), separated by commas.</td></tr>
+    <tr id="set-screenshot-to"><td><code>screenshot_to</code></td><td><code>both</code></td><td>Where screenshots go: <code>both</code> (a file and the clipboard), <code>clipboard</code> or <code>file</code>.</td></tr>
+    <tr id="set-shortcuts-blocked"><td><code>shortcuts_blocked</code></td><td><i>empty</i></td><td>Apple Shortcuts Mint may not run, by name. Empty = all allowed.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-agents" data-group="Configuration">
+  <h2>Claude mode and agents</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-agent-mode"><td><code>agent_mode</code></td><td><code>auto</code></td><td><a href="agents#claude-mode">Claude mode</a>, Claude Code and Codex sessions in the notch: <code>auto</code> (whenever a session is running), <code>on</code> (always) or <code>off</code>.</td></tr>
+    <tr id="set-agent-approvals"><td><code>agent_approvals</code></td><td>on</td><td>An agent's permission request or question opens the notch on it.</td></tr>
+    <tr id="set-agent-open-on-done"><td><code>agent_open_on_done</code></td><td>on</td><td>A finished agent's summary shows in the notch for a few seconds.</td></tr>
+    <tr id="set-agent-compact"><td><code>agent_compact</code></td><td>off</td><td>The Agents tab is minimized to one line.</td></tr>
+    <tr id="set-agent-telegram"><td><code>agent_telegram</code></td><td><code>away</code></td><td>Coding agents message you on Telegram: <code>away</code> (when you're away from the Mac), <code>always</code> or <code>off</code>.</td></tr>
+    <tr id="set-agent-checks"><td><code>agent_checks</code></td><td>on</td><td>Read the agents' test runs, risky steps and changed files, and give a verdict in alerts and answers.</td></tr>
+    <tr id="set-agent-fix-loop"><td><code>agent_fix_loop</code></td><td>off</td><td>With Mint's Claude Code hooks: send Claude back to work when it stops or pushes with failing or untested tests.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-safety" data-group="Configuration">
+  <h2>The guard</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-guard"><td><code>guard</code></td><td><code>all</code></td><td>When <a href="safety#guard">the guard</a> asks first. <code>all</code>: before deleting, before changing or moving existing things, and before risky system commands. <code>delete</code>: only deleting and risky commands. <code>off</code>: never (risky words still need your request). Mint's own files always ask first.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-storage" data-group="Configuration">
+  <h2>Storage, meetings and the timeline</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-storage-folder"><td><code>storage_folder</code></td><td><i>empty</i></td><td>Where Mint saves what it makes, one folder per kind (Documents, Meetings, Videos, Agents, Spreadsheets, Images). Empty = <code>~/Documents/Mint</code>.</td></tr>
+    <tr id="set-meeting-offer"><td><code>meeting_offer</code></td><td>on</td><td>When a call starts, offer to take <a href="using#meetings">meeting notes</a>.</td></tr>
+    <tr id="set-meeting-keep-audio"><td><code>meeting_keep_audio</code></td><td>on</td><td>Keep meeting recordings (compressed) next to their notes.</td></tr>
+    <tr id="set-timeline"><td><code>timeline</code></td><td>off</td><td>The activity timeline: the app, window title and page address over time, as text only. Off until you turn it on.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-remote" data-group="Configuration">
+  <h2>Google Meet, Telegram and email</h2>
+  <p>See <a href="remote#meet">Google Meet with Mint</a>, <a href="remote#telegram">Telegram</a> and <a href="remote#email">email control</a>.</p>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-meet-share"><td><code>meet_share</code></td><td><code>screen</code></td><td>Share the whole screen in Mint's call (<code>screen</code>) or not (<code>off</code>).</td></tr>
+    <tr id="set-meet-max-minutes"><td><code>meet_max_minutes</code></td><td><code>120</code></td><td>The longest a call with Mint lasts.</td></tr>
+    <tr id="set-meet-admit"><td><code>meet_admit</code></td><td><code>everyone</code></td><td>Who gets into Mint's call without asking: <code>everyone</code> with the link, the <code>first</code> person only, or <code>ask</code> each time on Telegram.</td></tr>
+    <tr id="set-telegram-enabled"><td><code>telegram_enabled</code></td><td>off</td><td>Telegram control. Also needs a bot token (<code>TELEGRAM_BOT_TOKEN</code>).</td></tr>
+    <tr id="set-telegram-read-only"><td><code>telegram_read_only</code></td><td>off</td><td>Phone requests can only look: they never send, delete or buy.</td></tr>
+    <tr id="set-telegram-notify"><td><code>telegram_notify</code></td><td>on</td><td>Tracker and agent news is sent to the chat.</td></tr>
+    <tr id="set-email-enabled"><td><code>email_enabled</code></td><td>off</td><td>Email control: Mint acts on requests emailed to the address it watches.</td></tr>
+    <tr id="set-email-address"><td><code>email_address</code></td><td><i>empty</i></td><td>The address Mint watches.</td></tr>
+    <tr id="set-email-allow"><td><code>email_allow</code></td><td><code>list</code></td><td>Who may email requests: <code>list</code> (the senders in <code>email_allowed</code>) or <code>all</code> (anyone who knows a secret word, which is then required).</td></tr>
+    <tr id="set-email-allowed"><td><code>email_allowed</code></td><td><i>empty</i></td><td>Allowed senders, separated by commas. Empty = only the watched address itself.</td></tr>
+    <tr id="set-email-prefix"><td><code>email_prefix</code></td><td><code>Mint:</code></td><td>Only mail whose subject starts with this is a request.</td></tr>
+    <tr id="set-email-read-only"><td><code>email_read_only</code></td><td>off</td><td>Emailed requests can only look: they never send, delete or buy.</td></tr>
+    <tr id="set-email-backend"><td><code>email_backend</code></td><td><code>auto</code></td><td>How mail is read: <code>imap</code> (IMAP and SMTP with an app password kept in the Keychain), <code>mail</code> (the Mail app's account, no password), or <code>auto</code> (IMAP when an app password is saved, else Mail).</td></tr>
+    <tr id="set-email-mail-account"><td><code>email_mail_account</code></td><td><i>empty</i></td><td>With the Mail app: the account watched. Empty = every inbox.</td></tr>
+    <tr id="set-email-imap-host"><td><code>email_imap_host</code></td><td><i>empty</i></td><td>The IMAP server. Empty = worked out from the address (Gmail, iCloud, Fastmail, Yahoo; otherwise <code>imap.</code> plus the domain).</td></tr>
+    <tr id="set-email-smtp-host"><td><code>email_smtp_host</code></td><td><i>empty</i></td><td>The SMTP server, as <code>host</code> or <code>host:port</code>. Empty = worked out from the address.</td></tr>
+    <tr id="set-email-auth-server"><td><code>email_auth_server</code></td><td><i>empty</i></td><td>Whose Authentication-Results header to trust when checking the sender. Empty = <code>mx.google.com</code> for Gmail.</td></tr>
+  </table></div>
+  <p>Replies only ever go to the verified sender of a request.</p>
+</section>
+
+<section id="config-models" data-group="Configuration">
+  <h2>Voice models and reliability</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-voice-models"><td><code>voice_models</code></td><td><i>empty</i></td><td>The live voice models to use, best first. Empty = Mint's own pool.</td></tr>
+    <tr id="set-switch-when-slow"><td><code>switch_when_slow</code></td><td>on</td><td>When a voice model stalls, answers slowly or fails, use the next one for a while.</td></tr>
+    <tr id="set-live-tpm-limit"><td><code>live_tpm_limit</code></td><td><code>65000</code></td><td>Each voice model's tokens-a-minute limit, used to spread the load.</td></tr>
+    <tr id="set-auto-compact"><td><code>auto_compact</code></td><td>on</td><td>Near the voice model's context limit, shorten the conversation at a quiet moment instead of letting the oldest turns drop.</td></tr>
+    <tr id="set-tool-diet"><td><code>tool_diet</code></td><td>on</td><td>The voice session declares only the everyday tools and finds the rest when needed. Off = declare every tool (from the next start).</td></tr>
+    <tr id="set-gemini-key-mode"><td><code>gemini_key_mode</code></td><td><code>split</code></td><td>With two Gemini keys: <code>split</code> (the voice on key 1, everything else on key 2) or <code>primary</code> (key 1 first, key 2 as backup). Either way each key covers for the other when it is rate-limited.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-updates" data-group="Configuration">
+  <h2>Updates</h2>
+  <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+    <tr id="set-auto-update"><td><code>auto_update</code></td><td>on</td><td>Check at launch and every 12 hours, and install a new version while the Mac is idle. See <a href="settings#updates">Updates</a>.</td></tr>
+    <tr id="set-update-channel"><td><code>update_channel</code></td><td><code>stable</code></td><td><code>stable</code>, or <code>beta</code> to get pre-releases too.</td></tr>
+  </table></div>
+</section>
+
+<section id="config-env" data-group="Configuration">
+  <h2>Environment variables</h2>
+  <p class="lead">Put these in <code>.env</code> (see <a href="#config-files">Where settings live</a>), one <code>NAME=value</code> per line. Values already set in the environment win. Restart Mint after a change.</p>
+  <h3>Keys</h3>
+  <div class="table"><table><tr><th>Variable</th><th>Default</th><th>What it's for</th></tr>
+    <tr id="env-gemini-api-key"><td><code>GEMINI_API_KEY</code></td><td><i>not set</i></td><td>Required: Mint's voice and most of its work. Free at <a href="https://aistudio.google.com/apikey">Google AI Studio</a>.</td></tr>
+    <tr id="env-gemini-api-key-2"><td><code>GEMINI_API_KEY_2</code></td><td><i>not set</i></td><td>Optional second Gemini key: doubles the free limits, and each key covers for the other.</td></tr>
+    <tr id="env-openai-api-key"><td><code>OPENAI_API_KEY</code></td><td><i>not set</i></td><td>Agents on OpenAI models.</td></tr>
+    <tr id="env-anthropic-api-key"><td><code>ANTHROPIC_API_KEY</code></td><td><i>not set</i></td><td>Agents on Claude models.</td></tr>
+    <tr id="env-openrouter-api-key"><td><code>OPENROUTER_API_KEY</code></td><td><i>not set</i></td><td>Agents on any model OpenRouter offers.</td></tr>
+    <tr id="env-groq-api-key"><td><code>GROQ_API_KEY</code></td><td><i>not set</i></td><td>Agents on Groq's fast open models.</td></tr>
+    <tr id="env-xai-api-key"><td><code>XAI_API_KEY</code></td><td><i>not set</i></td><td>Agents on xAI's Grok.</td></tr>
+    <tr id="env-typesafe-api-key"><td><code>TYPESAFE_API_KEY</code></td><td><i>not set</i></td><td>Jev, the fast chooser (which button, which skill, which memory), and the <code>desktop</code> tool for multi-step clicking in any app.</td></tr>
+    <tr id="env-exa-api-key"><td><code>EXA_API_KEY</code></td><td><i>not set</i></td><td>Better web search for agents (DuckDuckGo otherwise).</td></tr>
+    <tr id="env-tavily-api-key"><td><code>TAVILY_API_KEY</code></td><td><i>not set</i></td><td>Better web search for agents, if you have no Exa key.</td></tr>
+    <tr id="env-telegram-bot-token"><td><code>TELEGRAM_BOT_TOKEN</code></td><td><i>not set</i></td><td>Your own Telegram bot, for <a href="remote#telegram">control from your phone</a>.</td></tr>
+  </table></div>
+  <h3>Other servers</h3>
+  <div class="table"><table><tr><th>Variable</th><th>Default</th><th>What it's for</th></tr>
+    <tr id="env-openai-base-url"><td><code>OPENAI_BASE_URL</code></td><td><code>https://api.openai.com/v1</code></td><td>Another address for the OpenAI API (a proxy or a compatible server).</td></tr>
+    <tr id="env-anthropic-base-url"><td><code>ANTHROPIC_BASE_URL</code></td><td><i>not set</i></td><td>Another address for the Anthropic API.</td></tr>
+    <tr id="env-openrouter-base-url"><td><code>OPENROUTER_BASE_URL</code></td><td><i>not set</i></td><td>Another address for OpenRouter.</td></tr>
+    <tr id="env-groq-base-url"><td><code>GROQ_BASE_URL</code></td><td><i>not set</i></td><td>Another address for Groq.</td></tr>
+    <tr id="env-xai-base-url"><td><code>XAI_BASE_URL</code></td><td><i>not set</i></td><td>Another address for xAI.</td></tr>
+    <tr id="env-ollama-base-url"><td><code>OLLAMA_BASE_URL</code></td><td><i>not set</i></td><td>Where Ollama runs, for local models. Settings ▸ Models &amp; agents wins over it; otherwise <code>http://localhost:11434/v1</code>.</td></tr>
+  </table></div>
+  <h3>Behaviour</h3>
+  <div class="table"><table><tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
+    <tr id="env-mint-allow-shell"><td><code>MINT_ALLOW_SHELL</code></td><td><i>not set</i></td><td><code>1</code> turns on the shell tool. It is the one tool that can do arbitrary damage, so it is off unless you ask for it.</td></tr>
+    <tr id="env-mint-allow-search"><td><code>MINT_ALLOW_SEARCH</code></td><td><i>not set</i></td><td><code>1</code> lets the voice model use Google Search grounding. Off because it is billed separately, and on a free key the session is refused.</td></tr>
+    <tr id="env-mint-desktop-timeout"><td><code>MINT_DESKTOP_TIMEOUT</code></td><td><code>75</code></td><td>Seconds to wait for one <code>desktop</code> goal before giving up.</td></tr>
+    <tr id="env-mint-sleep-after"><td><code>MINT_SLEEP_AFTER</code></td><td><code>12</code></td><td>Seconds of quiet before Mint stops streaming and waits for the wake word again.</td></tr>
+    <tr id="env-mint-wake-threshold"><td><code>MINT_WAKE_THRESHOLD</code></td><td><code>0.5</code></td><td>How sure the wake word detector must be, from 0 to 1. Higher means fewer false wakes and more missed ones.</td></tr>
+    <tr id="env-mint-transcribe"><td><code>MINT_TRANSCRIBE</code></td><td><i>not set</i></td><td><code>gemini</code> sends a video's audio to Gemini instead of transcribing it on this Mac (for videos without captions).</td></tr>
+    <tr id="env-mint-meeting-keep-wav"><td><code>MINT_MEETING_KEEP_WAV</code></td><td><i>not set</i></td><td><code>1</code> keeps the uncompressed meeting recordings too.</td></tr>
+    <tr id="env-mint-no-learning"><td><code>MINT_NO_LEARNING</code></td><td><i>not set</i></td><td>Any value stops Mint from writing new skills from experience.</td></tr>
+    <tr id="env-mint-debug"><td><code>MINT_DEBUG</code></td><td><i>not set</i></td><td>Any value prints each internal step to the log.</td></tr>
+  </table></div>
+  <h3>Models</h3>
+  <p>Each of these puts one model first for one job; the built-in list stays behind it as a fallback. Leave them unset unless you are testing models.</p>
+  <div class="table"><table><tr><th>Variable</th><th>Default</th><th>The job</th></tr>
+    <tr id="env-mint-model"><td><code>MINT_MODEL</code></td><td><code>models/gemini-3.8-live</code></td><td>The live voice model (also <code>voice_models</code> in settings).</td></tr>
+    <tr id="env-mint-fallback-model"><td><code>MINT_FALLBACK_MODEL</code></td><td><code>models/gemini-3.1-flash-live-preview</code></td><td>The live voice model used when the first one is out of quota.</td></tr>
+    <tr id="env-mint-voice"><td><code>MINT_VOICE</code></td><td><code>Zephyr</code></td><td>The voice, when <code>voice_name</code> is empty.</td></tr>
+    <tr id="env-mint-worker-models"><td><code>MINT_WORKER_MODELS</code></td><td><i>not set</i></td><td>Background jobs, comma-separated, best first.</td></tr>
+    <tr id="env-mint-lite-model"><td><code>MINT_LITE_MODEL</code></td><td><i>not set</i></td><td>Quick background requests.</td></tr>
+    <tr id="env-mint-summary-model"><td><code>MINT_SUMMARY_MODEL</code></td><td><i>not set</i></td><td>Summarizing the conversation for memory.</td></tr>
+    <tr id="env-mint-compact-model"><td><code>MINT_COMPACT_MODEL</code></td><td><i>not set</i></td><td>Compacting a long conversation.</td></tr>
+    <tr id="env-mint-embed-model"><td><code>MINT_EMBED_MODEL</code></td><td><i>not set</i></td><td>Embeddings for finding memories.</td></tr>
+    <tr id="env-mint-ground-model"><td><code>MINT_GROUND_MODEL</code></td><td><i>not set</i></td><td>Finding the control you meant on screen.</td></tr>
+    <tr id="env-mint-notes-model"><td><code>MINT_NOTES_MODEL</code></td><td><i>not set</i></td><td>Writing meeting notes.</td></tr>
+    <tr id="env-mint-transcribe-model"><td><code>MINT_TRANSCRIBE_MODEL</code></td><td><i>not set</i></td><td>Transcribing a video's audio with Gemini.</td></tr>
+    <tr id="env-mint-parakeet-model"><td><code>MINT_PARAKEET_MODEL</code></td><td><code>mlx-community/parakeet-tdt-0.6b-v3</code></td><td>Transcribing a video's audio on this Mac.</td></tr>
+    <tr id="env-mint-video-model"><td><code>MINT_VIDEO_MODEL</code></td><td><i>not set</i></td><td>Writing a video's digest.</td></tr>
+    <tr id="env-mint-edit-model"><td><code>MINT_EDIT_MODEL</code></td><td><i>not set</i></td><td>Planning video edits.</td></tr>
+    <tr id="env-mint-screenrec-model"><td><code>MINT_SCREENREC_MODEL</code></td><td><i>not set</i></td><td>Finding the window or area to record.</td></tr>
+    <tr id="env-mint-teach-model"><td><code>MINT_TEACH_MODEL</code></td><td><i>not set</i></td><td>Writing up a skill you taught.</td></tr>
+    <tr id="env-typesafe-model"><td><code>TYPESAFE_MODEL</code></td><td><i>not set</i></td><td>The model Jev uses for web goals.</td></tr>
+  </table></div>
+</section><nav class="pager" aria-label="Previous and next page"><a class="prev" href="settings"><small>Previous</small><span>Settings and updates</span></a><a class="next" href="troubleshooting"><small>Next</small><span>Troubleshooting</span></a></nav></article></div><footer><span>Hey Mint · open-source voice assistant for macOS · GPL-3.0</span><span class="grow"></span>
+<a href="../docs">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a href="https://github.com/shivatmax/hey-mint/releases">Releases</a><a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">Contribute</a></footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<script src="../assets/docs-index.js"></script>
+<script src="../assets/guide.js"></script><script src="../assets/critters.js"></script>
+</body></html>

@@ -344,6 +344,7 @@ def drag(paths: list[str], app: dict) -> str:
         time.sleep(0.3)
     if target is None:
         return f"{app['name']} has no window to drop into"
+    __import__("mint.ui.window_glow", fromlist=["glow"]).glow(point=target, seconds=6.0)   # where the file lands
     notch_search.show(paths=paths[:1], query="", title=f"To {app['name']}")
     start = None
     for _ in range(12):                          # the notch grows and the tile lands
@@ -382,6 +383,7 @@ def drag(paths: list[str], app: dict) -> str:
         time.sleep(0.12)
     fx.click(target[0], target[1], f"Into {app['name']}")
     _post(Quartz.kCGEventLeftMouseUp, *target)
+    __import__("mint.ui.sfx", fromlist=["play"]).play("drop")
     time.sleep(0.35)
     _glide(Quartz.kCGEventMouseMoved, target, home, 0.35)
     if not picked:

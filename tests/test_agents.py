@@ -200,7 +200,7 @@ def test_settings_merge_keeps_everything_else(tmp_path, monkeypatch):
     data = json.loads(settings.read_text())
     assert data["model"] == "opus"
     assert data["hooks"]["PreToolUse"][0] == {"hooks": [other]}           # theirs first, untouched
-    assert data["hooks"]["PreToolUse"][1]["matcher"] == "Bash"              # Mint's guard (shell commands)
+    assert "Bash" in data["hooks"]["PreToolUse"][1]["matcher"].split("|")  # Mint's guard (shell commands)
     assert data["hooks"]["Stop"][0] == {"hooks": [other]} and len(data["hooks"]["Stop"]) == 2
     assert data["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"] >= 120
     assert agent_hooks.install() == "Already connected."                 # idempotent

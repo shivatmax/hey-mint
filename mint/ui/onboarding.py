@@ -1,12 +1,14 @@
 """Onboarding: the first thing a new user sees, and the "Welcome tour…" in the menu bar.
 
-Eight pages in one window, each fading and springing in:
+Nine pages in one window, each fading and springing in:
 
   welcome      Mint's face (it follows your pointer), what Mint is, Get started.
   about        your name, what to call Mint (a new name gets its own wake word), where Mint lives (in the notch
                or floating), what you do - shown back in a live preview. Saved to Settings ▸ You.
   connect      the Gemini API key: where to get it (three steps, AI Studio opens in one click), paste, and a
                check with Google that it works. Saved to .env (mode 600); the session waits for it.
+  jev          optional: a TypeSafe key for Jev (faster, surer clicking on sites and in apps). The console's keys
+               page opens in one click; paste, a check with TypeSafe, saved to .env. Skip leaves Gemini deciding.
   voice        six voices to tap and hear (voices.preview); the pick is Settings ▸ Voice.
   permissions  Microphone, Accessibility, Screen Recording, Input Monitoring, Calendars and
                Reminders: why each is needed, Allow (macOS's own prompt, or its Settings pane), and
@@ -39,8 +41,10 @@ from mint.core import prefs
 log = logging.getLogger("mint.ui.onboarding")
 
 W, H = 980, 660
-PAGES = ("welcome", "about", "connect", "voice", "permissions", "shortcuts", "tour", "done")
+PAGES = ("welcome", "about", "connect", "jev", "voice", "permissions", "shortcuts", "tour", "done")
 STUDIO = "https://aistudio.google.com/apikey"
+TYPESAFE_KEYS = "https://console.typesafe.ai/keys"          # TypeSafe's quickstart: "Get your API key" there
+JEV_ENV = "TYPESAFE_API_KEY"
 TOP, BOTTOM = (0.95, 0.97, 1.0), (0.80, 0.87, 1.0)       # a pale sky, lighter at the top
 INK = (0.07, 0.11, 0.22)                                    # deep navy text
 DIM = (0.36, 0.42, 0.56)
@@ -209,6 +213,39 @@ def _verify_key(key: str) -> tuple[str, str]:
         return "bad", f"Google answered {error.code}: {str(detail.get('message') or '')[:120]}"
     except (urllib.error.URLError, TimeoutError, OSError):
         return "offline", "Couldn't reach Google to check it - saved anyway. I'll connect when you're online."
+
+
+def _verify_jev_key(key: str) -> tuple[str, str]:
+    """("ok" | "bad" | "offline", words): one tiny Jev question with this key (in a header, never the URL)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from mint.core import jev
+    body = {"model": jev.MODEL, "state": {"check": "Mint's setup"},
+            "questions": {"ok": {"type": "choice", "instructions": "Pick yes.", "criteria": {"yes": "Yes", "no": "No"}}}}
+    request = urllib.request.Request(jev.URL, data=json.dumps(body).encode(), method="POST",
+                                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            json.loads(reply.read() or b"{}")
+        return "ok", ""
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            return "bad", "TypeSafe says this key isn't valid. Copy it again from the console (no spaces)."
+        if error.code == 429:
+            return "ok", ""                     # valid, just busy
+        return "bad", f"TypeSafe answered {error.code}. Try the key again, or skip - Jev is optional."
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "offline", "Couldn't reach TypeSafe to check it - saved anyway."
+
+
+def _save_jev_key(key: str) -> None:
+    """Into .env (mode 600) and this process; Jev's cached key is dropped so it's used at once."""
+    from mint.core import jev
+    from mint.agents import catalog
+    catalog.write_key(JEV_ENV, key)
+    jev._key = None
 
 
 def _caps(value: str) -> list[str]:
@@ -522,6 +559,8 @@ class Onboarding:
         label = {"permissions": "Continue", "tour": "Finish tour"}.get(name, "Continue")
         if name == "connect" and not self._has_key():
             label = "Skip for now"
+        if name == "jev" and not os.environ.get(JEV_ENV):
+            label = "Skip"
         self.next_button.label.setStringValue_(label)
         self._center(self.next_button)
 
@@ -913,6 +952,117 @@ class Onboarding:
             ny += used + 14
         items.append((card, 0.18, 0.94))
         return items
+
+    # jev: the optional TypeSafe key
+
+    def _page_jev(self, page) -> list:
+        items = self._heading(page, "Optional", "Make me quicker with Jev.",
+                              "Jev picks the right button, link or field in a fraction of a second, so I click "
+                              "around websites and apps faster and more surely. You can skip this - then Gemini "
+                              "makes those choices.")
+        steps = (("Open TypeSafe's console", "Sign in, then go to API keys."),
+                 ("Create a key", "Copy the key it shows."),
+                 ("Paste it here", "I'll check it with TypeSafe and save it."))
+        y = 206
+        for n, (title, text) in enumerate(steps, 1):
+            badge = gfx.number_badge(str(n), 26, _cg(SKY), _cg(WHITE), 13)
+            holder = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(80, y + 2, 26, 26))
+            holder.setWantsLayer_(True)
+            badge.setPosition_(Quartz.CGPointMake(13, 13))
+            holder.layer().addSublayer_(badge)
+            page.addSubview_(holder)
+            items.append(holder)
+            items.append(self._label(page, title, 120, y, 300, size=16, weight=AppKit.NSFontWeightSemibold))
+            items.append(self._label(page, text, 120, y + 24, 400, size=13, rgb=DIM))
+            if n == 1:
+                items.append(self._pill(page, "console.typesafe.ai", 364, y - 2, 210, 36, self._open_typesafe,
+                                        primary=False, symbol="arrow.up.right", size=13, trailing=True))
+            y += 64
+        has = bool(os.environ.get(JEV_ENV))
+        box = self._secret_field(page, "jev_key", 80, y + 4, 380,
+                                 "Saved ✓ - paste a new key to replace it" if has else "Paste your TypeSafe API key")
+        items.append(box)
+        items.append(self._pill(page, "Paste", 470, y + 4, 104, 46, self._paste_jev, primary=True,
+                                symbol="doc.on.clipboard", size=14))
+        self.jev_status = self._label(page, "", 80, y + 60, 494, size=13, weight=AppKit.NSFontWeightMedium, lines=2)
+        items.append(self.jev_status)
+        if has:
+            self._jev_said("ok", "Jev is set up.")
+        card = self._card(page, 620, 196, 280, 300, radius=22)
+        self._tile(card, "bolt.fill", (0.64, 0.47, 1.0), 24, 24, size=38)
+        self._label(card, "Good to know", 24, 76, 232, size=15, weight=AppKit.NSFontWeightSemibold)
+        notes = ("Optional: everything works without it.",
+                 "The key stays on this Mac, in a file only you can read.",
+                 "Add or change it any time in Settings ▸ Models & agents.")
+        ny = 104
+        for note in notes:
+            dot = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(24, ny + 3, 12, 12))
+            dot.setImage_(gfx.symbol("checkmark", 10, weight="bold"))
+            dot.setContentTintColor_(_ns(OK))
+            card.addSubview_(dot)
+            label = self._label(card, note, 44, ny, 214, size=13, rgb=DIM, lines=3, h=54)
+            used = label.cell().cellSizeForBounds_(AppKit.NSMakeRect(0, 0, 214, 200)).height
+            ny += used + 14
+        items.append((card, 0.18, 0.94))
+        return items
+
+    def _open_typesafe(self) -> None:
+        AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(TYPESAFE_KEYS))
+        self._jev_said("info", "TypeSafe's console is open in your browser. Create a key, copy it, then press Paste.")
+
+    def _paste_jev(self) -> None:
+        text = AppKit.NSPasteboard.generalPasteboard().stringForType_(AppKit.NSPasteboardTypeString) or ""
+        text = "".join(str(text).split())
+        if not text:
+            self._jev_said("bad", "The clipboard is empty. Copy the key in TypeSafe's console first.")
+            return
+        field = self.fields.get("jev_key")
+        if field is not None:
+            field.setStringValue_(text)
+        self._check_jev(text)
+
+    def _jev_said(self, kind: str, words: str) -> None:
+        if getattr(self, "jev_status", None) is None:
+            return
+        rgb = {"ok": OK, "bad": (0.85, 0.22, 0.2), "info": DIM, "busy": DEEP}.get(kind, DIM)
+        mark = {"ok": "✓  ", "bad": "✕  ", "busy": "…  "}.get(kind, "")
+        self.jev_status.setStringValue_(mark + words)
+        self.jev_status.setTextColor_(_ns(rgb))
+        _enter(self.jev_status, 0.0, rise=6)
+        if kind == "ok":
+            self._paint_chrome(animated=False)
+
+    def _check_jev(self, key: str) -> None:
+        """Ask TypeSafe whether the key works, then save it. Off the main thread."""
+        key = "".join(str(key or "").split())
+        if len(key) < 16:
+            self._jev_said("bad", "That doesn't look like a whole key. Copy it again from the console.")
+            return
+        self._jev_said("busy", "Checking the key with TypeSafe…")
+
+        def run():
+            verdict, words = _verify_jev_key(key)
+            if verdict in ("ok", "offline"):
+                try:
+                    _save_jev_key(key)
+                except Exception as error:
+                    verdict, words = "bad", f"Couldn't save it: {error}"
+            AppHelper.callAfter(self._jev_checked, verdict, words)
+        threading.Thread(target=run, name="onboarding-jev-key", daemon=True).start()
+
+    def _jev_checked(self, verdict: str, words: str) -> None:
+        if self.view is None or PAGES[self.page] != "jev":
+            return
+        if verdict == "ok":
+            self._jev_said("ok", "Jev is set up. Clicking just got quicker.")
+            for orb, _host in self.orbs:
+                orb.celebrate()
+        elif verdict == "offline":
+            self._jev_said("info", words)
+        else:
+            field = self.fields.get("jev_key")
+            self._bad_jev = "".join(str(field.stringValue()).split()) if field is not None else None
+            self._jev_said("bad", words)
 
     def _secret_field(self, view, key, x, y, w, placeholder):
         box = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, 46))
@@ -1579,6 +1729,13 @@ class Onboarding:
                     catalog.write_key(config.API_KEY_ENV, typed)
                 except Exception:
                     log.exception("saving the Gemini key")
+        elif name == "jev" and self.fields.get("jev_key") is not None:
+            typed = "".join(str(self.fields["jev_key"].stringValue()).split())
+            if len(typed) >= 16 and typed != (os.environ.get(JEV_ENV) or "") and typed != getattr(self, "_bad_jev", None):
+                try:
+                    _save_jev_key(typed)
+                except Exception:
+                    log.exception("saving the TypeSafe key")
         elif name == "voice" and self.voice and self.voice != str(prefs.get("voice_name") or config.VOICE):
             prefs.set("voice_name", self.voice)
         elif name == "shortcuts" and self.recording:

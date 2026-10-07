@@ -1,0 +1,76 @@
+<!-- The Architecture page, adapted from docs/architecture.md in the public repo. Module names are the public
+     repo's packages (mint.app, mint.core, ...). -->
+<section id="arch-overview" data-group="Architecture">
+  <h2>The big picture</h2>
+  <p class="lead">One process, one conversation. Gemini Live listens, speaks and decides which tool to call; everything else is there to make those calls quick, sure and safe.</p>
+<pre>
+ microphone ─▶ wake word (on device) ─▶ voice lock ─▶ Gemini Live ─▶ speaker
+                                                        │   ▲
+                                              tool calls│   │results
+                                                        ▼   │
+                            mint.tools ── mint.screen ── mint.knowledge ── mint.agents
+                                                        │
+                                                        ▼
+                                  mint.ui: the orb, captions, chat, marks, critters
+</pre>
+  <p><b>Gemini Live</b> listens, speaks and picks tools. <b>Jev</b>, a fast chooser, picks from real lists wherever a guess would be risky: which control to press, which skill fits, which memories matter, which app was meant. Long jobs go to <a href="#agents">agents</a> that run in the background and report back.</p>
+  <ul class="plain">
+    <li><b>Direct routes first.</b> Menus, the accessibility tree, AppleScript and web APIs before pixels; the pointer moves only when nothing else can do the job.</li>
+    <li><b>On device where it matters.</b> The wake word, the voice lock and speaker checks run locally; nothing leaves the Mac while Mint is asleep.</li>
+    <li><b>Learns.</b> Tasks that took many steps or needed your correction become <a href="#skills">skills</a>, ranked by how often they work.</li>
+    <li><b>Cheap to watch.</b> A video becomes a transcript and about 12 keyframes on one contact sheet: about 6k tokens for a 15-minute talk instead of about 180k.</li>
+  </ul>
+</section>
+
+<section id="arch-packages" data-group="Architecture">
+  <h2>The packages</h2>
+  <p class="lead">The Python side is the <code>mint</code> package, in eight parts.</p>
+  <div class="table"><table><tr><th>Package</th><th>What it does</th></tr>
+    <tr><td><code>mint.app</code></td><td>Startup, the Live session and its lifecycle: audio in and out, tool calls, wake and sleep, reconnects; finishing multi-part requests; “stop”; quitting and the login item; plans that survive restarts; simple voice commands run locally; Telegram; updates; Report a problem.</td></tr>
+    <tr><td><code>mint.core</code></td><td>Shared configuration and services: keys, models and the system instruction; <code>settings.json</code> and <code>custom.json</code>; Jev; Gemini requests for background jobs, with retries across models; global shortcuts; token usage per model per day.</td></tr>
+    <tr><td><code>mint.voice</code></td><td>Listening and speaking: the audio engine with voice processing, the “Hey Mint” detector, the voice lock and enrolment, words it gets wrong, the voices, dictation, and training a custom wake phrase on this Mac.</td></tr>
+    <tr><td><code>mint.knowledge</code></td><td>What Mint knows: the conversation and its rolling summary, memory (one fact per block, keeping earlier values, tidied daily), the journal of what happened when, the opt-in timeline, skills, teaching, and the learner that writes skills from experience.</td></tr>
+    <tr><td><code>mint.tools</code></td><td>Everything Gemini can call: files, web, browser, menus, AppleScript, calendar and reminders, the clipboard, videos, automations, meetings, documents, the Mac's switches, screen recording, trackers, undo and more. See <a href="#tools">Every tool</a>.</td></tr>
+    <tr><td><code>mint.screen</code></td><td>Seeing and acting on the screen: Accessibility, finding the control you meant, on-device text recognition, screenshots for the model, finding words and marking them.</td></tr>
+    <tr><td><code>mint.ui</code></td><td>Everything drawn: the menu bar, the orb and its face, the island, chat, Settings, the skills and memory window, effects, expressions, 60 fps motion, marks, critters, screen-share visibility, on-screen lessons, the welcome window.</td></tr>
+    <tr><td><code>mint.agents</code></td><td>Background agents: the hub and each agent's tool loop, the agents list, model providers, the Codex runner, agents asking agents, and the tools Gemini uses to delegate.</td></tr></table></div>
+</section>
+
+<section id="arch-flow" data-group="Architecture">
+  <h2>How a request flows</h2>
+  <ol class="steps">
+    <li><b>Wake.</b> The wake word detector scores 80 ms frames on the Mac. With a trained voice, the voice lock checks who is speaking before any audio leaves the Mac.</li>
+    <li><b>Understand.</b> Audio streams to Gemini Live. The phrase “Hey Mint” itself is cut out so it is not transcribed as a word.</li>
+    <li><b>Act.</b> Gemini calls tools. Direct routes come first: menus and the accessibility tree, AppleScript, the browser's own scripting, file and web APIs. The pointer moves only when nothing else can do the job, and every action is checked by comparing the window before and after.</li>
+    <li><b>Show.</b> Each tool call becomes an orb morph, a caption and a small flourish. None of it appears in Mint's own screenshots.</li>
+    <li><b>Remember.</b> Turns go into the conversation history and facts into memory; tasks that took many steps or needed correcting become skills. Plans are saved as they go, so “where were we?” works after a restart, and the journal answers questions about any of it by date.</li>
+  </ol>
+  <h3>Running by itself</h3>
+  <p><a href="#automations">Automations</a> check their schedules and watchers every 15 seconds and hand what is due to the session as a message Mint acts on. When the Python process has unloaded, it has already written the next due time down; Mint Ear checks it every 30 seconds and starts Mint in time.</p>
+  <h3>Watching a video</h3>
+  <p>Two jobs run side by side. Speech: the site's captions, or the audio transcribed (on the Mac, or by Gemini in two-minute pieces). Pictures: about 100 small frames are sampled, the ones where the picture changes are kept, and about 12 are laid out on one contact sheet with their times. A Flash model then writes the digest from the transcript, the sheet and the measured pace and colours. Everything is cached per video.</p>
+</section>
+
+<section id="arch-helpers" data-group="Architecture">
+  <h2>The helper apps</h2>
+  <p class="lead">Mint.app is a small Swift launcher with a few native helpers inside it.</p>
+  <div class="table"><table><tr><th>Helper</th><th>What it does</th></tr>
+    <tr><td>Mint Ear</td><td>Keeps the wake word running in about 70 MB while the Python process is unloaded, and starts Mint when you call it or an automation is due.</td></tr>
+    <tr><td>MintEngine</td><td>The screen-control engine (adapted from <a href="https://github.com/savka777/jev-use">jev-use</a>). Started on the first <code>desktop</code> goal as a child of Mint, so it shares Mint's Accessibility permission and quits with it. It reads the front app's accessibility tree, lets Jev choose each action, performs it and checks the result, step by step until the goal is met.</td></tr>
+    <tr><td>MintScreen</td><td>Records the screen, one window or an area with ScreenCaptureKit into an H.264 .mp4, optionally with the Mac's sound and the microphone, leaving Mint's own orb out. The window or area is shown as a box first and recorded only after you say yes.</td></tr>
+    <tr><td>MintRecorder</td><td>The meeting recorder: the call's audio (through a Core Audio process tap) and the microphone, to two tracks on one clock. Both are transcribed in parallel, speech detection on the Mac sets the times, and Gemini writes the notes.</td></tr></table></div>
+</section>
+
+<section id="arch-safety" data-group="Architecture">
+  <h2>Safety by construction</h2>
+  <ul class="plain">
+    <li>Password fields are never typed into, and secrets are refused by the file, memory and skill writers.</li>
+    <li>Sending, submitting, deleting and quitting need an explicit request, and the same message is never sent twice within two minutes. <a href="#guard">The guard</a> asks before anything is deleted or changed.</li>
+    <li>What Mint reads (pages, emails, files) is information, never instructions: <a href="#outside-text">pages and emails can't give Mint orders</a>.</li>
+    <li>AppleScript cannot run shell commands; the shell tool is off unless <a href="#env-mint-allow-shell"><code>MINT_ALLOW_SHELL=1</code></a>.</li>
+    <li>“Stop” cancels queued clicks and keys immediately.</li>
+  </ul>
+  <h3>Data on your Mac</h3>
+  <p>Keys (<code>.env</code>, readable only by you), <code>settings.json</code>, <code>custom.json</code>, the agents list, memory, skills, your voice enrolment, the conversation history, plans, automations and, when it is on, the timeline all stay in Mint's folder on your Mac (see <a href="#config-files">Where settings live</a>). The log is at <code>~/Library/Logs/Mint/mint.log</code>. None of it is in the repository.</p>
+  <p>For working on Mint itself, see the <a href="{{repo}}/blob/main/docs/architecture.md">architecture notes</a> and the <a href="{{repo}}/blob/main/docs/development.md">developer handbook</a>.</p>
+</section>

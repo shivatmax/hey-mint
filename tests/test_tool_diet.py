@@ -45,7 +45,7 @@ def test_core_set_is_stable_and_small(full):
     again = _names(tool_diet.live_tools(tools.tools()))
     assert first == again                                   # the same list every time it is built
     assert set(first) == (tool_diet.CORE & set(_names(full))) | set(tool_diet.BRIDGE)
-    assert 45 <= len(first) <= 70, len(first)
+    assert 45 <= len(first) <= 72, len(first)
     assert len(first) < len(_names(full)) * 0.6
     for everyday in ("open_app", "type_text", "set_timer", "set_volume", "media_key", "music", "stop_listening",
                      "create_reminder", "web_search", "look", "background_task", "remember", "recall"):

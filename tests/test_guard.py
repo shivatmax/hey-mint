@@ -142,7 +142,7 @@ def test_claude_code_hook_guard(tmp_path):
     assert run("echo x > ~/Library/Application\\ Support/Mint/settings.json")["permissionDecision"] == "ask"
     assert run("ls ~/.claude && cat ~/.codex/config.toml") is None             # reading is fine
     groups = agent_hooks._merged({}, True)["hooks"]["PreToolUse"]
-    assert groups[0]["matcher"] == "Bash"
+    assert "Bash" in groups[0]["matcher"].split("|")
 
 
 # --- the circuit breaker, Mint's own files, answering several questions at once ----------------------------

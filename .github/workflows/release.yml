@@ -23,7 +23,7 @@ jobs:
       HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_NOTARY: ${{ secrets.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with: {fetch-depth: 0}
       - name: Tools (the newest Xcode on the runner, portaudio)
         run: |
@@ -75,7 +75,7 @@ jobs:
           exit $status
       - name: Publish the release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist/*.dmg
@@ -83,13 +83,22 @@ jobs:
             dist/latest.json
           generate_release_notes: true
           body: |
-            ## Install
-            1. Download the **Hey-Mint-…-arm64.dmg** below (Apple silicon Macs, macOS 14.2 or later).
-            2. Open it and drag **Hey Mint** into Applications.
-            3. Open Hey Mint. If macOS says it can't check it for malware, open **System Settings ▸ Privacy & Security** and click **Open Anyway** (only once).
-            4. Paste your free [Gemini API key](https://aistudio.google.com/apikey) and click **Start Mint**.
-            5. Allow the Microphone, and turn on Hey Mint under **Accessibility** when asked.
+            ## Install (Apple silicon Mac, macOS 14.2 or later)
+            **Already have Hey Mint? Don't download anything** - it updates itself (Settings ▸ Updates & Help).
 
-            After that, Hey Mint installs new versions itself (Settings ▸ Updates) and keeps its permissions.
+            **Way 1 - download (no Terminal)**
+            1. Download **Hey-Mint-…-arm64.dmg** below, open it and drag **Hey Mint** onto **Applications**.
+            2. Open **Hey Mint** from Applications. macOS says *“Apple could not verify ‘Hey Mint’…”* - click **Done**.
+            3. Open **System Settings ▸ Privacy & Security**, scroll down, click **Open Anyway** next to *“Hey Mint” was blocked*, type your Mac password, then **Open Anyway** again. (macOS 14: right-click Hey Mint ▸ **Open** ▸ **Open**.)
+
+            That's once per Mac: new versions install themselves without asking. (Hey Mint is free; Apple only skips this question for developers who pay it a yearly fee.)
+
+            **Way 2 - one line in Terminal (macOS asks nothing)**
+            ```
+            curl -fsSL https://raw.githubusercontent.com/shivatmax/hey-mint/main/packaging/install.sh | bash
+            ```
+            It downloads this release, checks its sha256, puts Hey Mint in Applications, approves it with macOS and opens it.
+
+            **Then** paste your free [Gemini API key](https://aistudio.google.com/apikey) in the welcome window, allow the Microphone, and turn on Hey Mint under **Accessibility** when asked.
 
             Then say **“Hey Mint”**, or press ⌘J and type. The guide: https://hey-mint.pages.dev/

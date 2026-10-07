@@ -950,21 +950,52 @@ def _wait_running(name: str, timeout: float = 6.0):
     return None
 
 
-def _ensure_target_front() -> str:
-    """'' if fine; a FAILED message if the app Mint just opened is not in
-    front and cannot be brought there - typing then would land elsewhere."""
+def _handed_back() -> bool:
+    """Is the target an app Mint brought forward for a pointer click and then gave the front back from
+    (ground._register_target), rather than one the user asked to open or switch to?"""
+    try:
+        from mint.screen import ground
+        return _target["at"] == ground._handed_back["at"]
+    except Exception:
+        return False
+
+
+def _ensure_target_front(name: str = "", args: dict | None = None) -> tuple[str, object]:
+    """('', prior) if fine; (a FAILED message, None) if the app Mint just opened is not in front and
+    cannot be brought there - typing then would land elsewhere.
+
+    ui_act is not brought forward: it presses and types through Accessibility in an app behind the
+    user's window, and brings it forward itself only for the pointer or keyboard - so it is told the
+    app instead. `prior` is the user's app to give the front back to after the tool, when the target is
+    one Mint only borrowed the front for (not one the user asked for); else None."""
     app = _target["app"]
     if app is None or time.monotonic() - _target["at"] > TARGET_FOR or app.isTerminated():
-        return ""
+        return "", None
     front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
     if front is not None and front.processIdentifier() == app.processIdentifier():
-        return ""
+        return "", None
+    if name == "ui_act" and args is not None:
+        if not args.get("app"):
+            args["app"] = app.localizedName() or ""
+        return "", None
+    import os
+    prior = front if _handed_back() and front is not None and front.processIdentifier() != os.getpid() else None
     from mint.screen.ground import bring_forward
     if bring_forward(app, wait=2.0):
-        return ""
+        return "", prior
     return (f"FAILED: {app.localizedName()} is not in front ({front.localizedName() if front else 'nothing'} is), "
             "and could not be brought forward, so nothing was done - acting now would hit the wrong app. "
-            "Try switch_to it.")
+            "Try switch_to it."), None
+
+
+def _give_front_back(prior, result: str) -> str:
+    """After a keyboard/pointer tool in an app Mint brought forward only for it: the user's app gets
+    the front back, and the result says the action was not a background one."""
+    from mint.screen.ground import bring_forward
+    result = result.replace(" (background):", " (foreground):", 1)
+    if bring_forward(prior, wait=1.0):
+        result += f" ({prior.localizedName()} is back in front, as the user had it.)"
+    return result
 
 
 def _debug(text: str) -> None:
@@ -1077,12 +1108,16 @@ async def _wrapped(core, name: str, args: dict):
     field = str(args.pop("field", "") or "") if name == "type_text" else ""
     if name in _SCREEN and name != "look":
         # Act on the app that was just opened, not on whatever else is in front.
-        guard = await asyncio.to_thread(_ensure_target_front)
+        guard, prior = await asyncio.to_thread(_ensure_target_front, name, args)
         if guard:
             return guard, None
+    else:
+        prior = None
     if name == "type_text":
         prepared = await asyncio.to_thread(prepare_typing, field)
         if prepared.startswith("FAILED"):
+            if prior is not None:
+                prepared = await asyncio.to_thread(_give_front_back, prior, prepared)
             return prepared, None
         note = (" " + prepared) if prepared else ""
         if prepared and args.get("press_return") and not field:
@@ -1093,14 +1128,18 @@ async def _wrapped(core, name: str, args: dict):
                      "is the right one, then press_key return (or name the box with field=).")
 
     result, image = await core(name, args)
+    if prior is not None:
+        result = await asyncio.to_thread(_give_front_back, prior, result)
 
     if name == "type_text" and result.startswith("FAILED") and "no text field" in result:
         # A menu, popover or dialog is in front (ChatGPT's project picker, in
         # testing) and its box is not in the window type_text looks at. ui_act
         # reads every control, dialogs first, and types into the one described.
-        retry, image = await core("ui_act", {"action": "type", "text": args.get("text", ""),
-                                             "target": field or "the text box for typing here",
-                                             "press_return": bool(args.get("press_return"))})
+        retry_args = {"action": "type", "text": args.get("text", ""),
+                      "target": field or "the text box for typing here", "press_return": bool(args.get("press_return"))}
+        if prior is not None and _target["app"] is not None:
+            retry_args["app"] = _target["app"].localizedName() or ""     # the front went back to the user's app
+        retry, image = await core("ui_act", retry_args)
         if not retry.startswith(("FAILED", "Unknown", "The ui_act")):
             return retry + " (typed through ui_act - the box was in a menu or dialog)", image
         result += f" ui_act also could not: {retry[:200]}"

@@ -321,6 +321,12 @@
     if (!reduce) tick();
   }
 
+  // Docs: on a phone the page's section list starts folded.
+  if (matchMedia('(max-width: 980px)').matches) $('.side .onpage')?.removeAttribute('open');
+  // ...and the row of pages scrolls sideways to show this one.
+  const curPage = $('.side .pages a.cur'), pageRow = curPage?.parentElement;
+  if (pageRow && pageRow.scrollWidth > pageRow.clientWidth)
+    pageRow.scrollLeft += curPage.getBoundingClientRect().left - pageRow.getBoundingClientRect().left - 24;
   // Docs: the side menu follows the section you are reading.
   const links = $$('.side nav a');
   const io = new IntersectionObserver(entries => {
@@ -357,14 +363,21 @@
   $$('video').filter(v => !v.closest('[data-player]') && !v.closest('[data-film]')).forEach(v => { v.muted = true; v.loop = true; v.playsInline = true; vio.observe(v); });
 
   // Docs search: sections and every example.
+  // The index covers every docs page: a hit on this page jumps to it, others open their page.
   const input = $('#find'), hits = $('#hits');
+  const here = document.body.dataset.doc || '', docsBase = (document.body.dataset.root || '') + 'docs/';
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const where = h => (h.p === here && h.h ? '' : docsBase + h.p) + (h.h ? '#' + h.h : '');
+  const rank = (h, words) => ({page: 0, section: 1, part: 2, key: 3}[h.k] ?? 4) + (words.some(w => h.t.toLowerCase().startsWith(w)) ? 0 : .5);
   if (input && window.MINT_INDEX) {
     input.addEventListener('input', () => {
       const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
       if (!words.length) { hits.innerHTML = ''; return; }
-      const found = MINT_INDEX.filter(x => words.every(w => (x.t + ' ' + (x.w || '')).toLowerCase().includes(w))).slice(0, 8);
-      hits.innerHTML = found.length ? found.map(h => h.k === 'section' ? `<a href="#${h.h}"><b>${h.t}</b></a>`
-        : `<a href="#${h.h}"><b>“${h.t}”</b> · ${h.w}</a>`).join('')
+      const found = MINT_INDEX.filter(x => words.every(w => (x.k === 'key' ? x.t : x.t + ' ' + (x.w || '')).toLowerCase().includes(w)))
+        .sort((a, b) => rank(a, words) - rank(b, words)).slice(0, 10);
+      const label = h => h.k === 'page' ? `<b>${esc(h.t)}</b> <i>· page</i>` : h.k === 'key' ? `<b><code>${esc(h.t)}</code></b> <i>· ${esc(h.w)}</i>`
+        : h.k === 'section' || h.k === 'part' ? `<b>${esc(h.t)}</b> <i>· ${esc(h.w)}</i>` : `<b>“${esc(h.t)}”</b> <i>· ${esc(h.w)}</i>`;
+      hits.innerHTML = found.length ? found.map(h => `<a href="${where(h)}">${label(h)}</a>`).join('')
         : '<div class="none">Not here yet. Just ask Mint: it tries before it says no.</div>';
     });
     input.addEventListener('keydown', e => {

@@ -3172,6 +3172,11 @@ class Mint:
         for task in list(self._timers):
             task.cancel()
         self.audio.close()
+        try:
+            from mint.tools import cdp
+            cdp.shutdown()                    # Mint's own web browser goes with it (the user's Chrome stays)
+        except Exception:
+            log.debug("web browser shutdown failed", exc_info=True)
         # Fold the rest of today's conversation into memory before quitting,
         # but never hold up quitting for long.
         from mint.knowledge.conversation import memory

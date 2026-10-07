@@ -10,7 +10,7 @@ Pages
   Voice & wake word the wake word, training your voice, voice lock
   Speaking          which of the 30 Gemini voices, speaking style, language, captions
   Audio             microphone, speaker, echo cancellation, stepping aside for calls
-  Appearance        theme, position, face, effects
+  Appearance & Sound  where Mint lives, theme, animation level, effects, sounds and volume
   Shortcuts         keys for the chat, talking, dictation, the clipboard
   Accounts & keys   API keys (Gemini required, OpenAI and TypeSafe optional), Google via Internet Accounts
   Connectors        the apps and services Mint works with, their status, and making new ones
@@ -73,6 +73,10 @@ STYLES = [("", "Natural (no style)"), ("warm and calm", "Warm and calm"),
 VOICE_FILTERS = [("all", "All 30 voices"), ("female", "Female voices"), ("male", "Male voices")]
 UNLOAD = [(0, "Never (recommended)"), (5, "After 5 minutes asleep"), (10, "After 10 minutes asleep"),
           (20, "After 20 minutes asleep"), (30, "After 30 minutes asleep"), (60, "After an hour asleep")]
+MCP_NAMES = {"claude": "Claude Code", "codex": "Codex"}
+WHERE = [(False, "A floating orb"), (True, "The notch")]
+OPEN_TO = [("auto", "Auto"), ("home", "Home"), ("search", "Search"), ("shelf", "Shelf"), ("agents", "Coding agents")]
+MOTION = [("full", "Full (playful)"), ("calm", "Calm"), ("minimal", "Minimal (fades only)")]
 AGENT_MODES = [("auto", "Auto (while they work)"), ("on", "Always on"), ("off", "Off")]
 FOLLOW_UP = [(0, "No - always say Hey Mint"), (4, "4 seconds"), (6, "6 seconds"), (8, "8 seconds"),
              (12, "12 seconds")]
@@ -97,7 +101,7 @@ KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/api
         ("TYPESAFE_API_KEY", "TypeSafe (Jev)", "Optional - surer clicking and typing in any app")]
 PAGES = [("general", "General", "gearshape"), ("voice", "Voice & wake word", "waveform"),
          ("speaking", "Speaking", "person.wave.2"), ("audio", "Audio", "speaker.wave.2"),
-         ("looks", "Appearance", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
+         ("looks", "Appearance & Sound", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
          ("apple_shortcuts", "Apple Shortcuts", "square.stack.3d.up"),
          ("accounts", "Accounts & keys", "key"), ("connectors", "Connectors", "puzzlepiece.extension"),
          ("models", "Models & agents", "cpu"),
@@ -335,6 +339,30 @@ class SettingsWindow:
     def _row_switch(self, page, key, title, hint=""):
         card, top, x, h = page.row(title, hint, control_w=38)
         return self._switch(card, x, top + (h - 22) / 2, bool(prefs.get(key)), lambda on: prefs.set(key, on))
+
+    def _row_slider(self, page, key, title, lo, hi, hint="", w=200, on_release=None):
+        card, top, x, h = page.row(title, hint, control_w=w)
+        slider = AppKit.NSSlider.sliderWithValue_minValue_maxValue_target_action_(
+            float(prefs.get(key) if prefs.get(key) is not None else (lo + hi) / 2), lo, hi, None, None)
+        slider.setFrame_(AppKit.NSMakeRect(x, top + (h - 22) / 2, w, 22))
+        slider.setControlSize_(AppKit.NSControlSizeSmall)
+        slider.setContinuous_(True)
+
+        def moved(control):
+            prefs.set(key, round(float(control.doubleValue()), 2))
+            event = AppKit.NSApp.currentEvent()
+            if on_release is not None and event is not None and event.type() == AppKit.NSEventTypeLeftMouseUp:
+                on_release()
+        self._on(slider, moved)
+        card.addSubview_(slider)
+        return slider
+
+    def _sample_sound(self, name: str) -> None:
+        try:
+            from mint.ui import sfx
+            sfx.sample(name)
+        except Exception:
+            log.debug("sample sound failed", exc_info=True)
 
     def _row_popup(self, page, key, title, options, hint="", w=250, on_change=None):
         card, top, x, h = page.row(title, hint, control_w=w)
@@ -734,24 +762,63 @@ class SettingsWindow:
                                        "No other app is using the microphone right now.")
 
     def _facts_looks(self) -> dict:
-        return {"hooks": self._hooks_title()}
+        mcp = {}
+        try:
+            from mint.tools import agent_mcp
+            for app in ("claude", "codex"):
+                mcp[app] = None if not agent_mcp.available(app) else bool(agent_mcp.connected(app))
+        except Exception:
+            mcp = {"claude": None, "codex": None}
+        return {"hooks": self._hooks_title(), "limits": self._limits_title(), "mcp": mcp}
 
     def _page_looks(self, page, facts: dict) -> None:
-        page.section("The orb")
+        """Appearance & Sound: where Mint lives and how it looks, how much it moves, how much it makes a sound."""
+        name = prefs.name()
+        page.section("View")
+        self._row_popup(page, "notch_mode", f"Where {name} lives", WHERE,
+                        "Switching plays live: the orb flies into the notch, or drops out of it.", w=200)
         self._row_popup(page, "theme", "Theme", THEMES, w=200)
-        self._row_popup(page, "position", "Position", POSITIONS, w=200)
+        self._row_popup(page, "position", "Orb position", POSITIONS, w=200)
+        self._row_popup(page, "notch_open_to", "The open notch shows", OPEN_TO,
+                        "Auto: Home, or your coding agents while they work.", w=200)
         self._row_switch(page, "face", "Face on the orb")
+        self._row_switch(page, "menubar_face", "Face in the menu bar", "The menu bar icon is Mint's face and shows what it's doing.")
+        page.end()
+
+        page.section("Animation")
+        self._row_popup(page, "motion", "How much it moves", MOTION,
+                        "Calm: gentle, no bounce. Minimal: fades only (as with macOS Reduce motion).", w=200)
         self._row_switch(page, "auto_emotions", "Expressions during conversation",
                          "Smiles, laughs and hearts that follow what you say.")
+        self._row_switch(page, "status_badge", "Status badge",
+                         "Dots on its face while it works, red on an error, green when done. Point at it for the word.")
         self._row_switch(page, "cute_effects", "Action flourishes", "Little animations when it clicks, types or finishes.")
         self._row_switch(page, "cute_agents", "Critter helpers", "Cute critters that stand for its sub-agents.")
         self._row_switch(page, "cursor_effects", "On-screen effects", "Sparks, ripples and highlights.")
+        self._row_switch(page, "window_glow", "Glow round its window",
+                         "A soft glowing border round the window Mint is working in, so you can see where it is.")
+        self._row_switch(page, "poke_play", "Poke to play",
+                         "Click Mint: a slap. Three quick ones make it dizzy; keep going and it gets annoyed.")
+        self._row_switch(page, "greeting", "Morning hello", "A sparkly hello the first time Mint wakes up each day.")
+        self._row_switch(page, "wander", "Little trips", "Now and then the orb takes a short trip near its spot.")
+        page.end()
+
+        page.section("Sounds")
+        self._row_switch(page, "ui_sounds", "Little sounds", "Soft sounds made by Mint itself. Quiet while you dictate or are on a call.")
+        self._row_slider(page, "sound_volume", "Volume", 0.0, 1.0, on_release=lambda: self._sample_sound("done"))
+        self._row_switch(page, "sounds_notch", "Notch opening and closing")
+        self._row_switch(page, "sounds_tasks", "Tasks", "Done, failed, a message sent, a file dropped.")
+        self._row_switch(page, "sounds_play", "Play", "Pokes, dizzy and the morning hello.")
+        self._row_buttons(page, "Hear them", [("Done", 80, lambda: self._sample_sound("done")),
+                                              ("Error", 80, lambda: self._sample_sound("error")),
+                                              ("Poke", 80, lambda: self._sample_sound("poke"))])
+        page.end()
+
+        page.section("More")
         self._row_switch(page, "music_player_auto", "Music player",
                          "A mini player with the song, art and controls when Spotify or Music plays.")
         page.end()
         page.section("Notch (Dynamic Island)")
-        self._row_switch(page, "notch_mode", "Mint lives in the notch",
-                         "Like the iPhone's Dynamic Island, at the camera. Switching plays live: the orb flies in, or drops out.")
         self._row_switch(page, "notch_words", "Words in the notch", "What Mint says, word by word, as it drops down.")
         self._row_switch(page, "notch_controls", "Controls on hover", "Mic, voice, chat, sleep and more when you point at it.")
         self._row_switch(page, "notch_idle_face", "Little Mint when idle", "Off: a plain notch until something happens.")
@@ -761,10 +828,13 @@ class SettingsWindow:
         self._row_switch(page, "notch_calendar", "Calendar", "The week and today's events in the open notch.")
         self._row_switch(page, "notch_battery", "Battery", "The charge in the open notch, and a peek when you plug in or unplug.")
         self._row_switch(page, "notch_search", "Search in the notch", "Find files and apps from the notch; what Mint finds shows there too.")
+        self._row_switch(page, "notch_composer", "Type in the notch", "The + in the open notch turns it into a box to type a request.")
         page.end()
         page.section("Claude mode (coding agents)")
         self._row_popup(page, "agent_mode", "Claude Code and Codex", AGENT_MODES,
                         "Auto: the notch shows a session while it works. On: the Agents tab even when idle.", w=200)
+        self._row_switch(page, "notch_agents_bar", "Agents bar under the notch",
+                         "A slim bar with the current step while Claude Code or Codex works.")
         self._row_switch(page, "agent_approvals", "Open when an agent needs you",
                          "A permission request or a question opens the notch on it.")
         self._row_switch(page, "agent_open_on_done", "Show the summary when it finishes",
@@ -772,10 +842,27 @@ class SettingsWindow:
         self._row_popup(page, "agent_telegram", "Message me on Telegram", AGENT_TELEGRAM,
                         "When an agent needs you or finishes: Allow / Deny there, or reply to tell it what to do.",
                         w=200)
+        self._row_switch(page, "agent_checks", "Check agents' work",
+                         "Reads their test runs, risky steps and changed files; the verdict shows in alerts and answers.")
+        self._row_switch(page, "agent_fix_loop", "Send Claude back to fix failing tests",
+                         "Needs Mint's Claude Code hooks. At most twice per request.")
         self._agent_hooks_row = self._row_buttons(
             page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks)],
             "Allow, Always or Deny Claude Code's permission requests from the notch (adds a hook to "
             "~/.claude/settings.json; a backup is kept). The terminal still asks too.")
+        mcp = facts.get("mcp") or {}
+        self._mcp_buttons = dict(zip(("claude", "codex"), self._row_buttons(
+            page, "Let agents ask Mint", [(self._mcp_title(app, mcp.get(app)), {"claude": 178, "codex": 132}[app],
+                                           lambda a=app: self._toggle_mcp(a)) for app in ("claude", "codex")],
+            "Claude Code and Codex can check their own work with Mint before saying done (read-only).")))
+        for app, button in self._mcp_buttons.items():
+            if mcp.get(app) is None:
+                button.setEnabled_(False)
+                button.setToolTip_(f"{MCP_NAMES[app]} isn't installed on this Mac.")
+        self._mcp_state = dict(mcp)
+        self._agent_limits_row = self._row_buttons(
+            page, "Claude's usage limits", [(facts["limits"], 210, self._toggle_limits)],
+            "Mint reads Claude Code's 5-hour and weekly limits through a status line, and keeps showing yours.")
         page.end()
 
     def _meet_setup(self) -> None:
@@ -1510,6 +1597,8 @@ class SettingsWindow:
                           hint="Opens a new GitHub issue in your browser. Recent errors (nothing personal) are copied "
                                "for you to paste in if you like. Nothing is sent until you submit it.")
         self._row_buttons(page, "The log", [("Open log", 110, lambda: _open_file(report.LOG))])
+        self._row_buttons(page, "Is everything set up?", [("Check my setup", 140, self._check_setup)],
+                          hint="Checks permissions, keys, models and connections. Read-only.")
         if facts["can_restart"]:
             self._row_buttons(page, "Something stuck?", [(f"Restart {prefs.name()}", 130, lambda: self._restart())],
                               hint=f"Restarts {prefs.name()} - the conversation is kept. If it is too stuck to open "
@@ -1547,6 +1636,91 @@ class SettingsWindow:
             button.setTitle_(self._hooks_title())
         note = AppKit.NSAlert.alloc().init()
         note.setMessageText_("Claude Code")
+        note.setInformativeText_(said)
+        note.runModal()
+
+    def _check_setup(self) -> None:
+        def work():
+            import contextlib
+            import io
+            from mint.app import doctor
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                doctor.run()
+            return buf.getvalue().strip() or "No output."
+
+        def show(text):
+            alert = AppKit.NSAlert.alloc().init()
+            alert.setMessageText_("Mint's setup check")
+            scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 520, 300))
+            scroll.setHasVerticalScroller_(True)
+            scroll.setBorderType_(AppKit.NSBezelBorder)
+            view = AppKit.NSTextView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 520, 300))
+            view.setEditable_(False)
+            view.setFont_(AppKit.NSFont.monospacedSystemFontOfSize_weight_(11, AppKit.NSFontWeightRegular))
+            view.setString_(text)
+            view.setAutoresizingMask_(AppKit.NSViewWidthSizable)
+            scroll.setDocumentView_(view)
+            alert.setAccessoryView_(scroll)
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+        self._background("doctor", work, show)
+
+    def _mcp_title(self, app: str, on) -> str:
+        return f"{'Disconnect' if on else 'Connect'} {MCP_NAMES[app]}"
+
+    def _toggle_mcp(self, app: str) -> None:
+        from mint.tools import agent_mcp
+        on = bool(getattr(self, "_mcp_state", {}).get(app))
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_(f"Stop letting {MCP_NAMES[app]} ask Mint?" if on else f"Let {MCP_NAMES[app]} ask Mint?")
+        alert.setInformativeText_(agent_mcp.preview(app, not on))
+        alert.addButtonWithTitle_("Disconnect" if on else "Connect")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        button = getattr(self, "_mcp_buttons", {}).get(app)
+        if button is not None:
+            button.setEnabled_(False)
+
+        def work():
+            said = agent_mcp.disconnect(app) if on else agent_mcp.connect(app)
+            return said, bool(agent_mcp.connected(app))
+
+        def done(result):
+            said, now = result if isinstance(result, tuple) else (str(result), on)
+            self._mcp_state = {**getattr(self, "_mcp_state", {}), app: now}
+            if button is not None:
+                button.setTitle_(self._mcp_title(app, now))
+                button.setEnabled_(True)
+            note = AppKit.NSAlert.alloc().init()
+            note.setMessageText_(MCP_NAMES[app])
+            note.setInformativeText_(said)
+            note.runModal()
+        self._background(f"mcp-{app}", work, done)
+
+    def _limits_title(self) -> str:
+        try:
+            from mint.tools import agent_hooks
+            return "Stop showing Claude's limits" if agent_hooks.statusline_installed() else "Show Claude's usage limits"
+        except Exception:
+            return "Show Claude's usage limits"
+
+    def _toggle_limits(self) -> None:
+        from mint.tools import agent_hooks
+        on = agent_hooks.statusline_installed()
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_("Stop reading Claude's usage limits?" if on else "Show Claude's usage limits?")
+        alert.setInformativeText_(agent_hooks.statusline_preview(not on))
+        alert.addButtonWithTitle_("Stop" if on else "Show")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        said = agent_hooks.uninstall_statusline() if on else agent_hooks.install_statusline()
+        for button in getattr(self, "_agent_limits_row", None) or []:
+            button.setTitle_(self._limits_title())
+        note = AppKit.NSAlert.alloc().init()
+        note.setMessageText_("Claude's usage limits")
         note.setInformativeText_(said)
         note.runModal()
 

@@ -73,7 +73,7 @@ def draw(scale: int) -> Image.Image:
         head.append((ex + 4 * math.cos(ang) + 15 * math.cos(ang + da), ey + 4 * math.sin(ang) + 15 * math.sin(ang + da)))
     d.polygon([(a * s, b * s) for a, b in head], fill=MINT)
 
-    # The card about the installer script.
+    # The card: how to approve it the first time (Hey Mint isn't notarized; that needs a paid Apple account).
     card = (36, 262, W - 36, 420)
     smask = Image.new("L", img.size, 0)
     ImageDraw.Draw(smask).rounded_rectangle([c * s for c in (card[0], card[1] + 4, card[2], card[3] + 4)],
@@ -84,16 +84,13 @@ def draw(scale: int) -> Image.Image:
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([c * s for c in card], radius=18 * s, fill=(255, 255, 255, 215), outline=(255, 255, 255, 255),
                         width=int(1.5 * s))
-    text((60, 292), "macOS says it can't check Hey Mint?", 15, INK, anchor="lm")
-    text((60, 316), "Open Terminal, paste this line and press Return:", 12.5, DIM, "Regular", "lm")
-    pill = (58, 330, 436, 358)                   # the command, in a pill (it is also on the page the icon opens)
-    d.rounded_rectangle([c * s for c in pill], radius=8 * s, fill=(232, 244, 242, 255), outline=(200, 224, 220, 255),
-                        width=int(1 * s))
-    mono = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", int(12 * s)) if os.path.exists(
-        "/System/Library/Fonts/Menlo.ttc") else font(12 * s, "Regular")
-    d.text((70 * s, 344 * s), "curl -fsSL hey-mint.pages.dev/install.sh | bash", font=mono, fill=INK, anchor="lm")
-    text((60, 378), "It installs Hey Mint, approves it with macOS and opens it.", 12, DIM, "Regular", "lm")
-    text((60, 399), "Or: System Settings \u25B8 Privacy & Security \u25B8 Open Anyway.", 11.5, (130, 148, 152), "Regular", "lm")
+    text((60, 290), "The first time, macOS asks once:", 15, INK, anchor="lm")
+    steps = ["Open Hey Mint from Applications, then click Done.",
+             "System Settings \u25B8 Privacy & Security: scroll down,",
+             "click Open Anyway, type your password, Open Anyway.",
+             "That's all, for good: updates install themselves."]
+    for i, line in enumerate(steps):
+        text((60, 318 + i * 22), line, 12.5, DIM if i < 3 else (130, 148, 152), "Regular", "lm")
     return img.convert("RGB")
 
 

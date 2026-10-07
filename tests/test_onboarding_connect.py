@@ -77,3 +77,33 @@ def test_a_refused_key_is_not_saved_when_leaving(monkeypatch):
     o.fields = {"gemini_key": Field("AIza-unchecked-key-0000000000000")}
     o._leave()
     assert saved == ["AIza-unchecked-key-0000000000000"]
+
+
+@pytest.mark.parametrize("answer,verdict", [
+    (_Reply(b'{"answers": {}}'), "ok"),
+    (_http_error(401, {"error": "unauthorized"}), "bad"),
+    (_http_error(403, {"error": "forbidden"}), "bad"),
+    (_http_error(429, {"error": "busy"}), "ok"),
+    (urllib.error.URLError("offline"), "offline"),
+])
+def test_the_optional_jev_key_is_checked_with_typesafe(monkeypatch, answer, verdict):
+    seen = {}
+
+    def urlopen(request, timeout=0):
+        seen["url"], seen["auth"] = request.full_url, request.get_header("Authorization")
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    got, words = onboarding._verify_jev_key("ts-test-key-000000000000")
+    assert got == verdict
+    assert "ts-test" not in seen["url"] and seen["auth"] == "Bearer ts-test-key-000000000000"
+    if verdict == "bad":
+        assert words
+
+
+def test_jev_is_an_optional_page_after_gemini():
+    assert onboarding.PAGES.index("jev") == onboarding.PAGES.index("connect") + 1
+    assert onboarding.TYPESAFE_KEYS == "https://console.typesafe.ai/keys"
+    assert onboarding.JEV_ENV == "TYPESAFE_API_KEY"

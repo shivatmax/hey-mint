@@ -38,9 +38,9 @@ CORE = frozenset({
     "type_text", "press_key", "scroll", "media_key", "set_volume", "clipboard", "get_selected_text",
     # the screen
     "look", "ui_act", "ui_elements", "click_text", "click_at", "read_window", "desktop", "scroll_to", "menu",
-    "screenshot",
+    "screenshot", "verify_state",
     # files and the web
-    "read_file", "write_file", "find_files", "file_action", "web_search", "read_url", "browser", "run_applescript",
+    "read_file", "write_file", "find_files", "file_action", "web_search", "read_url", "browser", "web_goal", "run_applescript",
     # the day
     "get_status", "set_timer", "create_reminder", "calendar_events", "create_event", "create_note",
     "compose_email", "list_emails", "system_action", "mac", "music", "calculate", "undo",
@@ -135,7 +135,8 @@ FAMILIES: dict[str, dict] = {
     "coding agents and sub-agents": {
         "tools": ("claude_mode", "delegate_tasks", "create_agent", "list_agents"),
         "words": "claude code codex agent agents coding session terminal delegate sub-agent job jobs stop "
-                 "message tell",
+                 "message tell tests test passed failing green broke usage limits left standup recap handoff "
+                 "hand off continue",
         "prompts": ("notch_agents",)},
     "handing files to an app": {
         "tools": ("hand_to_app",),

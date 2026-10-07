@@ -1,0 +1,50 @@
+{
+  "total": {
+    "right": 162,
+    "wrong": 4,
+    "unsure": 8
+  },
+  "byKind": {
+    "tests": {
+      "right": 92,
+      "wrong": 0,
+      "unsure": 8
+    },
+    "why": {
+      "right": 25,
+      "wrong": 0,
+      "unsure": 0
+    },
+    "weakened": {
+      "right": 17,
+      "wrong": 3,
+      "unsure": 0
+    },
+    "risky": {
+      "right": 14,
+      "wrong": 0,
+      "unsure": 0
+    },
+    "retries": {
+      "right": 14,
+      "wrong": 1,
+      "unsure": 0
+    }
+  },
+  "wrong": [
+    "2026-10-01-claude-964b-82310 retries e44",
+    "2026-10-04-claude-50b7-53522 weakened weakened",
+    "2026-10-04-claude-582e-32918 weakened weakened",
+    "2026-10-04-claude-582e-8485 weakened weakened"
+  ],
+  "unsure": [
+    "2026-10-01-claude-964b-26947 tests e45",
+    "2026-10-01-claude-964b-98422 tests e33",
+    "2026-10-01-claude-964b-98422 tests e39",
+    "2026-10-02-claude-964b-76648 tests e7",
+    "2026-10-02-claude-964b-97004 tests e61",
+    "2026-10-04-claude-899f-4245 tests e2",
+    "2026-10-04-claude-c3ae-65750 tests e2",
+    "2026-10-05-claude-4cfd-39389 tests e2"
+  ]
+}

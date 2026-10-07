@@ -316,6 +316,7 @@ def window(layout: str, app: str = "", app2: str = "") -> str:
         return f"FAILED: '{layout}' needs Rectangle (not installed)."
     import AppKit
     front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    __import__("mint.ui.window_glow", fromlist=["glow"]).glow(seconds=2.5)   # the window just placed glows
     if before:
         from mint.tools import undo
         undo.record("window", f"{before['app']} window → {layout.replace('_', ' ')}", before)

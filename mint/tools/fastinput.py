@@ -118,6 +118,42 @@ def press_key(key: str, modifiers: list[str] | None = None, times: int = 1,
     return f"Pressed {spoken}" + (f" {times} times" if times > 1 else "")
 
 
+# Typing as key events: one character per event, a short gap. Long text would take seconds (and is
+# what the paste is for), so callers keep to this length.
+UNICODE_MAX = 400
+UNICODE_GAP = 0.008
+
+
+def type_unicode(text: str, pid: int | None = None, gap: float = UNICODE_GAP) -> int:
+    """Type `text` as key events that carry the characters themselves (any language, any layout; the
+    clipboard is not touched). With `pid` they go only to that process. Return/Tab are real keys.
+    -> how many characters were sent (fewer if the user said stop)."""
+    if not has_accessibility():
+        return 0
+    from mint.app import control
+    sent = 0
+    for ch in text.replace("\r\n", "\n").replace("\r", "\n"):
+        if control.stopped():
+            break
+        if ch in "\n\t":
+            for down in (True, False):
+                event = Quartz.CGEventCreateKeyboardEvent(None, KEYS["tab"] if ch == "\t" else KEYS["return"], down)
+                Quartz.CGEventSetFlags(event, 0)
+                _post(event, pid)
+                time.sleep(gap)
+            sent += 1
+            continue
+        for down in (True, False):
+            # Key code 0 with the character attached: the app reads the character, not the key.
+            event = Quartz.CGEventCreateKeyboardEvent(None, 0, down)
+            Quartz.CGEventKeyboardSetUnicodeString(event, len(ch.encode("utf-16-le")) // 2, ch)
+            Quartz.CGEventSetFlags(event, 0)       # never inherit a held ⌘ (see press_key)
+            _post(event, pid)
+            time.sleep(gap)
+        sent += 1
+    return sent
+
+
 def scroll(direction: str = "down", amount: int = 3) -> str:
     """Scroll the window under the pointer. `amount` is roughly one screen per 5."""
     if not has_accessibility():

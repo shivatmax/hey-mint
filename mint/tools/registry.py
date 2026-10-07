@@ -313,31 +313,36 @@ def declarations() -> list[types.FunctionDeclaration]:
                                             "'Mint' for your own chat window and its buttons."}},
             ["action", "target"]),
         _fn("ui_elements",
-            "List the controls in the front window right now (numbered, with role, label and "
-            "where they are; says if a dialog is open). Use it when you are unsure what is on "
-            "screen or what to call a control - it is exact, unlike a screenshot.", {}),
+            "List the controls in the front window right now (each with an id like s12:7, role, label and "
+            "where it is; says if a dialog is open). Use it when you are unsure what is on "
+            "screen or what to call a control - it is exact, unlike a screenshot.",
+            {"since": {**STRING, "description": "Optional: a snapshot id from an earlier list of the same "
+                                                "window (like s12) - only what changed since (+ new, ~ changed, "
+                                                "- gone)."}}),
         _fn("click_text",
             "Click a piece of text you can name on screen - a sidebar item, tab, button or link "
             "label - in apps the desktop tool cannot see into (Slack, some Electron apps). The "
             "screen's text is read on this Mac and the label is matched exactly or by a classifier, "
             "so it can only click text that is really there. It reports whether the screen changed.",
             {"text": {**STRING, "description": "The label as it appears, or as the user described it, e.g. 'Huddles'."},
-             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."}},
+             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."},
+             "app": {**STRING, "description": "Optional: the app whose window has the text, if not the one in "
+                                            "front - then only that window is read."}},
             ["text"]),
         _fn("click_at",
-            "Click a point you can see in the latest look screenshot. Coordinates are 0-1000 "
-            "across the screenshot (x from left, y from top). This is the FALLBACK for controls "
-            "the desktop tool cannot find, because the app hides them from Accessibility (Slack, "
-            "canvases, games, some Electron apps). Prefer the desktop tool whenever it works.",
-            {"x": {"type": types.Type.NUMBER, "description": "0-1000 from the left edge."},
-             "y": {"type": types.Type.NUMBER, "description": "0-1000 from the top edge."},
+            "Click something you can see in the latest look screenshot, named by `target`. Mint "
+            "finds it itself - by its Accessibility name, the screen's text, then a vision model - "
+            "so name it well; x and y (0-1000 across the screenshot) are only a hint of where to "
+            "search, because pointing is 30-80 px off. This is the FALLBACK for controls ui_act "
+            "cannot find (Slack, canvases, games, some Electron apps). Prefer ui_act whenever it works.",
+            {"target": {**STRING, "description":
+                        "What to click: its visible text or a short description ('Uninstall', 'Search "
+                        "Extensions in Marketplace', 'the gear icon left of Search')."},
+             "x": {"type": types.Type.NUMBER, "description": "Hint: about where it is, 0-1000 from the left edge."},
+             "y": {"type": types.Type.NUMBER, "description": "Hint: about where it is, 0-1000 from the top edge."},
              "button": {**STRING, "description": "left (default) or right."},
-             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."},
-             "target": {**STRING, "description":
-                        "ALWAYS give the visible text or name of what you mean to click ('Uninstall', "
-                        "'Search Extensions in Marketplace'). Pointing is often 30-80 px off; Mint finds "
-                        "that text near your point and clicks its centre, or says what is really there."}},
-            ["x", "y"]),
+             "double": {"type": types.Type.BOOLEAN, "description": "Double-click."}},
+            ["target"]),
     ]
 
     if config.ALLOW_SHELL:
@@ -376,6 +381,14 @@ def _calendar_tool(args: dict) -> str:
     return text
 
 
+def _number(value) -> float | None:
+    """An optional numeric argument (click_at's hint), None when absent or not a number."""
+    try:
+        return float(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
 _SYNC = {
     "open_app": lambda a: macos.open_app(a["name"]),
     "open_url": lambda a: macos.open_url(a["url"], a.get("browser", "")),
@@ -408,9 +421,9 @@ _SYNC = {
     "list_emails": lambda a: skills.list_emails(a.get("count", 5)),
     "read_email": lambda a: skills.read_email(a["number"]),
     "list_accounts": lambda a: apps.list_accounts(),
-    "click_text": lambda a: ocr.click_text(a["text"], bool(a.get("double", False))),
+    "click_text": lambda a: ocr.click_text(a["text"], bool(a.get("double", False)), a.get("app") or None),
     "ui_act": lambda a: _ui_act(a),
-    "ui_elements": lambda a: __import__("mint.screen.ground", fromlist=["ground"]).summary(),
+    "ui_elements": lambda a: __import__("mint.screen.ground", fromlist=["ground"]).summary(since=a.get("since") or None),
     # Not offered to the model: the grounding benchmark, run through the app for its permissions.
     "ground_bench": lambda a: __import__("mint.screen.groundbench", fromlist=["run"]).run(a),
     "read_window": lambda a: documents.read_window(int(a.get("max_chars", 12000))),
@@ -420,7 +433,7 @@ _SYNC = {
     "create_pdf": lambda a: documents.create_pdf(a["title"], a["content"], a.get("open_after", True) is not False,
                                                  str(a.get("save_to") or "")),
     "click_at": lambda a: vision.click_at(
-        float(a["x"]), float(a["y"]), a.get("button", "left"), bool(a.get("double", False)),
+        _number(a.get("x")), _number(a.get("y")), a.get("button", "left"), bool(a.get("double", False)),
         str(a.get("target") or "")),
 }
 
@@ -475,8 +488,11 @@ def _ui_act(args: dict) -> str:
                                   str(args.get("text", "")))
         if app is None:
             return f"FAILED: {args['app']} is not running; open it first."
-        if not ground.bring_forward(app):
-            return f"FAILED: could not bring {args['app']} to the front, so nothing was done."
+        __import__("mint.ui.window_glow", fromlist=["glow"]).glow(pid=app.processIdentifier(), seconds=4.0)  # its window glows
+        # Not brought forward here: ground.act presses through Accessibility in the background when
+        # it can, and brings the app forward itself only for the pointer or keyboard.
+        return ground.act(str(args.get("action", "click")), str(args.get("target", "")),
+                          str(args.get("text", "")), bool(args.get("press_return", False)), app=app)
     if ground.OWN_CHAT_OPEN and not args.get("app") and str(args.get("action", "click")) == "click":
         # Mint's chat is open: "the Sleep button" means Mint's own, if it has one.
         target = set(ground._words(str(args.get("target", ""))))
@@ -542,6 +558,7 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:
             await asyncio.sleep(wait)
     if name in _OPENERS:
         _last_open = time.monotonic()
+    if name in ("press_key", "ui_act") and not (args or {}).get("app"): __import__("mint.ui.window_glow", fromlist=["glow"]).glow(seconds=3.0)  # noqa: E701 - Mint is working in the front window
 
     if name in {"scroll", "press_key", "media_key", "type_text", "get_selected_text"} \
             and not fastinput.has_accessibility():
@@ -581,7 +598,7 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:
                 "Screen Recording permission to the terminal running Mint."
             ), None
         return ("The screenshot was just sent to you as a video frame. Find what the user wants; "
-                "to click it, use click_at with 0-1000 coordinates of that screenshot."), frame
+                "to click it, use click_at with its name as target (and its rough 0-1000 x, y as a hint)."), frame
 
     handler = _SYNC.get(name)
     if handler is None:
@@ -944,3 +961,35 @@ def _background_task(args: dict) -> str:
 
 
 _SYNC["background_task"] = _background_task
+
+
+# --- The web engine: a whole goal on a website in one call (webgoal.py) ------------------------------
+
+_tools_before_web = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.tools import webgoal
+    return _tools_before_web() + [types.Tool(function_declarations=[webgoal.declaration()])]
+
+
+def _web_goal(args: dict) -> str:
+    from mint.tools import webgoal
+    return webgoal.run_tool(args)
+
+
+_SYNC["web_goal"] = _web_goal
+
+
+# --- Checking that an action worked: verify_state (verify.py) -------------------------------------
+# Read-only: polls windows, the front app, controls, text and files until the checks hold.
+
+_tools_before_verify = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.screen import verify
+    return _tools_before_verify() + [types.Tool(function_declarations=verify.declarations())]
+
+
+_SYNC["verify_state"] = lambda a: __import__("mint.screen.verify", fromlist=["tool"]).tool(a)

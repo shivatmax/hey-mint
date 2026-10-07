@@ -6,9 +6,10 @@ constraints, recovery, undo, an agent handoff and clipboard + files. For each ta
 the runner sets up the fixtures, sends the request (1 to 3 turns) to the running Mint, waits until Mint is done,
 and checks the end state on disk or in the app. It never grades Mint's words. It then cleans up.
 
+Run it from the root of your checkout (the folder with `mint/` and `bench/`):
+
 ```sh
-PY="$HOME/Library/Application Support/Mint/.venv/bin/python"
-cd ~/Downloads/Projects/projects/Project-Jev/jarvis
+PY="$HOME/Library/Application Support/Mint/.venv/bin/python"   # the Python install.sh made (or .venv/bin/python)
 
 "$PY" bench/reliability/run.py --list                        # the tasks
 "$PY" bench/reliability/run.py --selftest                    # no Mint: oracles make the right end state; all must PASS

@@ -1,0 +1,17 @@
+<!-- More of the Troubleshooting page (the fixes table, #help, and #report are in ../docs.html). -->
+<section id="logs" data-group="Troubleshooting">
+  <h2>The log and your files</h2>
+  <p class="lead">Where to look when something is off, and how to start over on one thing without losing the rest.</p>
+  <div class="table"><table><tr><th>What</th><th>Where</th></tr>
+    <tr><td>The log</td><td><code>~/Library/Logs/Mint/mint.log</code>. <b>Report a problem…</b> copies its recent errors for you, with personal details removed.</td></tr>
+    <tr><td>Keys, settings, memory, skills</td><td><code>~/Library/Application Support/Hey Mint</code> for the downloaded app (<code>~/Library/Application Support/Mint</code> for an app built from source). Updating or reinstalling keeps them.</td></tr>
+    <tr><td>Some feature files</td><td><code>~/Library/Application Support/Mint</code>: the clipboard history, the Google Meet browser profile, backups of changed files.</td></tr>
+    <tr><td>What Mint makes</td><td><code>~/Documents/Mint</code>, unless you picked another folder in Settings ▸ Storage &amp; Privacy.</td></tr></table></div>
+  <ul class="plain">
+    <li><b>Change a key:</b> Settings ▸ Accounts &amp; keys, or hold <kbd>⌥</kbd> while opening Hey Mint.</li>
+    <li><b>Check your setup:</b> Settings ▸ Updates &amp; Help ▸ <em>Check my setup</em> runs the same checklist as <code>python -m mint --doctor</code> from a source checkout: macOS, the Gemini key (checked with Google, shown only as ••••last4), the voice models, permissions, the app and updates, Claude Code's hooks, Telegram and email control, disk space. Each line says ✓, ! or ✗ and what to do.</li>
+    <li><b>See the welcome again:</b> <b>Welcome tour…</b> in the menu bar.</li>
+    <li><b>Check a setting by hand:</b> Settings ▸ Updates &amp; Help ▸ The settings file ▸ Edit…; every setting and its default is on the <a href="#config-files">Configuration</a> page.</li>
+    <li><b>The app can't be opened:</b> use the <a href="#install">one-line install</a>, which approves it with macOS for you.</li>
+  </ul>
+</section>

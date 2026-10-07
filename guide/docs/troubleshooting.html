@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Troubleshooting · Hey Mint docs</title><meta name="description" content="Fixes for common problems, where the log and your files are, and how to report a bug.">
+<link rel="canonical" href="https://hey-mint.pages.dev/docs/troubleshooting"><meta name="theme-color" content="#F3F6FB">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="../assets/og.png">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
+<meta property="og:title" content="Troubleshooting · Hey Mint docs"><meta property="og:description" content="Fixes for common problems, where the log and your files are, and how to report a bug.">
+<meta property="og:url" content="https://hey-mint.pages.dev/docs/troubleshooting"><meta property="og:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Troubleshooting · Hey Mint docs">
+<meta name="twitter:description" content="Fixes for common problems, where the log and your files are, and how to report a bug."><meta name="twitter:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta name="twitter:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Hey Mint", "item": "https://hey-mint.pages.dev/"}, {"@type": "ListItem", "position": 2, "name": "Docs", "item": "https://hey-mint.pages.dev/docs"}, {"@type": "ListItem", "position": 3, "name": "Troubleshooting", "item": "https://hey-mint.pages.dev/docs/troubleshooting"}]}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/guide.css"></head>
+<body data-hello="Click a ▶ example and I&#x27;ll act it out." data-page="docs" data-doc="troubleshooting" data-root="../">
+<header class="top"><div class="top-in"><a class="brand" href="../"><span class="dot"></span>Hey Mint</a>
+<nav aria-label="Site"><a href="../docs" class="on">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
+<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings">Settings and updates</a><a href="configuration">Configuration</a><a href="troubleshooting" class="cur" aria-current="page">Troubleshooting</a><a href="architecture">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#help">Common problems</a><a href="#logs">The log and your files</a><a href="#report">Report a problem</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 11 of 12</div><h1>Troubleshooting</h1><p>Fixes for common problems, where the log and your files are, and how to report a bug.</p></div><section id="help" data-group="Troubleshooting">
+  <h2>Common problems</h2>
+  <div class="table"><table><tr><th>Problem</th><th>Fix</th></tr>
+    <tr><td>Can't click or type</td><td>System Settings ▸ Privacy &amp; Security ▸ Accessibility: switch Mint on (off and on again after an update)</td></tr>
+    <tr><td>“not allowed to control that app”</td><td>Privacy &amp; Security ▸ Automation ▸ Mint</td></tr>
+    <tr><td>It hears the room</td><td>Train your voice, or turn the mic off and type (<kbd>⌘J</kbd>)</td></tr>
+    <tr><td>It mishears a name</td><td>Tell it once: “you heard X, I said Y”</td></tr>
+    <tr><td>An agent seems stuck</td><td>“how's Astra doing?”, then “stop Astra”</td></tr>
+    <tr><td>The app won't open</td><td>Privacy &amp; Security ▸ Open Anyway (the app isn't notarized yet)</td></tr></table></div>
+  <p>The log is at <code>~/Library/Logs/Mint/mint.log</code>. Report bugs on <a href="https://github.com/shivatmax/hey-mint/issues">GitHub</a>.</p>
+</section>
+
+<section id="logs" data-group="Troubleshooting">
+  <h2>The log and your files</h2>
+  <p class="lead">Where to look when something is off, and how to start over on one thing without losing the rest.</p>
+  <div class="table"><table><tr><th>What</th><th>Where</th></tr>
+    <tr><td>The log</td><td><code>~/Library/Logs/Mint/mint.log</code>. <b>Report a problem…</b> copies its recent errors for you, with personal details removed.</td></tr>
+    <tr><td>Keys, settings, memory, skills</td><td><code>~/Library/Application Support/Hey Mint</code> for the downloaded app (<code>~/Library/Application Support/Mint</code> for an app built from source). Updating or reinstalling keeps them.</td></tr>
+    <tr><td>Some feature files</td><td><code>~/Library/Application Support/Mint</code>: the clipboard history, the Google Meet browser profile, backups of changed files.</td></tr>
+    <tr><td>What Mint makes</td><td><code>~/Documents/Mint</code>, unless you picked another folder in Settings ▸ Storage &amp; Privacy.</td></tr></table></div>
+  <ul class="plain">
+    <li><b>Change a key:</b> Settings ▸ Accounts &amp; keys, or hold <kbd>⌥</kbd> while opening Hey Mint.</li>
+    <li><b>Check your setup:</b> Settings ▸ Updates &amp; Help ▸ <em>Check my setup</em> runs the same checklist as <code>python -m mint --doctor</code> from a source checkout: macOS, the Gemini key (checked with Google, shown only as ••••last4), the voice models, permissions, the app and updates, Claude Code's hooks, Telegram and email control, disk space. Each line says ✓, ! or ✗ and what to do.</li>
+    <li><b>See the welcome again:</b> <b>Welcome tour…</b> in the menu bar.</li>
+    <li><b>Check a setting by hand:</b> Settings ▸ Updates &amp; Help ▸ The settings file ▸ Edit…; every setting and its default is on the <a href="configuration#config-files">Configuration</a> page.</li>
+    <li><b>The app can't be opened:</b> use the <a href="start#install">one-line install</a>, which approves it with macOS for you.</li>
+  </ul>
+</section>
+
+<section id="report" data-group="Troubleshooting">
+  <h2>Report a problem</h2>
+  <p class="lead">Something went wrong? Choose <b>Report a problem…</b> in the menu bar (or Settings ▸ Updates &amp; Help). A new GitHub issue opens in your browser with your version and macOS filled in.</p>
+  <p>The recent errors from Mint's log are copied to your clipboard, with paths, emails, keys and everything you or Mint said removed, so you can paste them in if you like. Nothing is sent until you submit the issue yourself.</p>
+</section><nav class="pager" aria-label="Previous and next page"><a class="prev" href="configuration"><small>Previous</small><span>Configuration</span></a><a class="next" href="architecture"><small>Next</small><span>Architecture</span></a></nav></article></div><footer><span>Hey Mint · open-source voice assistant for macOS · GPL-3.0</span><span class="grow"></span>
+<a href="../docs">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a href="https://github.com/shivatmax/hey-mint/releases">Releases</a><a href="https://github.com/shivatmax/hey-mint/blob/main/docs/development.md">Contribute</a></footer>
+<div class="bubble" id="bubble" role="status" aria-live="polite"></div>
+<div class="buddy" aria-hidden="true"><div class="body"><button class="orb" tabindex="-1" aria-label="The page's Mint. Poke it."><span class="face"><span class="eyes"><span class="eye"></span><span class="eye"></span></span><span class="mouth"></span><span class="cheek l"></span><span class="cheek r"></span><span class="brows"></span><span class="shades"></span></span><span class="hand l"></span><span class="hand r"></span></button></div></div>
+<script src="../assets/docs-index.js"></script>
+<script src="../assets/guide.js"></script><script src="../assets/critters.js"></script>
+</body></html>

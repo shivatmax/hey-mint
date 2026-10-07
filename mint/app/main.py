@@ -60,6 +60,8 @@ def _parse() -> argparse.Namespace:
                         help="Run one tool directly, without Gemini, print its result and exit. "
                              "Run through the app to use its permissions: "
                              "open -n ~/Applications/Mint.app --args --tool NAME '{...}'")
+    parser.add_argument("--doctor", action="store_true",
+                        help="Check the key, permissions, runtime and setup; print a checklist and exit.")
     return parser.parse_args()
 
 
@@ -228,6 +230,9 @@ def _memory_profile() -> None:
 
 def main() -> int:
     args = _parse()
+    if args.doctor:
+        from mint.app import doctor
+        return doctor.run(verbose=args.verbose)
     if os.path.exists(os.path.expanduser("~/Library/Application Support/Mint/profile-memory")) and not args.say:
         _memory_profile()
 

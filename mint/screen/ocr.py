@@ -225,21 +225,80 @@ def _where(item: dict, area: dict) -> str:
     return f"{vertical} {horizontal}"
 
 
-def click_text(target: str, double: bool = False) -> str:
-    """Click the on-screen text that best matches `target`."""
+def read_window(app) -> tuple[list[dict], dict, dict]:
+    """The text lines of one app's window, read from a picture of that window alone (with its own
+    sheets and popovers; capture.area), never from the screen rectangle: a window lying over it or
+    beside it is not in the picture, so its text cannot be credited to the app. The picture passes
+    capture's 1x/2x pixel-frame check, and the boxes map back through the window's own frame.
+    -> (items, area, window {x, y, w, h, app, pid, window_id}). Raises LookupError (no window),
+    capture.CaptureError (no picture, or a mismatched one) or vision.Blind."""
+    from mint.screen import axkit
+    from mint.screen import capture
+    pid = int(app.processIdentifier())
+    name = app.localizedName() or "the app"
+    ax_window = axkit.focused_window(pid)
+    wid = axkit.window_id(ax_window) if ax_window is not None else None
+    if not wid:
+        shown = axkit.server_windows(pid)
+        wid = shown[0] if shown else None
+    bounds = capture.window_bounds(wid) if wid else None
+    if bounds is None:
+        raise LookupError(f"{name} has no window on screen")
+    shot = capture.area(bounds, wid)
+    if shot.get("method") == "region":
+        shot = capture.window(wid)           # never the screen grab: it shows whatever lies on top
+    x, y, w, h = shot["bounds"]
+    area = {"left": x, "top": y, "width": w, "height": h}
+    small = shot["image"].convert("L").resize((64, 40))
+    low, high = small.getextrema()
+    if high - low < 12:
+        from mint.screen.vision import Blind
+        raise Blind()
+    window = {"x": x, "y": y, "w": w, "h": h, "app": name, "pid": pid, "window_id": wid}
+    items = recognize(shot["image"], area)
+    for item in items:
+        item["window_id"] = wid
+    return items, area, window
+
+
+def _running(app):
+    """An NSRunningApplication for an app object or a name ("Visual Studio Code" runs as "Code")."""
+    if app is None or hasattr(app, "processIdentifier"):
+        return app
+    from mint.screen import ground
+    return ground.running_app(str(app))
+
+
+def click_text(target: str, double: bool = False, app=None) -> str:
+    """Click the on-screen text that best matches `target`. With `app`, only that app's window is
+    read (a picture of it alone), so another window lying on top or beside cannot lend its text."""
     import Quartz
 
     if not fastinput.has_accessibility():
         return "Cannot click: Mint lacks Accessibility permission."
+    running = _running(app)
+    if app is not None and running is None:
+        return f"FAILED: {app} is not running, so nothing was clicked; open it first."
+    if running is not None and int(running.processIdentifier()) == os.getpid():
+        running = None                     # Mint's own window: read off the screen as before
     try:
-        items, area = read_screen()
+        if running is not None:
+            items, area, front = read_window(running)
+            rows = None
+        else:
+            items, area = read_screen()
+            front, rows = _front_window(), _layer0()
     except Exception as error:
         if type(error).__name__ == "Blind":
             return ("Cannot see the screen: Mint lacks Screen Recording permission. Do not "
                     "guess; tell the user to allow it in System Settings.")
+        if isinstance(error, LookupError):
+            return f"FAILED: {error}, so nothing was clicked."
         return f"Could not read the screen: {error}"
     if not items:
-        return "No text is visible on screen."
+        return f"No text is visible in {front['app']}'s window." if running is not None else "No text is visible on screen."
+    seen = (lambda item: _seen_in(item, front, rows)) if front is not None else (lambda item: True)
+    of = "of the window" if running is not None else "of the screen"
 
     # Exact label first: the common case ("Huddles") needs no model at all.
     # Icons next to a label are read as stray characters ("6 Huddles|" for a
@@ -248,16 +307,15 @@ def click_text(target: str, double: bool = False) -> str:
     exact = [i for i, item in enumerate(items) if _words(item["text"]) == wanted]
     # The same label can appear in two windows - in testing, "Threads" was both
     # Slack's sidebar item and a word in a chat window behind it. The user means
-    # the app in front.
-    front = _front_window()
+    # the app in front - where its window can be seen, not where another lies over it.
     if len(exact) > 1 and front is not None:
-        in_front = [i for i in exact if _inside(items[i], front)]
+        in_front = [i for i in exact if seen(items[i])]
         exact = in_front or exact
     if not exact:
         # The words inside a longer line ("microsoft.com" in "Microsoft microsoft.com 52,882,693"):
         # one such line in the front window needs no model either.
         within = [i for i, item in enumerate(items) if wanted and target_span(item["text"], target) is not None
-                  and (front is None or _inside(item, front))]
+                  and seen(item)]
         if len(within) == 1:
             exact = within
     if len(exact) == 1:
@@ -265,18 +323,20 @@ def click_text(target: str, double: bool = False) -> str:
     else:
         pool = exact or range(len(items))
         if front is not None:          # the front window's text first (the list is cut at 250)
-            pool = sorted(pool, key=lambda i: not _inside(items[i], front))
-        options = {str(i): f"'{items[i]['text']}' ({_where(items[i], area)} of the screen)"
+            pool = sorted(pool, key=lambda i: not seen(items[i]))
+        options = {str(i): f"'{items[i]['text']}' ({_where(items[i], area)} {of})"
                    for i in list(pool)[:250]}   # TypeSafe allows 255 options
         chosen, why = jev.resolve(target, options, what="on-screen text")
         if chosen is None:
-            return f"FAILED: could not find '{target}' on screen, so nothing was clicked. {why}"
+            where = f"in {front['app']}'s window" if running is not None else "on screen"
+            return f"FAILED: could not find '{target}' {where}, so nothing was clicked. {why}"
         index = int(chosen)
 
     item = items[index]
     (px, py), box = click_point(item, target)
     # Self-check before anything moves: the point must be inside the box of the text that was
-    # chosen, on the display that was read, and that spot must not be covered by another app.
+    # chosen, on the display (or window) that was read, and - for an app's own window - that spot
+    # must not be covered by another app's window.
     line_box = (item["x"], item["y"], item["w"], item["h"])
     if not (contains(box, (px, py)) and contains(line_box, (px, py), slack=2)
             and contains((area["left"], area["top"], area["width"], area["height"]), (px, py))):
@@ -284,10 +344,13 @@ def click_text(target: str, double: bool = False) -> str:
                 f"box {tuple(int(v) for v in box)}, so nothing was clicked.")
     point = Quartz.CGPointMake(px, py)
     window = _window_at(point)
-    if front is not None and window is not None and window.get("pid") and front.get("pid") \
-            and window["pid"] != front["pid"] and _inside(item, front):
-        return (f"FAILED: '{item['text'][:40]}' belongs to {front['app']}, but {window['app']} covers that spot, so "
-                "nothing was clicked. Bring the app to the front first.")
+    if running is not None:
+        if window is not None and window.get("pid") and window["pid"] != front["pid"]:
+            return (f"FAILED: '{item['text'][:40]}' is in {front['app']}'s window, but {window['app']} covers that "
+                    f"spot, so nothing was clicked. Bring {front['app']} forward first, or use ui_act (no pointer).")
+        window = front
+    # Without an app the text was read off the screen as drawn, so it belongs to the window on top
+    # at that spot (`window`) - even when the front app's window lies under it.
     before = _texts_in(items, window)
     focus_before = _focus_role(window)
 
@@ -298,56 +361,81 @@ def click_text(target: str, double: bool = False) -> str:
     if control.stopped():
         return "STOPPED by the user before clicking; nothing was clicked."
 
-    # Move there first. Chromium-based apps (Slack, Chrome, Electron) ignore a
-    # press that arrives without the pointer having entered the element: in
-    # testing, a click at exactly the right spot on Slack's "Huddles" did
-    # nothing until the pointer was moved there first.
-    move = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, point, Quartz.kCGMouseButtonLeft)
-    Quartz.CGEventPost(Quartz.kCGHIDEventTap, move)
-    time.sleep(0.08)
-    for click in range(2 if double else 1):
-        for kind in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
-            event = Quartz.CGEventCreateMouseEvent(None, kind, point, Quartz.kCGMouseButtonLeft)
-            Quartz.CGEventSetIntegerValueField(event, Quartz.kCGMouseEventClickState, click + 1)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            time.sleep(0.03)
+    # An accessibility press on the control under the text first: no cursor, no activation. Only
+    # for native controls that advertise it (effect.press_target_at) - Chromium ignores AXPress, so
+    # Slack's "Huddles" still gets the pointer, moved there first: in testing, a press at exactly
+    # the right spot did nothing until the pointer had entered it.
     from mint.screen import axkit
-    axkit.note_click((window or {}).get("pid"), px, py, item["text"])
+    from mint.screen import effect
+    windows_before = effect.window_snapshot()
+    quiet_key = ((window or {}).get("pid"), _words(item["text"]))
+    pressed, evidence = None, []
+    if not double and time.monotonic() - _ax_quiet.get(quiet_key, -1e9) > 120:
+        try:
+            pressed = effect.press_target_at(px, py, (window or {}).get("pid"))
+            if pressed is not None:
+                done, evidence, problem = effect.ax_deliver(pressed, "AXPress")
+                # An error after the app may already have acted: never click it again with the pointer.
+                pressed = pressed if done or effect.maybe_acted(problem) else None
+        except Exception:
+            pressed = None
+    if pressed is not None:
+        axkit.note_click((window or {}).get("pid"), px, py, item["text"])
+        route, delivery, verb = "accessibility", "background", "Pressed"
+    else:
+        from mint.screen import ground
+        ground.mouse_click(px, py, double=double, label=item["text"], spark=False)
+        route, delivery, verb = "global_input", "foreground", "Double-clicked" if double else "Clicked"
 
     # Read the screen again: a warm read takes about 0.1s, so there is no
     # excuse for reporting a click as a result. In testing the vision route
     # announced "Huddle started" after clicking something else entirely.
     time.sleep(0.8)
     try:
-        after_items, _ = read_screen()
+        after_items = read_window(running)[0] if running is not None else read_screen()[0]
         # Only the clicked window counts. Comparing the whole screen let a
         # change in some other window pass for success in testing.
         after = _texts_in(after_items, window)
         changed = len(before ^ after)
     except Exception:
         changed = -1
+    evidence += effect.window_changes(windows_before, effect.window_snapshot(), pids=((window or {}).get("pid"),))
     where = f" in {window['app']}" if window and window.get("app") else ""
-    label = f"Clicked '{_words(item['text'])}'{where} at ({int(point.x)}, {int(point.y)}) ({why})"
+    label = f"{verb} '{_words(item['text'])}'{where} at ({int(point.x)}, {int(point.y)}) ({why})"
     # A couple of labels can differ between two reads of an unchanged window.
     threshold = max(3, len(before) // 12)
-    if 0 <= changed < threshold:
+    if changed >= threshold:
+        appeared = sorted(after - before, key=len, reverse=True)[:5]
+        evidence.insert(0, f"the window changed; new text includes: {appeared}")
+    if 0 <= changed < threshold and not evidence:
         # A click into a text box changes nothing you can see until you type (VS Code's
         # "Search Extensions in Marketplace" on 1 Oct: the click was right, the report said FAILED,
         # and the model gave up on it). The keyboard focus says whether it went in.
         focus_after = _focus_role(window)
         if focus_after == "input":
-            return (label + ". The text box now has the keyboard focus - type into it with type_text "
-                    "(no field= needed).")
-        if _PLACEHOLDER.match(_words(item["text"])) and focus_after != focus_before:
-            return (label + ". Nothing else changed, but the keyboard focus moved - it looks like a text box's "
-                    "placeholder, so the cursor is probably in it now: type with type_text, then check.")
-        return ("FAILED: " + label + ", but the window did NOT change afterwards, so the click "
-                "probably had no effect - something may be covering it, such as a dialog.")
-    if changed >= threshold:
-        appeared = sorted(after - before, key=len, reverse=True)[:5]
-        return label + f". The window changed; new text includes: {appeared}."
-    return label + "."
+            evidence = ["the text box now has the keyboard focus - type into it with type_text (no field= needed)"]
+        elif _PLACEHOLDER.match(_words(item["text"])) and focus_after != focus_before:
+            return effect.Effect(effect.UNVERIFIABLE, label + "; nothing else changed, but the keyboard focus moved - "
+                                 "it looks like a text box's placeholder, so the cursor is probably in it now",
+                                 route, delivery, escalation="type with type_text, then check").render()
+        elif route == "accessibility":
+            _ax_quiet[quiet_key] = time.monotonic()
+            return effect.Effect(effect.UNVERIFIABLE, label + "; the window did not change afterwards", route,
+                                 delivery, escalation="if it really did nothing, call click_text again: the next "
+                                 "try uses the real pointer").render()
+        else:
+            return effect.Effect(effect.NOOP, label + "; the window did NOT change afterwards, so the click probably "
+                                 "had no effect - something may be covering it, such as a dialog", route, delivery,
+                                 escalation="look at what is in front (ui_elements or look) before clicking again"
+                                 ).render()
+    if evidence:
+        return effect.Effect(effect.CONFIRMED, label, route, delivery, evidence).render()
+    return effect.Effect(effect.UNVERIFIABLE, label + "; the screen could not be read again to check", route,
+                         delivery, escalation="look to check").render()
 
+
+# Text whose accessibility press showed nothing: clicked with the pointer if asked again soon.
+_ax_quiet: dict = {}
 
 _PLACEHOLDER = re.compile(r"^(s?earch|type|enter|filter|find|ask|message|write|add|go to|reply|new|name|"
                           r"what|where|email|url|address)\b")
@@ -417,21 +505,42 @@ def _front_window() -> dict | None:
     return None
 
 
-def _window_at(point) -> dict | None:
-    """Bounds of the ordinary window under a screen point, front-most first."""
+def _layer0() -> list[dict]:
+    """The ordinary on-screen windows, front to back: [{x, y, w, h, app, pid}]. Invisible ones
+    (alpha 0) are left out: they cover nothing."""
     import Quartz
 
     windows = Quartz.CGWindowListCopyWindowInfo(
         Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
         Quartz.kCGNullWindowID) or []
+    rows = []
     for window in windows:
-        if window.get("kCGWindowLayer", 0) != 0:
-            continue
         b = window.get("kCGWindowBounds") or {}
-        if b and b["X"] <= point.x <= b["X"] + b["Width"] and b["Y"] <= point.y <= b["Y"] + b["Height"]:
-            return {"x": b["X"], "y": b["Y"], "w": b["Width"], "h": b["Height"],
-                    "app": window.get("kCGWindowOwnerName", ""), "pid": int(window.get("kCGWindowOwnerPID", 0))}
-    return None
+        if window.get("kCGWindowLayer", 0) != 0 or not b or float(window.get("kCGWindowAlpha", 1) or 0) <= 0:
+            continue
+        rows.append({"x": b["X"], "y": b["Y"], "w": b["Width"], "h": b["Height"],
+                     "app": window.get("kCGWindowOwnerName", ""), "pid": int(window.get("kCGWindowOwnerPID", 0))})
+    return rows
+
+
+def _top_at(rows: list[dict], x: float, y: float) -> dict | None:
+    return next((r for r in rows if r["x"] <= x <= r["x"] + r["w"] and r["y"] <= y <= r["y"] + r["h"]), None)
+
+
+def _seen_in(item: dict, window: dict, rows: list[dict] | None) -> bool:
+    """The text is drawn by `window`: inside its bounds, and no other app's window lies on top there
+    (the screen picture then shows that other window's text)."""
+    if not _inside(item, window):
+        return False
+    if rows is None or not window.get("pid"):
+        return True
+    top = _top_at(rows, item["x"] + item["w"] / 2, item["y"] + item["h"] / 2)
+    return top is None or top["pid"] == window["pid"]
+
+
+def _window_at(point) -> dict | None:
+    """Bounds of the ordinary window under a screen point, front-most first."""
+    return _top_at(_layer0(), point.x, point.y)
 
 
 def _texts_in(items: list[dict], window: dict | None) -> set[str]:

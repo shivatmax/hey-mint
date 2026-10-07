@@ -25,6 +25,8 @@ collects nothing. What leaves your Mac goes straight from your Mac to the AI ser
 | Background agents and Codex (optional) | The task and the files or pages it works on | OpenAI |
 | Quick choices and the screen-control engine (optional) | The request, and the names of the controls in the app in front (no screenshots) | TypeSafe Jev |
 | Telegram remote control (optional; off until you add your own bot token and switch it on) | The requests and voice notes you send your bot, Mint's steps and replies, and screenshots or files from those requests | Telegram (your own bot, through the Bot API; voice notes are transcribed by the Google Gemini API) |
+| Email control (optional; off until you set it up) | Mint reads new mail in the address you give it (only messages from senders you allowed, with the subject prefix) and sends its replies to them | Your mail provider (IMAP / SMTP, or Apple Mail) |
+| Google Meet calls (optional; only when you ask for a call) | Mint's voice, and your screen while it is shared, to the people in the call | Google Meet (in a separate Chrome window) |
 | Watching or editing a web video | The video's address | The video site (via yt-dlp) |
 | Checking for updates (the downloaded app, at launch and every 12 hours; off with Settings ▸ Automatic updates) | A request for the latest release, with no data about you (GitHub sees your IP address, as with any download) | GitHub |
 
@@ -37,11 +39,15 @@ may use your data to improve their models. Paid tiers usually don't.
 - Meeting and screen recordings start only when you press record.
 - Dictation listens only while you hold the key.
 - Mint is invisible in screen shares unless you ask it to show.
-- Never sends email (drafts only); messages, posts and forms go out only when you asked.
+- Never sends email on its own (drafts only). The one exception is email control, which you set up: Mint
+  replies by email only to the allowed senders who wrote to it. Messages, posts and forms go out only when you
+  asked.
+- Watching your coding agents (Claude Code, Codex) reads their own session logs on your Mac; nothing from them
+  is sent anywhere, apart from what you ask about out loud.
 
 ## Contact
 
 Questions or concerns: open an issue, or contact the Maintainer through
 [github.com/shivatmax](https://github.com/shivatmax).
 
-*Last updated: 29 September 2026.*
+*Last updated: 7 October 2026.*

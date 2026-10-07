@@ -29,6 +29,7 @@ import Quartz
 from PyObjCTools import AppHelper
 
 from mint.ui import gfx
+from mint.ui import kinetics
 from mint.core import prefs
 from mint.ui.critters import PINK, _keys, _symbol_layer, _text_layer, confetti, float_up
 
@@ -114,7 +115,7 @@ class CuteFX:
         AppHelper.callAfter(self._safe, self.finish, ok)
 
     def _safe(self, fn, *args):
-        if not enabled():
+        if not enabled() or kinetics.reduce_motion():      # Reduce motion: no flying, floating flourishes
             return
         try:
             fn(*args)
@@ -196,7 +197,8 @@ class CuteFX:
         stamp.setAffineTransform_(Quartz.CGAffineTransformMakeRotation(random.uniform(-0.4, 0.4)))
         stamp.setOpacity_(0.0)
         root.addSublayer_(stamp)
-        _keys(stamp, "transform.scale", [1.8, 0.85, 1.0, 1.0], 0.9, [0, 0.18, 0.3, 1], name="stamp")
+        if not kinetics.reduce_motion():                    # Reduce motion: the print just fades in and out
+            _keys(stamp, "transform.scale", [1.8, 0.85, 1.0, 1.0], 0.9, [0, 0.18, 0.3, 1], name="stamp")
         _keys(stamp, "opacity", [0.0, 0.95, 0.95, 0.0], 0.9, [0, 0.12, 0.6, 1], name="fade")
         AppHelper.callLater(0.95, stamp.removeFromSuperlayer)
 

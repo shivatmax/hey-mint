@@ -14,7 +14,14 @@ The hooks are opt-in (Settings > Agents > Connect Claude Code). Installing them:
 and shows exactly what will be added before writing. Removing them takes out only Mint's entries.
 
 Events used: PermissionRequest (waits for your click), Notification (it needs you), UserPromptSubmit and
-Stop (instant start / end), SessionStart (which terminal it runs in, so "Open" goes to the right window).
+Stop (instant start / end), SessionStart (which terminal it runs in, so "Open" goes to the right window),
+PreToolUse (the guard on shell commands; before an edit, another agent on the same file; with the fix loop on,
+a commit or push while the tests fail). With the fix loop on (agent_checks.py), Stop asks Mint whether the work
+is done: failing or untested tests send Claude back, at most twice per request.
+
+Claude's usage limits: Claude Code gives them only to a status line command. install_statusline() (opt-in, from
+Settings) puts Mint's in ~/.claude/settings.json "statusLine": it saves the limits and context window sizes to
+claude-limits.json in Mint's folder and then runs your own status line, if you had one, so it looks the same.
 
 The socket is in Mint's Application Support folder (mode 600, folder 700) and only takes connections
 from this user (getpeereid). Nothing is sent anywhere else. Decisions are made only by a click on the
@@ -46,7 +53,8 @@ MARK = "mint-agent-hook"                     # how Mint's own entries are recogn
 WAIT = 590                                   # seconds an approval stays answerable from the notch
 EVENTS = (("PermissionRequest", WAIT + 10), ("Notification", 5), ("UserPromptSubmit", 5), ("Stop", 5),
           ("SessionStart", 5), ("SessionEnd", 5), ("PreToolUse", 5))
-MATCHERS = {"PreToolUse": "Bash"}            # the guard looks at shell commands only (cheap: no other tool runs it)
+# PreToolUse: the guard looks at shell commands; edits are checked for another agent on the same file (agent_checks).
+MATCHERS = {"PreToolUse": "Bash|Edit|Write|MultiEdit|NotebookEdit"}
 
 _pending: dict = {}           # approval id -> {"conn", "session", "suggestions", "created"}
 _lock = threading.Lock()
@@ -74,6 +82,56 @@ OWN = re.compile(r"Application(\\ | )Support/Mint\b|\bMint\.app\b|(~|\$\{?HOME\}
                  r"\.claude\.json\b", re.I)
 WRITES = re.compile(r"(^|[;&|`(\s])(rm|rmdir|unlink|shred|srm|trash|mv|truncate|chmod|chown|chflags|sed\s+-i)\s|"
                     r"(^|[^0-9&])>>?\s*\S", re.I)
+SHIPS = re.compile(r"\bgit\s+(-\S+\s+)*(commit|push)\b|\bgh\s+pr\s+(create|merge)\b|"
+                   r"\b(npm|pnpm|yarn|cargo)\s+publish\b|\btwine\s+upload\b", re.I)
+
+
+def pref(name, default=None):
+    try:
+        value = json.load(open(SETTINGS)).get(name)
+    except Exception:
+        value = None
+    return default if value is None else value
+
+
+def ask(payload, wait):
+    """Mint's checks on the agent's work (agent_checks.py): {} when Mint isn't running or has nothing to say."""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(wait)
+        s.connect(SOCK)
+        s.sendall((json.dumps(dict(payload, _mint_ask=True)) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        answer = json.loads(data.decode() or "{}")
+        return answer if isinstance(answer, dict) else {}
+    except Exception:
+        return {}
+
+
+def checks(payload):
+    """Before a commit / push (fix loop on) or an edit: Mint may deny or ask, with the reason."""
+    tool = payload.get("tool_name") or ""
+    if not os.path.exists(SOCK):
+        return
+    if tool == "Bash":
+        command = str((payload.get("tool_input") or {}).get("command") or "")
+        if not pref("agent_fix_loop", False) or not SHIPS.search(command):
+            return
+        reason, decision = ask(payload, 3.0).get("deny"), "deny"
+    else:
+        if pref("agent_checks", True) is False:
+            return
+        reason, decision = ask(payload, 1.0).get("ask"), "ask"
+    if reason:
+        sys.stdout.write(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": decision,
+            "permissionDecisionReason": str(reason)}}) + "\n")
 
 
 def guard(payload):
@@ -85,19 +143,20 @@ def guard(payload):
             "hookEventName": "PreToolUse", "permissionDecision": "ask",
             "permissionDecisionReason": "Mint's guard: this command deletes or writes over Mint's own files or "
                                         "Claude Code's / Codex's settings. It needs your OK."}}) + "\n")
-        return
+        return True
     try:
         level = (json.load(open(SETTINGS)).get("guard") or "all")
     except Exception:
         level = "all"
     if level == "off":
-        return
+        return False
     for pattern, why, kind in GUARD:
         if (level == "all" or kind != "change") and re.search(pattern, command, re.I | re.M):
             sys.stdout.write(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse", "permissionDecision": "ask",
                 "permissionDecisionReason": "Mint's guard: this command " + why + ". It needs your OK."}}) + "\n")
-            return
+            return True
+    return False
 
 
 def main():
@@ -107,9 +166,16 @@ def main():
         return
     event = payload.get("hook_event_name", "")
     if event == "PreToolUse":
-        guard(payload)
+        if payload.get("tool_name") == "Bash" and guard(payload):
+            return
+        checks(payload)
         return
     if not os.path.exists(SOCK):
+        return
+    if event == "Stop" and pref("agent_fix_loop", False):
+        answer = ask(payload, 4.0)                 # Mint's fix loop: tests failing / untested -> keep working
+        if answer.get("decision") == "block" and answer.get("reason"):
+            sys.stdout.write(json.dumps({"decision": "block", "reason": str(answer["reason"])}) + "\n")
         return
     env = os.environ
     payload["term_program"] = env.get("TERM_PROGRAM", "")
@@ -258,6 +324,17 @@ def _client(conn) -> None:
         conn.close()
         return
     from mint.tools import agent_watch
+    if payload.pop("_mint_ask", False):
+        from mint.tools import agent_checks
+        answer = agent_checks.answer(payload)
+        try:
+            conn.sendall((json.dumps(answer) + "\n").encode())
+        except OSError:
+            pass
+        conn.close()
+        if payload.get("hook_event_name") == "Stop" and not answer:
+            agent_watch.ingest_hook(payload)     # (sent back: it isn't done, so no "done")
+        return
     if payload.get("hook_event_name") == "PermissionRequest":
         ident = uuid.uuid4().hex[:12]
         payload["_mint_id"] = ident
@@ -464,3 +541,140 @@ def _apply(add: bool) -> str:
     print(f"  [agents: Claude Code hooks {'connected' if add else 'removed'}{where}]", flush=True)
     return ("Connected. New Claude Code sessions ask for approval in the notch too." if add
             else "Disconnected. Claude Code is back to how it was.") + where
+
+
+# --- the status line (Claude's usage limits) -------------------------------------------------------------
+
+STATUS_PY = os.path.join(HOOK_DIR, "mint_statusline.py")
+STATUS_SH = os.path.join(HOOK_DIR, "mint-statusline")
+STATUS_STATE = os.path.join(SUPPORT, "statusline.json")       # {"previous": the status line you had}
+STATUS_MARK = "mint-statusline"
+
+STATUS_SCRIPT = r"""#!/usr/bin/env python3
+# Mint's Claude Code status line: saves Claude's usage limits and the context window size for Mint, then prints
+# your own status line (the one you had before), or a short one. Nothing from your conversation is saved.
+import json, os, subprocess, sys, time
+
+SUPPORT = os.path.expanduser("~/Library/Application Support/Mint")
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw or "{}")
+except Exception:
+    data = {}
+if data.get("rate_limits") or data.get("context_window"):
+    try:
+        path = os.path.join(SUPPORT, "claude-limits.json")
+        try:
+            sizes = json.load(open(path)).get("sizes") or {}
+        except Exception:
+            sizes = {}
+        ctx = data.get("context_window") or {}
+        if data.get("session_id") and ctx.get("context_window_size"):
+            sizes.pop(data["session_id"], None)
+            sizes[data["session_id"]] = ctx["context_window_size"]
+            sizes = dict(list(sizes.items())[-30:])
+        keep = {"sizes": sizes, "rate_limits": data.get("rate_limits"),
+                "context_window": {"used_percentage": ctx.get("used_percentage"),
+                                   "context_window_size": ctx.get("context_window_size")} if ctx else None,
+                "session_id": data.get("session_id"), "updatedAt": int(time.time() * 1000)}
+        with open(path + ".tmp", "w") as fh:
+            json.dump(keep, fh)
+        os.replace(path + ".tmp", path)
+    except Exception:
+        pass
+try:
+    previous = (json.load(open(os.path.join(SUPPORT, "statusline.json"))).get("previous") or {})
+except Exception:
+    previous = {}
+if previous.get("command"):
+    try:
+        out = subprocess.run(previous["command"], input=raw, capture_output=True, text=True, shell=True, timeout=4)
+        sys.stdout.write(out.stdout)
+    except Exception:
+        pass
+else:
+    def pct(w):
+        return "%d%%" % round(w["used_percentage"]) if isinstance(w, dict) and isinstance(
+            w.get("used_percentage"), (int, float)) else ""
+    rl = data.get("rate_limits") or {}
+    parts = [(data.get("model") or {}).get("display_name") or "",
+             pct(rl.get("five_hour")) and "5h " + pct(rl.get("five_hour")),
+             pct(rl.get("seven_day")) and "week " + pct(rl.get("seven_day")),
+             pct(data.get("context_window")) and "context " + pct(data.get("context_window"))]
+    sys.stdout.write(" · ".join(p for p in parts if p) or "Mint")
+"""
+
+STATUS_WRAPPER = HOOK_WRAPPER.replace("Claude Code hook (see mint_agent_hook.py next to this)",
+                                      "Claude Code status line (see mint_statusline.py next to this)").replace(
+    "mint_agent_hook.py\" 2>/dev/null", "mint_statusline.py\" 2>/dev/null")
+
+
+def statusline_installed() -> bool:
+    try:
+        line = _load_settings().get("statusLine") or {}
+    except (OSError, ValueError):
+        return False
+    return isinstance(line, dict) and STATUS_MARK in str(line.get("command") or "")
+
+
+def statusline_preview(add: bool = True) -> str:
+    if add:
+        return ("Claude Code shares its usage limits only with a status line. Mint will set its own status line in "
+                "~/.claude/settings.json (a backup is saved first). It saves Claude's 5-hour and weekly limits for "
+                "Mint, then shows your current status line exactly as before. Removing it puts yours back.")
+    return "Mint will put your own status line back in ~/.claude/settings.json (a backup is saved first)."
+
+
+def install_statusline() -> str:
+    return _apply_statusline(True)
+
+
+def uninstall_statusline() -> str:
+    return _apply_statusline(False)
+
+
+def _apply_statusline(add: bool) -> str:
+    try:
+        settings = _load_settings()
+    except ValueError:
+        return "~/.claude/settings.json isn't valid JSON, so Mint left it alone. Fix it in an editor first."
+    except OSError as exc:
+        return f"Couldn't read ~/.claude/settings.json: {exc}"
+    new = json.loads(json.dumps(settings))
+    current = new.get("statusLine")
+    ours = isinstance(current, dict) and STATUS_MARK in str(current.get("command") or "")
+    if add:
+        if ours:
+            return "Already on."
+        os.makedirs(HOOK_DIR, exist_ok=True)
+        for path, text in ((STATUS_PY, STATUS_SCRIPT), (STATUS_SH, STATUS_WRAPPER)):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.chmod(path, 0o755)
+        with open(STATUS_STATE, "w", encoding="utf-8") as fh:
+            json.dump({"previous": current if isinstance(current, dict) else None}, fh)
+        new["statusLine"] = {"type": "command", "command": f'/bin/sh "{STATUS_SH}"'}
+    else:
+        if not ours:
+            return "Mint's status line wasn't there."
+        try:
+            previous = json.load(open(STATUS_STATE, encoding="utf-8")).get("previous")
+        except (OSError, ValueError):
+            previous = None
+        if isinstance(previous, dict) and previous.get("command"):
+            new["statusLine"] = previous
+        else:
+            new.pop("statusLine", None)
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    backup = ""
+    if os.path.exists(SETTINGS):
+        backup = SETTINGS + time.strftime(".mint-backup-%Y%m%d-%H%M%S")
+        shutil.copy2(SETTINGS, backup)
+    tmp = SETTINGS + ".mint-tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(new, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, SETTINGS)
+    where = f" (backup: {os.path.basename(backup)})" if backup else ""
+    return ("On. Claude's usage limits show in Mint after Claude Code's next answer." if add
+            else "Off. Your own status line is back.") + where

@@ -88,7 +88,11 @@ class _Clipboard:
 def type_text(text: str, press_return: bool = False, pid: int | None = None) -> str:
     """Insert text at the cursor in whatever field has focus. Instant.
 
-    With `pid`, the paste goes only to that process.
+    The ladder (effect.py has the why): straight into a native field through Accessibility
+    (AXSelectedText at the caret, read back) - no keys, no clipboard; else the characters as key
+    events sent to that app; else - and always for web pages and Chromium/Electron apps, where an
+    accessibility write is only echoed - a paste that borrows the clipboard and puts it back.
+    With `pid`, keys and the paste go only to that process.
     """
     if not text:
         return "Nothing to type."
@@ -104,38 +108,88 @@ def type_text(text: str, press_return: bool = False, pid: int | None = None) -> 
             # testing, text meant for a Google Doc was sent to a Gmail tab that
             # had come to the front, where Return would open an email.
             return problem
+    from mint.screen import axkit
+    from mint.screen import effect
     from mint.screen import ocr
+    front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    app_pid = pid or (int(front.processIdentifier()) if front is not None else 0)
+    focused = None if editor else axkit.focused_element(app_pid)
+    if focused is not None and axkit.attr(focused, "AXSubrole") == "AXSecureTextField":
+        return effect.refused("the focused field is a password field. Mint never types passwords - ask the user "
+                              "to type it themselves, then carry on")
     target = ocr._front_window()   # the window being typed into, fixed now
     before = _visible_text(target)
+    windows_before = effect.window_snapshot()
     from mint.ui.effects import fx
     fx.highlight_focused(seconds=min(4.0, 1.6 + len(text) / 400), label="Typing")
     from mint.app import control
     if control.stopped():
         return "STOPPED by the user before typing; nothing was typed."
-    with _Clipboard() as clip:
-        clip.board.clearContents()
-        clip.board.setString_forType_(text, AppKit.NSPasteboardTypeString)
-        # Pasting is instant and exact, where synthesising each keystroke is slow
-        # and mangles non-ASCII text and keyboard layouts.
-        fastinput.press_key("v", ["command"], pid=pid)
-        time.sleep(0.12)
-        if press_return:
-            fastinput.press_key("return", pid=pid)
+    progress, count, route, delivery = "skipped", 0, "", ""
+    if focused is not None and axkit.attr(focused, "AXRole") in _EDITABLE_ROLES \
+            and not effect.LIVE.chromium(app_pid):
+        raw = axkit.attr(focused, "AXValue")
+        value_before = raw if isinstance(raw, str) else None
+        progress, count, _ = effect.ax_insert(focused, text, at="caret")
+        if progress in ("complete", "partial", "unverifiable"):
+            route, delivery = "accessibility", "background"
+        elif progress in ("unchanged", "rejected") and len(text) <= fastinput.UNICODE_MAX:
+            fastinput.type_unicode(text, pid=app_pid or None)
+            time.sleep(0.15)
+            raw = axkit.attr(focused, "AXValue")
+            progress, count = effect.typed_progress(value_before, raw if isinstance(raw, str) else None, text)
+            route, delivery = "synthetic_events", "foreground"
+    if not route or progress == "unchanged":
+        with _Clipboard() as clip:
+            clip.board.clearContents()
+            clip.board.setString_forType_(text, AppKit.NSPasteboardTypeString)
+            # Pasting is instant and exact, where synthesising each keystroke is slow
+            # and mangles non-ASCII text and keyboard layouts.
+            fastinput.press_key("v", ["command"], pid=pid)
+            time.sleep(0.12)
+        progress, route, delivery = "pasted", "global_input", "foreground"
+    if press_return:
+        fastinput.press_key("return", pid=pid)
     done = f"Typed {len(text)} characters" + (" and pressed Return" if press_return else "")
-    verdict = _verify_typed(text, before, target)
-    if press_return and "FAILED" in verdict:
-        # Return in a chat box sends the message and clears the box, and the app
-        # may still be switching to the conversation. Reported as FAILED, the model
-        # typed the prompt again (ChatGPT, 24 Sep) - so say what is known.
-        verdict = (". Not confirmed on screen yet: Return may already have SENT it (a chat clears its box). "
-                   "Check with look before typing it again - never send it twice.")
-    if "FAILED" not in verdict and "not verified" not in verdict and "Not confirmed" not in verdict:
-        verdict += _name_untitled_doc(text)
-    if "FAILED" not in verdict:
+    evidence = []
+    if progress == "complete":
+        evidence.append("the field reads it back")
+        kind = effect.CONFIRMED
+    elif progress == "partial":
+        kind = effect.PARTIAL
+    else:
+        # Nothing read back from the field: what newly appears on screen is the evidence.
+        verdict = _verify_typed(text, before, target)
+        if "now visible on screen" in verdict:
+            kind = effect.CONFIRMED
+            evidence.append("it is now visible on screen")
+        elif "FAILED" in verdict and not press_return:
+            kind = effect.NOOP
+        else:
+            kind = effect.UNVERIFIABLE
+            if press_return and "FAILED" in verdict:
+                # Return in a chat box sends the message and clears the box, and the app
+                # may still be switching to the conversation. Reported as FAILED, the model
+                # typed the prompt again (ChatGPT, 24 Sep) - so say what is known.
+                done += "; not confirmed on screen yet: Return may already have SENT it (a chat clears its box)"
+            elif verdict.strip(" .(),"):
+                done += "; " + verdict.strip(" .(),")
+    evidence += effect.window_changes(windows_before, effect.window_snapshot(), pids=(app_pid,))
+    if kind == effect.CONFIRMED:
+        named = _name_untitled_doc(text).strip(" .")
+        done += f"; {named}" if named else ""
+    if kind != effect.NOOP:
         from mint.tools import undo
         undo.typed(text, press_return, pid)
-    return done + verdict
-
+    escalation = {
+        effect.PARTIAL: f"only {count} of {len(text)} characters landed - check the field, then type only what is "
+                        "missing",
+        effect.NOOP: "the text did not appear in the front window - the field may not have had focus, or another "
+                     "window was in front; click into the field first, then type again",
+        effect.UNVERIFIABLE: "check with look before typing it again - never type or send it twice",
+    }.get(kind, "")
+    return effect.Effect(kind, done, route, delivery, evidence, escalation,
+                         delivered=count if kind == effect.PARTIAL else None).render()
 
 def _name_untitled_doc(text: str) -> str:
     """Give a new Google Doc a real name, from the first line written into it.

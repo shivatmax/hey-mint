@@ -226,8 +226,8 @@ Foreground (the app comes to the front, still no guessing):
    'Loading…' label). An AI chat writing its answer, or minutes of work: wait_until_done.
 Pointer (last):
 9. "this" / "here" / "where my mouse is": pointer (where tells you what it is over; click clicks it).
-10. Only for things no tool above can see (canvases, games, custom-drawn apps): look, then click_at. click_at
-   says what it hit - if that is not the target, pick a different point or use ui_act; never the same point twice.
+10. Only for things no tool above can see (canvases, games, custom-drawn apps): look, then click_at with the
+   target's name (x, y only a hint - Mint finds it by name, text or vision). click_at says what it hit - if that is not the target, pick a different point or use ui_act; never the same point twice.
 If a tool result starts with [Loop warning], do something different - never the same call a fourth time.
 A request repeated after an earlier failure means: try again, differently - never answer it from the
 earlier failure without a single tool call.
@@ -300,8 +300,8 @@ def _fingerprint(name: str, args: dict) -> str:
 
 def _failed(result: str) -> bool:
     head = (result or "")[:80].lower()
-    return head.startswith(("failed", "could not", "cannot", "did nothing", "not found", "refused", "no ")) \
-        or " failed" in head
+    return head.startswith(("failed", "could not", "cannot", "did nothing", "not found", "refused", "no ",
+                            "suspected no-op")) or " failed" in head
 
 
 def _password_field() -> bool:
@@ -1858,8 +1858,17 @@ def scroll_to(args: dict) -> str:
             fx.scroll(point[0], point[1], direction)
         except Exception:
             pass
+        from mint.screen import effect
+        last = _signature(pane)
         _wheel(point, direction, amount)
-        return f"Scrolled the {where} pane of {name} {direction}."
+        time.sleep(0.25)
+        if _signature(pane) != last:
+            return effect.Effect(effect.CONFIRMED, f"Scrolled the {where} pane of {name} {direction}", "global_input",
+                                 "foreground", ["its content moved (read back)"]).render()
+        return effect.Effect(effect.NOOP, f"Scrolled the {where} pane of {name} {direction}, but its content did not "
+                             "move", "global_input", "foreground",
+                             escalation=f"it may be at its end - try direction={'up' if direction == 'down' else 'down'}, "
+                             "or name the pane with where=").render()
 
     def locate():
         web = None
@@ -1908,7 +1917,10 @@ def scroll_to(args: dict) -> str:
                 seen = _ocr_find(target)
                 if seen is not None:
                     _highlight_box(seen, target)
-                    return f"'{target}' is now in view in {name} after {rounds} scroll{'s' if rounds > 1 else ''} (read on screen)."
+                    from mint.screen import effect
+                    return effect.Effect(effect.CONFIRMED, f"'{target}' is now in view in {name} after {rounds} "
+                                         f"scroll{'s' if rounds > 1 else ''}", "global_input", "foreground",
+                                         ["read on screen"]).render()
                 now = _signature(pane)
                 if now == last:
                     break                  # this pane is at its end
@@ -1921,9 +1933,12 @@ def scroll_to(args: dict) -> str:
                     "or check the name.")
 
     AX = _ax()
+    # Accessibility first: no wheel, no pointer, works with the window behind others.
     AX.AXUIElementPerformAction(element, "AXScrollToVisible")
     time.sleep(0.15)
+    wheeled = rounds > 0
     if not _on_screen(element, window):
+        wheeled = True
         area = _scroll_area_of(element)
         box = _frame(element)
         if area is not None and box:
@@ -1939,9 +1954,14 @@ def scroll_to(args: dict) -> str:
     label = _label(element)[:60] or target
     _highlight(element, target)
     role = (_attr(element, "AXRole") or "").removeprefix("AX")
+    from mint.screen import effect
+    route = ("global_input", "foreground") if wheeled else ("accessibility", "background")
     if visible:
-        return f"'{label}' ({role}) is now in view in {name}" + (f" after {rounds} scrolls." if rounds else ".")
-    return f"Found '{label}' ({role}) in {name}, but could not confirm it is on screen; look to check."
+        return effect.Effect(effect.CONFIRMED, f"'{label}' ({role}) is now in view in {name}"
+                             + (f" after {rounds} scrolls" if rounds else ""), *route,
+                             ["its frame reads back inside the window"]).render()
+    return effect.Effect(effect.UNVERIFIABLE, f"Found '{label}' ({role}) in {name}, but could not confirm it is on "
+                         "screen", *route, escalation="look to check").render()
 
 
 # --- menu -----------------------------------------------------------------------------------
@@ -3503,6 +3523,7 @@ def browser(args: dict) -> str:
     if app is None:
         return "FAILED: no web browser is open. open_url or open_chrome first."
     name, family = _BROWSERS[app.bundleIdentifier()]
+    __import__("mint.ui.window_glow", fromlist=["glow"]).glow(pid=app.processIdentifier(), seconds=4.0)  # the browser glows
     url, title = _tab_info(app)
     site = __import__("mint.ui.activity", fromlist=["_site"])._site(url) if url else name
 

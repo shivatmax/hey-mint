@@ -389,6 +389,9 @@ class Emotes:
 
     def _float(self, symbol: str, rgb, count=4, rise=34, size=10, spread=18, duration=1.6, stagger=0.35,
                start=None):
+        from mint.ui import kinetics
+        if kinetics.reduce_motion():                  # no drifting props either
+            return
         orb = self.orb
         bx, by = start or orb._bc
         for i in range(count):
@@ -446,6 +449,9 @@ class Emotes:
         return hand
 
     def _body(self, key, values, duration, times=None, repeat=1.0, name=None):
+        from mint.ui import kinetics
+        if kinetics.reduce_motion():                  # Reduce motion: the face alone, no hops or sways
+            return
         _keys(self.orb.body, key, values, duration, times, repeat=repeat, additive=True,
               name=name or "em-" + key.split(".")[-1])
 
@@ -772,6 +778,9 @@ class Emotes:
         self._clicks = [t for t in self._clicks if now - t < 2.5] + [now]
         if len(self._clicks) >= 2 and now - self._clicks[-2] < 0.6:
             self._pokes += 1
+            from mint.core import prefs
+            if prefs.get("poke_play") is not False:
+                return True                       # the orb plays it itself (Orb.poke): slap, dizzy, annoyed
             self._react(["laugh", "surprised", "dizzy", "angry"][min(self._pokes - 1, 3)]
                         if self._pokes < 6 else random.choice(["angry", "cry", "dizzy"]))
             return True

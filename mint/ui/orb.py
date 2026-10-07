@@ -8,6 +8,14 @@ happy) sits on that. Around it: a glow that swells with the voice, a pulse
 ring, a comet spinner while busy, a progress ring for long tasks, and a badge
 showing what kind of work is going on.
 
+The state reads even when the face is tiny (the notch): a status badge at the
+top-left (badge.py), a tint over the lower half, and the eyes' shape
+(expression: dash, halfmoon, arc, dot, wide). The face sits on a sphere: eyes
+foreshorten as they slide toward the rim. Poke it (poke): a slap, three quick
+ones make it dizzy, keep going and it gets annoyed. For scenes: wave() brings
+out two little hands, morph("folder") turns the face into a window, thumb_mode()
+makes it small enough to ride a progress bar.
+
 Main thread only.
 """
 
@@ -23,9 +31,27 @@ from PyObjCTools import AppHelper
 
 from mint.ui import activity
 from mint.ui import gfx
+from mint.ui import kinetics
 from mint.core import prefs
 
 INK = (0.04, 0.06, 0.12)          # the face's colour
+
+# Eye shapes, in face units (a 44 pt face): width, height, corner radius, tilt (inner ends down),
+# and which catch-lights show (both / one / none). "arc" and "closed" are drawn differently.
+EYES = {
+    "normal": (5.0, 9.0, 2.5, 0.0, 2),
+    "wide": (6.4, 10.6, 3.2, 0.0, 2),
+    "dot": (4.4, 4.6, 2.2, 0.0, 1),
+    "dash": (6.6, 1.9, 0.95, 0.0, 0),
+    "halfmoon": (7.0, 4.4, 3.5, 0.24, 0),
+    "arc": (5.0, 1.6, 0.8, 0.0, 0),
+    "closed": (5.0, 2.0, 1.0, 0.0, 0),
+}
+EXPRESSIONS = ("normal", "dash", "halfmoon", "arc", "dot", "wide")
+
+# Blink (from the peer's spec): close 80 ms, open 140 ms.
+_BLINK_CLOSE = (0.55, 0.0, 0.9, 0.45)
+_BLINK_OPEN = (0.15, 0.6, 0.3, 1.0)
 
 
 def _ease(name=Quartz.kCAMediaTimingFunctionEaseInEaseOut):
@@ -72,6 +98,26 @@ class Orb:
         self._next_z = 0.0
         self._yawn_until = 0.0
         self._look_around_until = 0.0
+        self.in_notch = False             # set by notch.py: extras float downwards, no pill
+        self.primary = False              # set by the HUD on the orb it drives: the status badge shows
+        self._busy = False
+        # The face on a sphere: gaze angles (eased), a kick that springs back (slaps), extras (dizzy).
+        self._gaze = [0.0, 0.0]
+        self._kick = [0.0, 0.0]
+        self._kick_v = [0.0, 0.0]
+        self._face_drop = 0.0             # the folder morph moves the face down under its bar
+        self._expr = "normal"
+        self._expr_until = 0.0
+        self._shape = "normal"            # the eye shape on screen
+        self._shape_seq = 0
+        self._pokes: list[float] = []
+        self._roll_at = 0.0               # dizzy: when the roll started
+        self._annoyed_until = 0.0
+        self._swell = 1.0
+        self._thumb = False
+        self._size = 1.0
+        self._morphed = None
+        self._tint_kind = None
         self._build()
 
     # --- construction ------------------------------------------------------------
@@ -139,6 +185,16 @@ class Orb:
         white = AppKit.NSColor.colorWithWhite_alpha_
         self.shade.setColors_([white(1.0, 0.28).CGColor(), white(1.0, 0.0).CGColor()])
         core.addSublayer_(self.shade)
+        # The state tint: the lower half takes the state's colour (blue working, red error...) so the
+        # state reads even on a tiny face; the swirl still shows through. Wider than the circle so the
+        # folder morph's corners are covered too.
+        self.tint = Quartz.CAGradientLayer.layer()
+        self.tint.setFrame_(Quartz.CGRectMake(-d * 0.1, -d * 0.1, d * 1.2, d * 1.2))
+        self.tint.setStartPoint_(Quartz.CGPointMake(0.5, 0.0))
+        self.tint.setEndPoint_(Quartz.CGPointMake(0.5, 0.56))
+        self.tint.setColors_([white(1.0, 0.0).CGColor(), white(1.0, 0.0).CGColor()])
+        self.tint.setOpacity_(0.0)
+        core.addSublayer_(self.tint)
         gloss = Quartz.CAGradientLayer.layer()
         gloss.setFrame_(Quartz.CGRectMake(d * 0.14, d * 0.52, d * 0.72, d * 0.42))
         gloss.setCornerRadius_(d * 0.21)
@@ -168,10 +224,19 @@ class Orb:
         def white_(w, a):
             return AppKit.NSColor.colorWithWhite_alpha_(w, a).CGColor()
         self.eyes, self.smiles, self.cheeks = [], [], []
+        self._sockets = []
         for dx in (-6.5 * s, 6.5 * s):
+            # Each eye hangs in a socket: the socket slides over the sphere and foreshortens near the
+            # rim; the eye inside changes shape and blinks. (Two layers, so the transforms don't fight.)
+            socket = Quartz.CALayer.layer()
+            socket.setBounds_(Quartz.CGRectMake(0, 0, 0, 0))
+            socket.setPosition_(Quartz.CGPointMake(d / 2 + dx, d / 2 + 2 * s))
+            face.addSublayer_(socket)
+            self._sockets.append(socket)
             eye = Quartz.CALayer.layer()
             eye.setBounds_(Quartz.CGRectMake(0, 0, 5 * s, 9 * s))
             eye.setCornerRadius_(2.5 * s)
+            eye.setPosition_(Quartz.CGPointMake(0, 0))
             eye.setBackgroundColor_(gfx.cg(INK, 0.9))
             # Two catch-lights make the eyes sparkle.
             for (hx, hy, hd) in ((3.5, 6.6, 2.3), (1.6, 2.6, 1.1)):
@@ -181,7 +246,7 @@ class Orb:
                 shine.setPosition_(Quartz.CGPointMake(hx * s, hy * s))
                 shine.setBackgroundColor_(white_(1.0, 0.95))
                 eye.addSublayer_(shine)
-            face.addSublayer_(eye)
+            socket.addSublayer_(eye)
             self.eyes.append((eye, dx))
             smile = Quartz.CAShapeLayer.layer()
             arc = Quartz.CGPathCreateMutable()
@@ -193,7 +258,8 @@ class Orb:
             smile.setLineWidth_(2.2 * s)
             smile.setLineCap_(Quartz.kCALineCapRound)
             smile.setOpacity_(0)
-            face.addSublayer_(smile)
+            smile.setPosition_(Quartz.CGPointMake(0, -1))
+            socket.addSublayer_(smile)
             self.smiles.append(smile)
             cheek = Quartz.CALayer.layer()
             cheek.setBounds_(Quartz.CGRectMake(0, 0, 6 * s, 3.5 * s))
@@ -303,6 +369,9 @@ class Orb:
         picture.setContentsGravity_(Quartz.kCAGravityResizeAspect)
         badge.addSublayer_(picture)
         self.badge, self.badge_icon, self.badge_mask, self.badge_picture = badge, icon, mask, picture
+        # The status badge, top left (dots while working, red on error, green when done).
+        from mint.ui.badge import StatusBadge
+        self.status = StatusBadge(self)
 
         emitter = Quartz.CAEmitterLayer.layer()
         emitter.setFrame_(self.root.bounds())
@@ -422,6 +491,36 @@ class Orb:
             group.setTimingFunction_(_ease(Quartz.kCAMediaTimingFunctionEaseOut))
             self.ring.addAnimation_forKey_(group, "pulse")
 
+        from mint.ui import badge
+        if dim:
+            self.status.flash_kind = None        # asleep or off: no red dot hanging on from before
+        self.status.set_base(badge.kind_for(state))
+        self._update_tint()
+
+    # --- state tint -------------------------------------------------------------------
+
+    TINTED = ("working", "thinking", "error", "done")
+
+    def _update_tint(self) -> None:
+        """The lower half in the state's colour: what the badge says right now, if it is worth a tint."""
+        kind = self.status.current()
+        kind = kind if kind in self.TINTED else None
+        if kind == self._tint_kind:
+            return
+        self._tint_kind = kind
+        from mint.ui.badge import COLORS
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.45)
+        if kind is not None:
+            rgb = COLORS[kind]
+            strong = 0.85 if kind in ("error", "done") else 0.8
+            self.tint.setColors_([gfx.cg(rgb, strong), gfx.cg(rgb, strong * 0.6), gfx.cg(rgb, 0.0)])
+            self.tint.setLocations_([0.0, 0.5, 1.0])
+            self.tint.setOpacity_(1.0)
+        else:
+            self.tint.setOpacity_(0.0)
+        Quartz.CATransaction.commit()
+
     def set_progress(self, fraction: float | None) -> None:
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setAnimationDuration_(0.5)
@@ -468,7 +567,8 @@ class Orb:
         self._spring(self.glyph, 0.2, 1.0, damping=9, stiffness=240, key="in")
         tile = kind in self.TILES or icon is not None
         self._reshape(d * (0.3 if tile else 0.5))
-        self._body_keys("transform.scale.x", [0.0, 0.12, -0.06, 0.0], 0.42)     # a little jelly squish
+        if not kinetics.reduce_motion():
+            self._body_keys("transform.scale.x", [0.0, 0.12, -0.06, 0.0], 0.42)     # a little jelly squish
         self._kind_motion(kind)
 
     def _fade(self, layer, opacity, duration, scale=None):
@@ -510,6 +610,8 @@ class Orb:
         target.removeAnimationForKey_("kind")
         self.scan.removeAllAnimations()
         self.scan.setOpacity_(0)
+        if kinetics.reduce_motion():           # the glyph alone says it; no loops
+            return
         g = self.d / 2
 
         def forever(key, values, duration, times=None):
@@ -574,7 +676,10 @@ class Orb:
         Quartz.CATransaction.commit()
         self.glyph.setShadowOpacity_(0.55)
         self._spring(self.glyph, 0.4, 1.0, damping=7, stiffness=300, key="in")
-        self._reshape(self.d * 0.5)
+        self._reshape(self.d * (0.24 if self._morphed == "folder" else 0.5))
+        # The state language: a green dot for a moment, or a red one (and a red tint) for longer.
+        self.status.flash("done" if ok else "error", 1.8 if ok else 4.0)
+        self._update_tint()
         if ok:
             self.hop()
             self._happy_until = time.monotonic() + 1.4
@@ -586,11 +691,16 @@ class Orb:
                 return
             self._fade(self.glyph, 0.0, 0.25)
             self._fade(self.face, 1.0, 0.3, scale=1.0)
+            # The face comes back with how it went: content arcs, or flat tired eyes for a while.
+            if not ok:
+                self.expression("dash", 3.0)
         AppHelper.callLater(0.9, back)
 
     # --- flourishes -----------------------------------------------------------------
 
     def burst(self, rgb, stars: bool = False, amount: float = 1.0) -> None:
+        if kinetics.reduce_motion():
+            return
         cells = []
         for image, rate, scale in ((self._dot_image, 110, 0.36), (self._star_image, 40 if stars else 0, 0.6)):
             if not rate or image is None:
@@ -626,11 +736,15 @@ class Orb:
         self.body.addAnimation_forKey_(animation, key)
 
     def shake(self) -> None:
+        if kinetics.reduce_motion():
+            return
         self._body_keys("transform.translation.x", [0, -5, 5, -4, 4, -2, 0], 0.42)
 
     def hop(self) -> None:
         """A little jump with squash and stretch: it crouches, stretches tall on the way up, squashes wide as
         it lands and wobbles back (additive, so it rides on the breathing and hover scale)."""
+        if kinetics.reduce_motion():
+            return
         self._body_keys("transform.translation.y", [0, -1.5, 7, -2, 2, 0], 0.56, [0, 0.12, 0.42, 0.68, 0.86, 1])
         if prefs.get("notch_playful") is False:
             return
@@ -640,13 +754,18 @@ class Orb:
                         0.56, [0, 0.12, 0.3, 0.5, 0.68, 0.84, 1])
 
     def boot(self) -> None:
-        self._spring(self.core, 0.45, 1.0, damping=7, stiffness=200, key="boot")
+        if kinetics.reduce_motion():
+            kinetics.basic(self.core, "opacity", 0.0, self.core.opacity(), 0.25, anim_key="boot", keep=False)
+        else:
+            self._spring(self.core, 0.45, 1.0, damping=7, stiffness=200, key="boot")
         self.burst(gfx.state_rgb("awake"), amount=0.45)
         self.blink()
 
     def celebrate(self) -> None:
         self.burst(gfx.accent(), stars=True, amount=1.5)
         self._happy_until = time.monotonic() + 1.8
+        self.status.flash("done", 2.5)
+        self._update_tint()
         self.hop()
 
     def stopped(self) -> None:
@@ -658,47 +777,399 @@ class Orb:
         flash.setDuration_(0.35)
         self.core.addAnimation_forKey_(flash, "flash")
 
-    def blink(self) -> None:
+
+    # --- blinking and eye shapes --------------------------------------------------------
+
+    @staticmethod
+    def _blink_anim(hold: float = 0.0):
+        """Close in 80 ms with a falling ease, open in 140 ms with a soft rise."""
+        close = Quartz.CAMediaTimingFunction.functionWithControlPoints____(*_BLINK_CLOSE)
+        open_ = Quartz.CAMediaTimingFunction.functionWithControlPoints____(*_BLINK_OPEN)
+        total = 0.08 + hold + 0.14
+        blink = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.scale.y")
+        if hold:
+            blink.setValues_([1.0, 0.08, 0.08, 1.0])
+            blink.setKeyTimes_([0.0, 0.08 / total, (0.08 + hold) / total, 1.0])
+            blink.setTimingFunctions_([close, _ease(Quartz.kCAMediaTimingFunctionLinear), open_])
+        else:
+            blink.setValues_([1.0, 0.08, 1.0])
+            blink.setKeyTimes_([0.0, 0.08 / total, 1.0])
+            blink.setTimingFunctions_([close, open_])
+        blink.setDuration_(total)
+        return blink
+
+    def blink(self, double: bool = False) -> None:
         for eye, _ in self.eyes:
-            blink = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.scale.y")
-            blink.setValues_([1.0, 0.1, 1.0])
-            blink.setDuration_(0.16)
-            eye.addAnimation_forKey_(blink, "blink")
+            eye.addAnimation_forKey_(self._blink_anim(), "blink")
+        if double:
+            AppHelper.callLater(0.3, self.blink)
 
     def wink(self) -> None:
         eye = self.eyes[1][0]
-        wink = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.scale.y")
-        wink.setValues_([1.0, 0.1, 0.1, 1.0])
-        wink.setKeyTimes_([0, 0.25, 0.75, 1])
-        wink.setDuration_(0.4)
-        eye.addAnimation_forKey_(wink, "blink")
+        eye.addAnimation_forKey_(self._blink_anim(hold=0.18), "blink")
+
+    def expression(self, name: str, seconds: float | None = None) -> None:
+        """Eyes-only expression: "dash" (flat: error, tired), "halfmoon" (annoyed), "arc" (content),
+        "dot" (small, looking), "wide" (surprised), "normal". For `seconds`, or until the next call."""
+        if name not in EXPRESSIONS or name == "normal":
+            self._expr, self._expr_until = "normal", 0.0
+            return
+        self._expr = name
+        self._expr_until = time.monotonic() + seconds if seconds else float("inf")
+
+    def _shape_for(self, now: float, closed: bool, happy: bool) -> str:
+        if closed or now < self._yawn_until:
+            return "closed"
+        if happy:
+            return "arc"
+        if now < self._expr_until:
+            return self._expr
+        return "normal"
+
+    def _set_shape(self, shape: str, quick: bool = False) -> None:
+        """Morph the eyes to a new shape; a big change hides behind a blink (swapped while shut)."""
+        old, self._shape = self._shape, shape
+        self._shape_seq += 1
+        seq = self._shape_seq
+        if quick or "closed" in (old, shape):
+            self._apply_shape(shape)
+            return
+        self.blink()
+
+        def swap():
+            if seq == self._shape_seq:
+                self._apply_shape(shape)
+        AppHelper.callLater(0.075, swap)
+
+    def _apply_shape(self, shape: str) -> None:
+        s = self._face_scale
+        w, h, r, tilt, shines = EYES[shape]
+        arc = shape == "arc"
+        all_corners = (Quartz.kCALayerMinXMinYCorner | Quartz.kCALayerMaxXMinYCorner
+                       | Quartz.kCALayerMinXMaxYCorner | Quartz.kCALayerMaxXMaxYCorner)
+        bottom = Quartz.kCALayerMinXMinYCorner | Quartz.kCALayerMaxXMinYCorner
+        for (eye, _), smile in zip(self.eyes, self.smiles):
+            pres = eye.presentationLayer() or eye
+            b = pres.bounds()
+            kinetics.spring(eye, "bounds", (0.0, 0.0, b.size.width, b.size.height), (0.0, 0.0, w * s, h * s),
+                            "bouncy", anim_key="eye-shape")
+            kinetics.spring(eye, "cornerRadius", pres.cornerRadius(), r * s, "bouncy", anim_key="eye-round")
+            Quartz.CATransaction.begin()
+            Quartz.CATransaction.setAnimationDuration_(0.12)
+            eye.setMaskedCorners_(bottom if shape == "halfmoon" else all_corners)
+            eye.setOpacity_(0.0 if arc else 1.0)
+            smile.setOpacity_(1.0 if arc else 0.0)
+            Quartz.CATransaction.commit()
+            Quartz.CATransaction.begin()
+            Quartz.CATransaction.setDisableActions_(True)
+            big, small = (eye.sublayers() or [None, None])[:2]
+            k = 1.15 if shape == "wide" else (0.7 if shape == "dot" else 1.0)
+            for shine, (fx, fy, size), on in ((big, (0.7, 0.73, 2.3), shines >= 1),
+                                              (small, (0.32, 0.29, 1.1), shines >= 2)):
+                if shine is None:
+                    continue
+                shine.setHidden_(not on)
+                shine.setBounds_(Quartz.CGRectMake(0, 0, size * k * s, size * k * s))
+                shine.setCornerRadius_(size * k * s / 2)
+                shine.setPosition_(Quartz.CGPointMake(w * s * fx, h * s * fy))
+            Quartz.CATransaction.commit()
+        self._tilt_target = tilt
+
+    # --- poke play ----------------------------------------------------------------------
+
+    ROLL, WOOZY = 1.4, 1.5          # dizzy: the eyes roll twice, then a woozy sway
+
+    def poke(self, dx: float = 0.0, dy: float = 0.0) -> str:
+        """A click on the face. (dx, dy): where, from the face's centre (screen points; y up).
+        -> "slap" | "dizzy" | "annoyed" | "ignored" | "blink" | "off". The state underneath carries on."""
+        if prefs.get("poke_play") is False:
+            return "off"
+        now = time.monotonic()
+        if kinetics.reduce_motion():
+            self.blink()
+            return "blink"
+        if now < self._annoyed_until:
+            self.shake()                         # "I said stop"
+            return "ignored"
+        self._pokes = [t for t in self._pokes if now - t < 6.0] + [now]
+        if len(self._pokes) >= 6:
+            self._pokes = []
+            self._annoyed()
+            return "annoyed"
+        quick = [t for t in self._pokes if now - t < 1.3]
+        if len(quick) >= 3 and now - self._roll_at > self.ROLL + self.WOOZY:
+            self._dizzy()
+            return "dizzy"
+        self._slap(dx, dy)
+        return "slap"
+
+    def _sound(self, name: str) -> None:
+        try:
+            from mint.ui import sfx
+            sfx.play(name)
+        except Exception:
+            pass
+
+    def _squash(self, k: float = 0.15, stiffness: float = 180.0, damping: float = 9.0) -> None:
+        """Squashed wide (k) then a wobbly spring back; additive, so it rides on the breathing scale."""
+        for key, value in (("transform.scale.x", k), ("transform.scale.y", -k)):
+            wobble = Quartz.CASpringAnimation.animationWithKeyPath_(key)
+            wobble.setFromValue_(value)
+            wobble.setToValue_(0.0)
+            wobble.setAdditive_(True)
+            wobble.setStiffness_(stiffness)
+            wobble.setDamping_(damping)
+            wobble.setMass_(1.0)
+            wobble.setDuration_(min(1.2, wobble.settlingDuration()))
+            self.body.addAnimation_forKey_(wobble, "poke-" + key)
+
+    def _slap(self, dx: float, dy: float) -> None:
+        self._squash(0.15)
+        side = -1.0 if dx > 0 else (1.0 if dx < 0 else random.choice((-1.0, 1.0)))
+        dist = math.hypot(dx, dy) or 1.0
+        # The eyes jerk away from the hit (one slides round behind the curve), squeezed shut a moment.
+        self._kick = [side * 1.0, -0.35 * dy / dist]
+        self._kick_v = [0.0, 0.0]
+        self._expr, self._expr_until = "dash", time.monotonic() + 0.28
+        self._quick_shape = True
+        self._sound("poke")
+
+    def _dizzy(self) -> None:
+        self._roll_at = time.monotonic()
+        self._squash(0.1)
+        self._kick = [0.0, 0.0]
+        self._sound("dizzy")
+        self._dizzy_stars(self.ROLL + self.WOOZY)
+        AppHelper.callLater(self.ROLL, lambda: self._body_keys(
+            "transform.rotation.z", [0, 0.16, -0.13, 0.1, -0.06, 0.02, 0], self.WOOZY))
+
+    def _annoyed(self) -> None:
+        self._annoyed_until = time.monotonic() + 4.0
+        self.expression("halfmoon", 4.0)
+        self._quick_shape = True
+        self._squash(-0.05, stiffness=260.0, damping=12.0)
+        self._sound("poke")
+        for i, side in enumerate((-1, 1)):
+            AppHelper.callLater(0.3 + i * 0.32, lambda side=side: self._puff(side))
+
+    def _puff(self, side: int) -> None:
+        """A tiny huff of steam off one side of the head."""
+        d = self.d
+        bx, by = self._bc
+        size = max(3.0, d * 0.14)
+        down = -1 if self.in_notch else 1
+        puff = Quartz.CALayer.layer()
+        puff.setBounds_(Quartz.CGRectMake(0, 0, size, size))
+        puff.setCornerRadius_(size / 2)
+        puff.setBackgroundColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.95).CGColor())
+        puff.setShadowColor_(AppKit.NSColor.whiteColor().CGColor())     # soft, like steam
+        puff.setShadowOpacity_(0.8)
+        puff.setShadowRadius_(size * 0.4)
+        puff.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+        start = (bx + side * d * 0.46, by + down * d * 0.3)
+        puff.setPosition_(Quartz.CGPointMake(*start))
+        puff.setOpacity_(0.0)
+        self.body.addSublayer_(puff)
+        end = (start[0] + side * d * 0.28, start[1] + down * d * 0.22)
+        kinetics.basic(puff, "position", start, end, 0.6, anim_key="puff-p", keep=False)
+        kinetics.basic(puff, "transform.scale", 0.4, 1.6, 0.6, anim_key="puff-s", keep=False)
+        fade = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+        fade.setValues_([0.0, 0.95, 0.0])
+        fade.setKeyTimes_([0, 0.2, 1])
+        fade.setDuration_(0.6)
+        puff.addAnimation_forKey_(fade, "puff-o")
+        AppHelper.callLater(0.62, puff.removeFromSuperlayer)
+
+    def _dizzy_stars(self, seconds: float) -> None:
+        """Three little stars circling the head (not in the notch: no room above)."""
+        if self.in_notch or self.d < 30:
+            return
+        d = self.d
+        bx, by = self._bc
+        w, h = d * 0.95, d * 0.26
+        ring = Quartz.CGPathCreateWithEllipseInRect(Quartz.CGRectMake(bx - w / 2, by + d * 0.42 - h / 2, w, h), None)
+        size = d * 0.2
+        for i in range(3):
+            star = Quartz.CALayer.layer()
+            star.setBounds_(Quartz.CGRectMake(0, 0, size, size))
+            mask = Quartz.CALayer.layer()
+            mask.setFrame_(Quartz.CGRectMake(0, 0, size, size))
+            mask.setContents_(gfx.symbol("star.fill", size * 2, "bold"))
+            mask.setContentsGravity_(Quartz.kCAGravityResizeAspect)
+            star.setMask_(mask)
+            star.setBackgroundColor_(gfx.cg((1.0, 0.86, 0.35)))
+            star.setShadowColor_(gfx.cg(INK))
+            star.setShadowOpacity_(0.35)
+            star.setShadowRadius_(1)
+            star.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+            star.setOpacity_(0.0)
+            self.body.addSublayer_(star)
+            orbit = Quartz.CAKeyframeAnimation.animationWithKeyPath_("position")
+            orbit.setPath_(ring)
+            orbit.setDuration_(0.9)
+            orbit.setRepeatCount_(float("inf"))
+            orbit.setCalculationMode_(Quartz.kCAAnimationPaced)
+            orbit.setTimeOffset_(i * 0.3)
+            star.addAnimation_forKey_(orbit, "orbit")
+            fade = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+            fade.setValues_([0.0, 1.0, 1.0, 0.0])
+            fade.setKeyTimes_([0, 0.1, 0.85, 1])
+            fade.setDuration_(seconds)
+            star.addAnimation_forKey_(fade, "fade")
+            AppHelper.callLater(seconds, star.removeFromSuperlayer)
+
+    # --- scenes (greeting, files, progress) ----------------------------------------------
+
+    def wave(self, seconds: float = 1.6) -> None:
+        """Two little round hands come out beside the face, wave, and pop away."""
+        if kinetics.reduce_motion():
+            self.blink()
+            return
+        d = self.d
+        bx, by = self._bc
+        size = max(5.0, d * 0.27)
+        hands = []
+        for i, side in enumerate((-1, 1)):
+            hand = Quartz.CAGradientLayer.layer()
+            hand.setType_(Quartz.kCAGradientLayerRadial)
+            hand.setStartPoint_(Quartz.CGPointMake(0.38, 0.66))
+            hand.setEndPoint_(Quartz.CGPointMake(1.1, -0.1))
+            hand.setColors_([gfx.cg((1.0, 1.0, 1.0)), gfx.cg(gfx.mix(gfx.light(gfx.accent()), (0.85, 0.88, 0.95), 0.4))])
+            hand.setBounds_(Quartz.CGRectMake(0, 0, size, size))
+            hand.setCornerRadius_(size / 2)
+            hand.setMasksToBounds_(False)
+            hand.setBorderWidth_(max(0.5, size * 0.06))
+            hand.setBorderColor_(AppKit.NSColor.colorWithWhite_alpha_(1.0, 0.75).CGColor())
+            hand.setShadowColor_(gfx.cg(INK))
+            hand.setShadowOpacity_(0.3)
+            hand.setShadowRadius_(max(1.0, size * 0.12))
+            hand.setShadowOffset_(Quartz.CGSizeMake(0, -0.5))
+            # The wrist is below the hand: it swings from there.
+            hand.setAnchorPoint_(Quartz.CGPointMake(0.5, -0.9))
+            hand.setPosition_(Quartz.CGPointMake(bx + side * d * 0.66, by - d * 0.42))
+            self.body.addSublayer_(hand)
+            hands.append(hand)
+            kinetics.pop(hand, "bouncy", start=0.1, delay=i * 0.07)
+            begin = Quartz.CACurrentMediaTime() + i * 0.07
+            # Up from below the face, then a wave from the wrist (both additive: they ride on the pop).
+            rise = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.translation.y")
+            rise.setValues_([-d * 0.3, d * 0.08, 0.0])
+            rise.setKeyTimes_([0, 0.6, 1])
+            rise.setDuration_(0.32)
+            rise.setAdditive_(True)
+            rise.setBeginTime_(begin)
+            rise.setFillMode_(Quartz.kCAFillModeBackwards)
+            hand.addAnimation_forKey_(rise, "rise")
+            swing = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.rotation.z")
+            a = 0.62 * -side
+            # Opposite phases, so the hands wave like two little paws rather than one stiff pair.
+            swing.setValues_([0.0, a, -a * 0.45, a, -a * 0.45, a * 0.8, 0.0] if i == 0 else
+                             [0.0, -a * 0.45, a, -a * 0.45, a, -a * 0.3, 0.0])
+            swing.setCalculationMode_(Quartz.kCAAnimationCubic)
+            swing.setDuration_(max(0.6, seconds - 0.45))
+            swing.setAdditive_(True)
+            swing.setBeginTime_(begin + 0.22)
+            swing.setFillMode_(Quartz.kCAFillModeBackwards)
+            hand.addAnimation_forKey_(swing, "wave")
+
+        def away():
+            for hand in hands:
+                kinetics.basic(hand, "transform.scale", 1.0, 0.05, 0.2, timing=Quartz.kCAMediaTimingFunctionEaseIn,
+                               anim_key="away")
+                kinetics.basic(hand, "opacity", 1.0, 0.0, 0.2, anim_key="away-o")
+            AppHelper.callLater(0.22, lambda: [h.removeFromSuperlayer() for h in hands])
+        AppHelper.callLater(max(0.5, seconds - 0.2), away)
+        self.blink()
+
+    def morph(self, shape: str | None = None) -> None:
+        """"folder": the round face becomes a rounded window/folder with a black bar on top (the eyes
+        stay); None: back to the circle. A spring on the bounds and corners."""
+        folder = shape == "folder"
+        if folder == (self._morphed == "folder"):
+            return
+        self._morphed = "folder" if folder else None
+        d = self.d
+        w, h = (d * 1.18, d * 1.0) if folder else (d, d)
+        radius = d * 0.24 if folder else d / 2
+        pres = self.core.presentationLayer() or self.core
+        b = pres.bounds()
+        # Bounds grow round the centre (origin below zero), so everything inside stays centred.
+        kinetics.spring(self.core, "bounds", (b.origin.x, b.origin.y, b.size.width, b.size.height),
+                        (-(w - d) / 2, -(h - d) / 2, w, h), "bouncy", anim_key="morph")
+        kinetics.spring(self.core, "cornerRadius", pres.cornerRadius(), radius, "bouncy", anim_key="shape")
+        bar = getattr(self, "_bar", None)
+        if bar is None:
+            bar = Quartz.CALayer.layer()
+            bar.setBackgroundColor_(gfx.cg((0.02, 0.02, 0.03), 0.95))
+            bar.setAnchorPoint_(Quartz.CGPointMake(0.5, 1.0))
+            bar.setOpacity_(0.0)
+            self.core.insertSublayer_below_(bar, self.face)
+            self._bar = bar
+        inset, bh = d * 0.075, d * 0.21
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        bar.setBounds_(Quartz.CGRectMake(0, 0, d * 1.18 - 2 * inset, bh))
+        bar.setCornerRadius_(bh / 2)
+        bar.setPosition_(Quartz.CGPointMake(d / 2, d / 2 + d * 0.5 - inset))
+        Quartz.CATransaction.commit()
+        kinetics.fade(bar, folder, 0.18 if folder else 0.12, delay=0.05 if folder else 0.0)
+        if folder:
+            kinetics.spring(bar, "transform.scale", 0.4, 1.0, "bouncy", anim_key="bar-in")
+        bx, by = self._bc
+        self.status.move_to((bx - w / 2 + d * 0.1, by + h / 2 - d * 0.08) if folder else self.status._home())
+
+    def thumb_mode(self, on: bool = True) -> None:
+        """Small and glowless, to ride a progress bar as its thumb; no badge, no rings."""
+        on = bool(on)
+        if on == self._thumb:
+            return
+        self._thumb = on
+        self.status.hide_for("thumb", on)
+        extras = (self.ring, self.spinner, self.progress_ring)
+        if on:
+            self._thumb_hidden = [layer.isHidden() for layer in extras]
+            for layer in extras:
+                layer.setHidden_(True)
+        else:
+            for layer, was in zip(extras, getattr(self, "_thumb_hidden", [False] * 3)):
+                layer.setHidden_(was)
 
     # --- per frame ------------------------------------------------------------------
 
     def tick(self, now: float, level: float, look, hovering: bool, visible_work: bool) -> None:
         """30 Hz. `look` is a (dx, dy) direction in screen points or None."""
         state = self.state
+        self._busy = bool(visible_work) or state in ("thinking", "working")
         self._hover += ((1.0 if hovering else 0.0) - self._hover) * 0.25
         asleep = state in ("sleeping", "paused", "offline")
         breath = 0.03 * math.sin(now * (1.2 if asleep else 2.1))
-        scale = (0.86 if asleep else 1.0) + 0.1 * self._hover + breath + level * 0.14
+        annoyed = now < self._annoyed_until
+        self._swell += ((1.12 if annoyed else 1.0) - self._swell) * 0.2
+        self._size += ((0.62 if self._thumb else 1.0) - self._size) * 0.25
+        scale = ((0.86 if asleep else 1.0) + 0.1 * self._hover + breath + level * 0.14) * self._swell * self._size
 
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
         self.body.setAffineTransform_(Quartz.CGAffineTransformMakeScale(scale, scale))
-        self.glow.setOpacity_((0.18 if asleep else 0.35) + level * 0.5 + 0.15 * self._hover)
+        glow = (0.18 if asleep else 0.35) + level * 0.5 + 0.15 * self._hover
+        self.glow.setOpacity_(0.0 if self._thumb else glow)
         g = 1.0 + level * 0.7
         self.glow.setAffineTransform_(Quartz.CGAffineTransformMakeScale(g, g))
         Quartz.CATransaction.commit()
+        self.status.tick(now)
+        self.status.hover(hovering and not self._thumb)
+        self._update_tint()
         if asleep and prefs.get("face") and now >= self._next_z:
             self._next_z = now + random.uniform(1.6, 2.6)
             self._snooze()
 
         if prefs.get("face"):
             self._face(now, level, look)
-        if not asleep and not visible_work and now >= self._next_whimsy:
-            self._next_whimsy = now + random.uniform(8.0, 15.0)
-            choice = random.choice(("hop", "wink", "sparkle", "wiggle", "look", "yawn"))
+        playing = annoyed or now - self._roll_at < self.ROLL + self.WOOZY
+        if not asleep and not visible_work and not playing and now >= self._next_whimsy:
+            calm = kinetics.calm()                   # Calm / Minimal / Reduce motion: only the quiet ones, rarer
+            self._next_whimsy = now + (random.uniform(25.0, 45.0) if calm else random.uniform(8.0, 15.0))
+            choice = random.choice(("wink", "look") if calm else ("hop", "wink", "sparkle", "wiggle", "look", "yawn"))
             if choice == "hop":
                 self.hop()
             elif choice == "look" and prefs.get("face"):
@@ -712,68 +1183,101 @@ class Orb:
             else:
                 self._body_keys("transform.rotation.z", [0, 0.14, -0.14, 0], 0.8)
 
+    def _sphere(self, x0: float, y0: float, yaw: float, pitch: float):
+        """A point drawn on the ball at (x0, y0) from the centre, after the ball turns by yaw (right) and
+        pitch (up): -> (x, y, squeeze_x, squeeze_y, in_front)."""
+        r = self.d * 0.47
+        x, y = x0 / r, y0 / r
+        z = math.sqrt(max(0.0, 1.0 - x * x - y * y))
+        x, z = x * math.cos(yaw) + z * math.sin(yaw), -x * math.sin(yaw) + z * math.cos(yaw)
+        y, z = y * math.cos(pitch) + z * math.sin(pitch), -y * math.sin(pitch) + z * math.cos(pitch)
+        return (x * r, y * r, math.sqrt(max(0.0, 1.0 - x * x)), math.sqrt(max(0.0, 1.0 - y * y)), z > 0.0)
+
     def _face(self, now: float, level: float, look) -> None:
         state = self.state
         s = self._face_scale
         happy = now < self._happy_until
         closed = state in ("sleeping", "paused", "starting", "offline")
-        tx, ty = 0.0, 0.0
+        # Where it looks, as turns of the ball (radians): yaw right, pitch up.
+        tp, tq = 0.0, 0.0
         if now < self._look_around_until:
             left = self._look_around_until - now
-            tx, ty = 3.0 * math.sin(left * 3.2), 1.0
+            tp, tq = 0.42 * math.sin(left * 3.2), 0.14
         elif state == "thinking":
-            tx, ty = 2.4 + 0.6 * math.sin(now * 1.7), 2.4
+            tp, tq = 0.34 + 0.08 * math.sin(now * 1.7), 0.32
         elif look is not None:
             dx, dy = look
             dist = math.hypot(dx, dy)
             if dist > 1:
-                pull = min(1.0, dist / 300)
-                tx, ty = 3.0 * pull * dx / dist, 2.4 * pull * dy / dist
+                pull = min(1.0, dist / 260)
+                tp, tq = 0.72 * pull * dx / dist, 0.46 * pull * dy / dist
         elif state == "working":
-            ty = -2.2
-        self._eye_offset[0] += (tx * s - self._eye_offset[0]) * 0.22
-        self._eye_offset[1] += (ty * s - self._eye_offset[1]) * 0.22
+            tq = -0.3
+        self._gaze[0] += (tp - self._gaze[0]) * 0.14          # the eyes trail the pointer a little
+        self._gaze[1] += (tq - self._gaze[1]) * 0.14
+        for i in (0, 1):                                      # a slap's kick springs back, with a little recoil
+            self._kick_v[i] += (-95.0 * self._kick[i] - 9.5 * self._kick_v[i]) / 30.0
+            self._kick[i] += self._kick_v[i] / 30.0
+        yaw = self._gaze[0] + self._kick[0]
+        pitch = self._gaze[1] + self._kick[1]
+        rolling = now - self._roll_at
+        if rolling < self.ROLL:                               # dizzy: the ball rolls forward twice
+            t = rolling / self.ROLL
+            pitch += (t * t * (3 - 2 * t)) * 4 * math.pi
+            yaw += 0.22 * math.sin(rolling * 7.0)
+        elif rolling < self.ROLL + self.WOOZY:                # then a woozy sway
+            fade = 1 - (rolling - self.ROLL) / self.WOOZY
+            yaw += 0.34 * fade * math.sin(rolling * 5.5)
+            pitch += 0.12 * fade * math.sin(rolling * 11.0)
+        self._face_drop += ((self.d * 0.1 if self._morphed == "folder" else 0.0) - self._face_drop) * 0.25
+        self._tilt = getattr(self, "_tilt", 0.0)
+        self._tilt += (getattr(self, "_tilt_target", 0.0) - self._tilt) * 0.3
 
-        yawning = now < self._yawn_until
-        mode = "happy" if happy and not closed else ("closed" if closed or yawning else "open")
+        shape = self._shape_for(now, closed, happy)
+        if shape != self._shape:
+            self._set_shape(shape, quick=getattr(self, "_quick_shape", False))
+        self._quick_shape = False
+
         d = self.d
+        cx, cy = d / 2, d / 2 - self._face_drop
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
-        for (eye, dx), smile in zip(self.eyes, self.smiles):
-            x = d / 2 + dx + self._eye_offset[0]
-            y = d / 2 + 2 * s + self._eye_offset[1]
-            eye.setPosition_(Quartz.CGPointMake(x, y))
-            smile.setPosition_(Quartz.CGPointMake(x, y - 1))
-            if mode != self._eye_mode:
-                eye.setOpacity_(0.0 if mode == "happy" else 1.0)
-                smile.setOpacity_(1.0 if mode == "happy" else 0.0)
-                eye.setBounds_(Quartz.CGRectMake(0, 0, 5 * s, (2 if mode == "closed" else 9) * s))
-                for shine in eye.sublayers() or []:
-                    shine.setHidden_(mode == "closed")
-        for cheek in self.cheeks:
-            cheek.setOpacity_(0.9 if mode == "happy" else 0.45)      # always a little rosy
+        for side, socket, (eye, dx) in zip((-1, 1), self._sockets, self.eyes):
+            x, y, fx, fy, front = self._sphere(dx, 2 * s, yaw, pitch)
+            socket.setPosition_(Quartz.CGPointMake(cx + x, cy + y))
+            socket.setHidden_(not front)
+            t = Quartz.CGAffineTransformMakeScale(max(0.05, fx), max(0.05, fy))
+            socket.setAffineTransform_(Quartz.CGAffineTransformRotate(t, side * self._tilt))
+        self._eye_offset = [self._sockets[0].position().x - (cx - 6.5 * s), self._sockets[0].position().y - (cy + 2 * s)]
+        cheek_on = 0.9 if shape == "arc" and happy else 0.45                 # always a little rosy
+        for cheek, x0 in zip(self.cheeks, (-9.4 * s, 9.4 * s)):
+            x, y, fx, fy, front = self._sphere(x0, -4 * s, yaw, pitch)
+            cheek.setPosition_(Quartz.CGPointMake(cx + x, cy + y))
+            cheek.setAffineTransform_(Quartz.CGAffineTransformMakeScale(max(0.05, fx), max(0.05, fy)))
+            cheek.setOpacity_(cheek_on if front else 0.0)
         speaking = state == "speaking"
-        self.mouth.setOpacity_(0.85 if speaking or yawning else 0.0)
-        self.rest_mouth.setOpacity_(0.0 if speaking or yawning or mode == "happy" else 0.85)
-        self.rest_mouth.setPosition_(Quartz.CGPointMake(d / 2 + self._eye_offset[0] * 0.6,
-                                                        d / 2 - 6 * s + self._eye_offset[1] * 0.5))
+        yawning = now < self._yawn_until
+        x, y, fx, fy, front = self._sphere(0.0, -6 * s, yaw, pitch)
+        self.rest_mouth.setOpacity_(0.0 if speaking or yawning or happy or not front else 0.85)
+        self.rest_mouth.setPosition_(Quartz.CGPointMake(cx + x, cy + y))
+        self.rest_mouth.setAffineTransform_(Quartz.CGAffineTransformMakeScale(max(0.05, fx), max(0.05, fy)))
+        x, y, fx, fy, front = self._sphere(0.0, -7 * s, yaw, pitch)
+        self.mouth.setOpacity_(0.85 if (speaking or yawning) and front else 0.0)
+        self.mouth.setPosition_(Quartz.CGPointMake(cx + x, cy + y))
+        self.mouth.setAffineTransform_(Quartz.CGAffineTransformMakeScale(max(0.05, fx), max(0.05, fy)))
         if yawning and not speaking:
             open_ = math.sin(math.pi * (1 - (self._yawn_until - now) / 1.3))
             h = (2 + 6 * open_) * s
             self.mouth.setBounds_(Quartz.CGRectMake(0, 0, (5 + 2 * open_) * s, h))
             self.mouth.setCornerRadius_(h / 2)
-            self.mouth.setPosition_(Quartz.CGPointMake(d / 2, d / 2 - 7 * s))
         if speaking:
             h = (1.6 + 6.0 * min(1.0, level * 1.6)) * s
             self.mouth.setBounds_(Quartz.CGRectMake(0, 0, (6 + 2 * level) * s, h))
             self.mouth.setCornerRadius_(min(h, 6 * s) / 2)
-            self.mouth.setPosition_(Quartz.CGPointMake(d / 2 + self._eye_offset[0] * 0.6,
-                                                       d / 2 - 7 * s + self._eye_offset[1] * 0.5))
         Quartz.CATransaction.commit()
-        self._eye_mode = mode
+        self._eye_mode = "happy" if shape == "arc" else ("closed" if shape == "closed" else "open")
 
-        if mode == "open" and now >= self._next_blink:
-            self.blink()
-            if random.random() < 0.2:
-                AppHelper.callLater(0.28, self.blink)
-            self._next_blink = now + random.uniform(2.2, 5.5)
+        blinks = shape in ("normal", "wide", "dot") and rolling > self.ROLL
+        if blinks and now >= self._next_blink:
+            self.blink(double=random.random() < (0.3 if self._busy else 0.2))
+            self._next_blink = now + (random.uniform(0.9, 2.4) if self._busy else random.uniform(2.2, 5.0))

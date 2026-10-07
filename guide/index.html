@@ -7,13 +7,15 @@
 <meta property="og:title" content="Hey Mint · the open-source voice assistant for your Mac"><meta property="og:description" content="Hey Mint is a free, open-source Jarvis for macOS. Say “Hey Mint” and it talks back, clicks and types in your apps, finds things on screen, and hands big jobs to little agents.">
 <meta property="og:url" content="https://hey-mint.pages.dev/"><meta property="og:image" content="https://hey-mint.pages.dev/assets/og.png">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Hey Mint · the open-source voice assistant for your Mac">
 <meta name="twitter:description" content="Hey Mint is a free, open-source Jarvis for macOS. Say “Hey Mint” and it talks back, clicks and types in your apps, finds things on screen, and hands big jobs to little agents."><meta name="twitter:image" content="https://hey-mint.pages.dev/assets/og.png">
+<meta name="twitter:image:alt" content="Hey Mint: a Jarvis-style voice assistant for your Mac. A teal orb with eyes, a row of little critters, and the request “Hey Mint, do a trick”.">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Hey Mint", "alternateName": ["Mint", "Hey Mint assistant"], "operatingSystem": "macOS", "applicationCategory": "UtilitiesApplication", "description": "Hey Mint is a free, open-source Jarvis for macOS. Say “Hey Mint” and it talks back, clicks and types in your apps, finds things on screen, and hands big jobs to little agents.", "url": "https://hey-mint.pages.dev/", "downloadUrl": "https://github.com/shivatmax/hey-mint/releases/latest", "image": "https://hey-mint.pages.dev/assets/og.png", "license": "https://www.gnu.org/licenses/gpl-3.0.html", "codeRepository": "https://github.com/shivatmax/hey-mint", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "keywords": "voice assistant, macOS, Jarvis, AI agent, Gemini Live, open source, desktop automation"}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/guide.css"></head>
-<body data-hello="My crew is hiding in the gift box. Click it!" data-page="index">
+<body data-hello="My crew is hiding in the gift box. Click it!" data-page="index" data-doc="" data-root="">
 <header class="top"><div class="top-in"><a class="brand" href="./"><span class="dot"></span>Hey Mint</a>
 <nav aria-label="Site"><a href="docs">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
 
@@ -101,48 +103,49 @@
     <h2 class="rise">Most of what you do with a mouse.</h2>
     <p class="intro rise">About 100 tools across your apps, files, browser and day. A few of them:</p>
     <div class="can rise">
-      <a href="docs#doing"><h3><span>🪟</span>Apps and windows</h3><p>Opens, switches, and finds the tab that's already open.</p><q>switch to the Jira tab</q></a>
-      <a href="docs#doing"><h3><span>👆</span>Clicks and types</h3><p>Finds controls by name, presses them, checks it worked.</p><q>click Sign in</q></a>
-      <a href="docs#files"><h3><span>📄</span>Files and PDFs</h3><p>Searches, reads, writes and tidies, with backups.</p><q>find the PDF about the lease</q></a>
-      <a href="docs#browser"><h3><span>🌐</span>Browser and web</h3><p>Tabs, forms, tab groups, in Chrome, Safari, Arc, Brave, Edge.</p><q>group my YouTube tabs</q></a>
-      <a href="docs#showing"><h3><span>🔎</span>Shows you where</h3><p>Boxes, underlines or points at things on screen.</p><q>where's the total?</q></a>
-      <a href="docs#memory"><h3><span>🧠</span>Remembers you</h3><p>Facts about you, and skills it learns from doing things.</p><q>remember my manager is Meera</q></a>
-      <a href="docs#videos"><h3><span>🎬</span>Watches videos</h3><p>Key moments with timestamps and the look and feel, in seconds.</p><q>what's this video about?</q></a>
-      <a href="docs#automations"><h3><span>⏰</span>Runs by itself</h3><p>On a schedule, or when a file lands or a meeting nears.</p><q>every weekday at 9, brief me</q></a>
-      <a href="docs#meetings"><h3><span>🎙️</span>Meeting notes, no bot</h3><p>On a call the orb becomes a recorder: audio or video, then transcript and to-dos.</p><q>what did we decide?</q></a>
-      <a href="docs#teach"><h3><span>🎓</span>Learns by watching</h3><p>Show it a task once. Or it points at each step while you do it.</p><q>show me how to export a PDF</q></a>
-      <a href="docs#edit"><h3><span>✍️</span>Edits what you select</h3><p>Rewrite, fix, shorten or translate text in any app.</p><q>make this more formal</q></a>
-      <a href="docs#history"><h3><span>🧭</span>Picks up again</h3><p>Plans survive restarts, and it knows what happened when.</p><q>where were we?</q></a>
-      <a href="docs#island"><h3><span>🫧</span>Changes shape</h3><p>The orb turns into a recorder, your day's card, a lesson, a video it's watching.</p><q>what's on my calendar today?</q></a>
-      <a href="docs#mac"><h3><span>🎛️</span>Mac switches</h3><p>Brightness, Do Not Disturb, window layouts, and recording just part of the screen.</p><q>Chrome left, Slack right</q></a>
-      <a href="docs#notch"><h3><span>🏝️</span>Lives in the notch</h3><p>A Dynamic Island at the camera: words, tasks and cards grow out of the notch. Switch live.</p><q>become the notch</q></a>
-      <a href="docs#guard"><h3><span>🛡️</span>Asks before deleting</h3><p>Before anything is deleted, overwritten or changed, Mint shows exactly what and waits for your yes - at the Mac or on Telegram.</p><q>delete last year's invoices</q></a>
-      <a href="docs#meet"><h3><span>📹</span>Google Meet with Mint</h3><p>Mint starts a Meet, shares your screen and sends you the link: talk to it from your phone, anywhere, and watch it work.</p><q>start a Google Meet</q></a>
-      <a href="docs#email"><h3><span>✉️</span>Control by email</h3><p>Email Mint from anywhere: it does it and answers in the same thread, with the steps, files and a Join button.</p><q>Mint: what's on today?</q></a>
-      <a href="docs#parallel"><h3><span>🔀</span>Several things at once</h3><p>Hand Mint one job, then another, and keep talking: they run side by side and each tells you when it's done.</p><q>also tidy my Downloads folder</q></a>
-      <a href="docs#claude-mode"><h3><span>✳️</span>Claude mode</h3><p>Claude Code and Codex live in the notch: every step, the diff, the tests, and Allow or Deny without leaving what you're doing.</p><q>what is Claude Code doing?</q></a>
-      <a href="docs#personality"><h3><span>🥹</span>Feels the moment</h3><p>A laugh at your joke, a sad face for bad news, sunglasses when a task is done.</p><q>I got the job!</q></a>
-      <a href="docs#briefing"><h3><span>☀️</span>Your day, briefed</h3><p>A spoken minute and a card: weather, today's timeline, reminders, headlines.</p><q>good morning, brief me</q></a>
-      <a href="docs#trackers"><h3><span>🔔</span>Tells you when it's done</h3><p>Downloads, uploads, builds, a Claude session: Mint watches and speaks up.</p><q>let me know when the download finishes</q></a>
-      <a href="docs#teach"><h3><span>🎥</span>Records what you teach</h3><p>A Mint-coloured pointer, every click captured, then saved as a skill.</p><q>watch me do this once</q></a>
-      <a href="docs#videos"><h3><span>🎞️</span>Shows what it watches</h3><p>Keyframes pop in on the island while it listens and writes it up.</p><q>watch this video</q></a>
-      <a href="docs#shortcuts"><h3><span>⌨️</span>Dictate anywhere</h3><p>Hold Right ⌥, talk, let go: clean text lands where you're typing.</p><q>hold ⌥ and talk</q></a>
-      <a href="docs#drop"><h3><span>📥</span>Drop files on it</h3><p>Drag a PDF, a video or a folder to Mint and pick what to do.</p><q>translate it into Hindi</q></a>
-      <a href="docs#install"><h3><span>👋</span>A proper welcome</h3><p>Your name, a voice, each permission explained, your shortcuts and a tour, in about two minutes.</p><q>Welcome tour…</q></a>
-      <a href="docs#clipboard"><h3><span>📋</span>A clipboard that remembers</h3><p>Everything you copy and every screenshot. Pick several, pin up to 20, paste them in order.</p><q>paste the last 5 screenshots in the chat</q></a>
-      <a href="docs#images"><h3><span>🎨</span>Make and edit pictures</h3><p>Image Playground draws it on your Mac; say a change and it redraws.</p><q>add a sailing boat</q></a>
-      <a href="docs#apple-shortcuts"><h3><span>⚡</span>Shortcuts, made for you</h3><p>Describe it, hear the steps, say yes: a new Apple Shortcut, one click to add.</p><q>make a shortcut that turns on dark mode</q></a>
-      <a href="docs#music"><h3><span>🎵</span>Music, by voice</h3><p>Spotify or Apple Music: any song, artist or mood, with a mini player.</p><q>play some lo-fi</q></a>
-      <a href="docs#apple-apps"><h3><span>📝</span>Notes and the Apple apps</h3><p>Change a note, tick off reminders, move events, find a contact.</p><q>add bread to my grocery note</q></a>
-      <a href="docs#connectors"><h3><span>🧩</span>Connectors</h3><p>Everything Mint connects to, and “integrate” any app on your Mac.</p><q>integrate Things</q></a>
-      <a href="docs#telegram"><h3><span>📱</span>Control it from your phone</h3><p>Text or voice-note your own Telegram bot from anywhere; watch each step arrive.</p><q>what's on my calendar today?</q></a>
-      <a href="docs#agent-apps"><h3><span>🤖</span>Talks to ChatGPT and Claude</h3><p>Asks them, reads the answers back, and tells you when they finish.</p><q>ask ChatGPT to outline my talk</q></a>
-      <a href="docs#notifications"><h3><span>🔔</span>What did I miss?</h3><p>Reads Notification Center, groups it by app, opens or clears the one you mean.</p><q>any messages from Slack?</q></a>
-      <a href="docs#undo"><h3><span>↩️</span>Undo anything it did</h3><p>Brightness, windows, text, files, reminders: “undo that” puts it back.</p><q>undo the last three things</q></a>
-      <a href="docs#shortcuts"><h3><span>🎹</span>Your own shortcuts</h3><p>Talk without “Hey Mint”: one key, set to whatever you like.</p><q>⌃⌥Space</q></a>
-      <a href="docs#documents"><h3><span>📄</span>Converts documents</h3><p>PDF to a Hindi Word doc, a table to Excel, any text copied off the screen.</p><q>make an Excel of this table</q></a>
-      <a href="docs#video-editing"><h3><span>✂️</span>Edits videos</h3><p>Trim, captions, vertical for Reels, silences out, then checks its own work.</p><q>make it vertical and add captions</q></a>
-      <a href="docs#island"><h3><span>🔢</span>Shows the answer</h3><p>Counts and lists as cards: unread emails, downloads, your automations.</p><q>how many unread emails?</q></a>
+      <a href="docs/using#doing"><h3><span>🪟</span>Apps and windows</h3><p>Opens, switches, and finds the tab that's already open.</p><q>switch to the Jira tab</q></a>
+      <a href="docs/using#doing"><h3><span>👆</span>Clicks and types</h3><p>Finds controls by name, presses them, checks it worked.</p><q>click Sign in</q></a>
+      <a href="docs/using#files"><h3><span>📄</span>Files and PDFs</h3><p>Searches, reads, writes and tidies, with backups.</p><q>find the PDF about the lease</q></a>
+      <a href="docs/using#browser"><h3><span>🌐</span>Browser and web</h3><p>Tabs, forms, tab groups, in Chrome, Safari, Arc, Brave, Edge.</p><q>group my YouTube tabs</q></a>
+      <a href="docs/using#showing"><h3><span>🔎</span>Shows you where</h3><p>Boxes, underlines or points at things on screen.</p><q>where's the total?</q></a>
+      <a href="docs/learning#memory"><h3><span>🧠</span>Remembers you</h3><p>Facts about you, and skills it learns from doing things.</p><q>remember my manager is Meera</q></a>
+      <a href="docs/using#videos"><h3><span>🎬</span>Watches videos</h3><p>Key moments with timestamps and the look and feel, in seconds.</p><q>what's this video about?</q></a>
+      <a href="docs/using#automations"><h3><span>⏰</span>Runs by itself</h3><p>On a schedule, or when a file lands or a meeting nears.</p><q>every weekday at 9, brief me</q></a>
+      <a href="docs/using#meetings"><h3><span>🎙️</span>Meeting notes, no bot</h3><p>On a call the orb becomes a recorder: audio or video, then transcript and to-dos.</p><q>what did we decide?</q></a>
+      <a href="docs/learning#teach"><h3><span>🎓</span>Learns by watching</h3><p>Show it a task once. Or it points at each step while you do it.</p><q>show me how to export a PDF</q></a>
+      <a href="docs/using#edit"><h3><span>✍️</span>Edits what you select</h3><p>Rewrite, fix, shorten or translate text in any app.</p><q>make this more formal</q></a>
+      <a href="docs/learning#history"><h3><span>🧭</span>Picks up again</h3><p>Plans survive restarts, and it knows what happened when.</p><q>where were we?</q></a>
+      <a href="docs/using#island"><h3><span>🫧</span>Changes shape</h3><p>The orb turns into a recorder, your day's card, a lesson, a video it's watching.</p><q>what's on my calendar today?</q></a>
+      <a href="docs/using#mac"><h3><span>🎛️</span>Mac switches</h3><p>Brightness, Do Not Disturb, window layouts, and recording just part of the screen.</p><q>Chrome left, Slack right</q></a>
+      <a href="docs/start#notch"><h3><span>🏝️</span>Lives in the notch</h3><p>A Dynamic Island at the camera: words, tasks and cards grow out of the notch. Switch live.</p><q>become the notch</q></a>
+      <a href="docs/safety#guard"><h3><span>🛡️</span>Asks before deleting</h3><p>Before anything is deleted, overwritten or changed, Mint shows exactly what and waits for your yes - at the Mac or on Telegram.</p><q>delete last year's invoices</q></a>
+      <a href="docs/remote#meet"><h3><span>📹</span>Google Meet with Mint</h3><p>Mint starts a Meet, shares your screen and sends you the link: talk to it from your phone, anywhere, and watch it work.</p><q>start a Google Meet</q></a>
+      <a href="docs/remote#email"><h3><span>✉️</span>Control by email</h3><p>Email Mint from anywhere: it does it and answers in the same thread, with the steps, files and a Join button.</p><q>Mint: what's on today?</q></a>
+      <a href="docs/using#web-tasks"><h3><span>⚡</span>Web tasks in seconds</h3><p>Flight searches, forms and lookups done in one go in Mint's own browser tab - no screen used, your logins when you allow it.</p><q>find the cheapest flight to London on Friday</q></a>
+      <a href="docs/agents#parallel"><h3><span>🔀</span>Several things at once</h3><p>Hand Mint one job, then another, and keep talking: they run side by side and each tells you when it's done.</p><q>also tidy my Downloads folder</q></a>
+      <a href="docs/agents#claude-mode"><h3><span>✳️</span>Claude mode</h3><p>Claude Code and Codex live in the notch: every step, the diff, the tests, and Allow or Deny without leaving what you're doing.</p><q>what is Claude Code doing?</q></a>
+      <a href="docs/personality#personality"><h3><span>🥹</span>Feels the moment</h3><p>A laugh at your joke, a sad face for bad news, sunglasses when a task is done.</p><q>I got the job!</q></a>
+      <a href="docs/using#briefing"><h3><span>☀️</span>Your day, briefed</h3><p>A spoken minute and a card: weather, today's timeline, reminders, headlines.</p><q>good morning, brief me</q></a>
+      <a href="docs/using#trackers"><h3><span>🔔</span>Tells you when it's done</h3><p>Downloads, uploads, builds, a Claude session: Mint watches and speaks up.</p><q>let me know when the download finishes</q></a>
+      <a href="docs/learning#teach"><h3><span>🎥</span>Records what you teach</h3><p>A Mint-coloured pointer, every click captured, then saved as a skill.</p><q>watch me do this once</q></a>
+      <a href="docs/using#videos"><h3><span>🎞️</span>Shows what it watches</h3><p>Keyframes pop in on the island while it listens and writes it up.</p><q>watch this video</q></a>
+      <a href="docs/start#shortcuts"><h3><span>⌨️</span>Dictate anywhere</h3><p>Hold Right ⌥, talk, let go: clean text lands where you're typing.</p><q>hold ⌥ and talk</q></a>
+      <a href="docs/using#drop"><h3><span>📥</span>Drop files on it</h3><p>Drag a PDF, a video or a folder to Mint and pick what to do.</p><q>translate it into Hindi</q></a>
+      <a href="docs/start#install"><h3><span>👋</span>A proper welcome</h3><p>Your name, a voice, each permission explained, your shortcuts and a tour, in about two minutes.</p><q>Welcome tour…</q></a>
+      <a href="docs/using#clipboard"><h3><span>📋</span>A clipboard that remembers</h3><p>Everything you copy and every screenshot. Pick several, pin up to 20, paste them in order.</p><q>paste the last 5 screenshots in the chat</q></a>
+      <a href="docs/using#images"><h3><span>🎨</span>Make and edit pictures</h3><p>Image Playground draws it on your Mac; say a change and it redraws.</p><q>add a sailing boat</q></a>
+      <a href="docs/using#apple-shortcuts"><h3><span>⚡</span>Shortcuts, made for you</h3><p>Describe it, hear the steps, say yes: a new Apple Shortcut, one click to add.</p><q>make a shortcut that turns on dark mode</q></a>
+      <a href="docs/using#music"><h3><span>🎵</span>Music, by voice</h3><p>Spotify or Apple Music: any song, artist or mood, with a mini player.</p><q>play some lo-fi</q></a>
+      <a href="docs/using#apple-apps"><h3><span>📝</span>Notes and the Apple apps</h3><p>Change a note, tick off reminders, move events, find a contact.</p><q>add bread to my grocery note</q></a>
+      <a href="docs/using#connectors"><h3><span>🧩</span>Connectors</h3><p>Everything Mint connects to, and “integrate” any app on your Mac.</p><q>integrate Things</q></a>
+      <a href="docs/remote#telegram"><h3><span>📱</span>Control it from your phone</h3><p>Text or voice-note your own Telegram bot from anywhere; watch each step arrive.</p><q>what's on my calendar today?</q></a>
+      <a href="docs/agents#agent-apps"><h3><span>🤖</span>Talks to ChatGPT and Claude</h3><p>Asks them, reads the answers back, and tells you when they finish.</p><q>ask ChatGPT to outline my talk</q></a>
+      <a href="docs/using#notifications"><h3><span>🔔</span>What did I miss?</h3><p>Reads Notification Center, groups it by app, opens or clears the one you mean.</p><q>any messages from Slack?</q></a>
+      <a href="docs/safety#undo"><h3><span>↩️</span>Undo anything it did</h3><p>Brightness, windows, text, files, reminders: “undo that” puts it back.</p><q>undo the last three things</q></a>
+      <a href="docs/start#shortcuts"><h3><span>🎹</span>Your own shortcuts</h3><p>Talk without “Hey Mint”: one key, set to whatever you like.</p><q>⌃⌥Space</q></a>
+      <a href="docs/using#documents"><h3><span>📄</span>Converts documents</h3><p>PDF to a Hindi Word doc, a table to Excel, any text copied off the screen.</p><q>make an Excel of this table</q></a>
+      <a href="docs/using#video-editing"><h3><span>✂️</span>Edits videos</h3><p>Trim, captions, vertical for Reels, silences out, then checks its own work.</p><q>make it vertical and add captions</q></a>
+      <a href="docs/using#island"><h3><span>🔢</span>Shows the answer</h3><p>Counts and lists as cards: unread emails, downloads, your automations.</p><q>how many unread emails?</q></a>
     </div>
   </div>
 </section>
@@ -159,7 +162,7 @@
         <li><span class="who" style="--c:#FFC870"></span><div><b>Sage</b> <span>turns notes into reports and PDFs</span></div></li>
         <li><span class="who" style="--c:#58C79E"></span><div><b>Codex</b> <span>builds websites and apps</span></div></li>
       </ul>
-      <a class="btn ghost rise" href="docs#agents">How agents work</a>
+      <a class="btn ghost rise" href="docs/agents#agents">How agents work</a>
     </div>
     <figure class="clip rise" style="margin:0"><div class="frame" style="--w:660px"><video src="media/agent.mp4" poster="media/agent.jpg" width="880" height="406" style="--ar:880/406" preload="none" muted loop playsinline aria-label="agent"></video></div>
       <figcaption><span class="stamp">A real run: Astra searching, reading and writing the brief (middle 2× faster)</span></figcaption></figure>
@@ -186,10 +189,10 @@
         <h2>Get Mint.</h2>
         <p class="intro">One app with everything inside. No Python, Homebrew or Terminal.</p>
         <a class="btn primary" href="https://github.com/shivatmax/hey-mint/releases/latest">Download for Mac</a>
-        <p class="alt">Prefer the source? <a href="docs#install">Build it yourself</a> · <a href="https://github.com/shivatmax/hey-mint">GitHub</a></p>
+        <p class="alt">Prefer the source? <a href="docs/start#install">Build it yourself</a> · <a href="https://github.com/shivatmax/hey-mint">GitHub</a></p>
       </div>
       <ol>
-        <li><div><b>Drag it to Applications</b><span>Or paste one line into Terminal and it installs and approves itself: <a href="docs#install">how</a>. (Otherwise the first time, click Open Anyway in System Settings ▸ Privacy &amp; Security.)</span></div></li>
+        <li><div><b>Drag it to Applications, approve it once</b><span>The first time, macOS asks: click Done, then <b>Open Anyway</b> in System Settings ▸ Privacy &amp; Security. Once per Mac - updates install themselves. (Or one line in Terminal, which asks nothing: <a href="docs/start#install">how</a>.)</span></div></li>
         <li><div><b>Paste your Gemini key</b><span>Free from Google AI Studio. It stays on your Mac.</span></div></li>
         <li><div><b>Say “Hey Mint”</b><span>Allow the microphone and Accessibility when asked. That's it.</span></div></li>
       </ol>

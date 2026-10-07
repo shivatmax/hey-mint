@@ -39,3 +39,7 @@ __pycache__/
 # Cloudflare
 .wrangler/
 /site/
+/web-profile/
+/web-runs.jsonl
+/chrome-bridge.*
+/web-bench.jsonl

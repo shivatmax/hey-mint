@@ -73,6 +73,21 @@ def _rgb(value) -> tuple:
         return (0.5, 0.82, 1.0)
 
 
+def _calm() -> bool:
+    """macOS Reduce motion: no hops, flights, spins or particles - things fade in and out instead."""
+    try:
+        from mint.ui import kinetics
+        return kinetics.reduce_motion()
+    except Exception:
+        return False
+
+
+def _fade(layer, to: float, seconds: float = 0.25, delay: float = 0.0) -> None:
+    start = layer.presentationLayer().opacity() if layer.presentationLayer() is not None else layer.opacity()
+    _no_actions(lambda: layer.setOpacity_(to))
+    _keys(layer, "opacity", [start, to], seconds, name="calm-fade", delay=delay)
+
+
 def _ease(name=Quartz.kCAMediaTimingFunctionEaseInEaseOut):
     return Quartz.CAMediaTimingFunction.functionWithName_(name)
 
@@ -261,6 +276,8 @@ def _particle(name):
 
 def confetti(root, x, y, colors, names=("heart.fill", "star.fill", "sparkle"), amount=1.0, up=True):
     """A small burst of hearts, stars and sparkles at (x, y) in `root`."""
+    if _calm():
+        return
     emitter = Quartz.CAEmitterLayer.layer()
     emitter.setEmitterPosition_(Quartz.CGPointMake(x, y))
     emitter.setEmitterShape_(Quartz.kCAEmitterLayerPoint)
@@ -301,6 +318,10 @@ def float_up(root, x, y, name, rgb, size=11.0, rise=34.0, seconds=1.1, drift=0.0
     layer.setPosition_(Quartz.CGPointMake(x, y))
     layer.setOpacity_(0.0)
     root.addSublayer_(layer)
+    if _calm():                        # in place: a fade in and out, no rise or sway
+        _keys(layer, "opacity", [0.0, 1.0, 1.0, 0.0], seconds, [0, 0.2, 0.7, 1], delay=delay, name="fade")
+        AppHelper.callLater(delay + seconds + 0.1, layer.removeFromSuperlayer)
+        return layer
     _keys(layer, "position.y", [y, y + rise], seconds, additive=False, delay=delay, name="rise")
     _keys(layer, "position.x", [x, x + drift + 3, x + drift - 3, x + drift], seconds, delay=delay,
           cubic=True, name="sway")
@@ -575,6 +596,8 @@ class Critter:
 
     def signature(self, root, direction: int = -1) -> str:
         """This species' own little move. Returns a caption for it."""
+        if _calm():
+            return self.SIGNATURES.get(self.species, "ta-da!")
         s = self.species
         if s == "owl":                      # head tilts side to side, a slow big blink
             _keys(self.body, "transform.rotation.z", [0, 0.32, 0.32, -0.32, -0.32, 0], 1.1,
@@ -625,6 +648,8 @@ class Critter:
         return self.SIGNATURES.get(s, "ta-da!")
 
     def fidget(self) -> None:
+        if _calm():
+            return
         """Something small and alive: an ear flick, a tail swish, a flap, a leaf sway."""
         for ear in self.parts["ears"]:
             _keys(ear, "transform.rotation.z", [0, 0.25, -0.1, 0], 0.5, additive=True, name="flick",
@@ -638,6 +663,8 @@ class Critter:
             _keys(leaf, "transform.rotation.z", [0, 0.2, -0.2, 0], 1.0, additive=True, name="sway")
 
     def flap_fast(self, seconds: float = 0.8) -> None:
+        if _calm():
+            return
         for wing in self.parts["wings"]:
             side = 1 if wing.position().x > CX else -1
             _keys(wing, "transform.rotation.z", [0, side * 0.7, 0], 0.16, additive=True, name="flap",
@@ -649,11 +676,13 @@ class Critter:
 
     def bob(self, on: bool, fast: bool = False) -> None:
         self.body.removeAnimationForKey_("bob")
-        if on:
+        if on and not _calm():
             _keys(self.body, "transform.translation.y", [0, 1.8, 0], 0.45 if fast else 1.0,
                   repeat=float("inf"), additive=True, name="bob", cubic=True)
 
     def hop(self, height: float = 12.0, seconds: float = 0.45, delay: float = 0.0) -> None:
+        if _calm():
+            return
         _keys(self.box, "position.y", [0, height, 0], seconds, [0, 0.45, 1], additive=True,
               name=f"hop{random.random()}", delay=delay)
         _keys(self.body, "transform.scale.y", [1, 0.78, 1.12, 1, 0.82, 1], seconds,
@@ -661,18 +690,26 @@ class Critter:
 
     def attention(self, on: bool) -> None:
         self.box.removeAnimationForKey_("attention")
-        if on:
+        if on and _calm():
+            _keys(self.box, "opacity", [1.0, 0.55, 1.0], 1.4, repeat=float("inf"), name="attention")
+        elif on:
             _keys(self.box, "position.y", [0, 10, 0, 0], 1.3, [0, 0.2, 0.4, 1], repeat=float("inf"),
                   additive=True, name="attention")
 
     def squish(self) -> None:
+        if _calm():
+            return
         _keys(self.body, "transform.scale.y", [0.62, 1.12, 0.95, 1.0], 0.45, [0, 0.35, 0.7, 1], name="squash")
         _keys(self.body, "transform.scale.x", [1.3, 0.9, 1.04, 1.0], 0.45, [0, 0.35, 0.7, 1], name="squashx")
 
     def spin(self, turns: float = 1.0, seconds: float = 0.6) -> None:
+        if _calm():
+            return
         _keys(self.body, "transform.rotation.y", [0, 2 * math.pi * turns], seconds, name="spin")
 
     def flip(self, direction: int = 1) -> None:
+        if _calm():
+            return
         """A somersault in the air, turning about its middle rather than its feet."""
         _keys(self.box, "position.y", [0, 34, 0], 0.7, [0, 0.5, 1], additive=True, name="flipup")
         values = []
@@ -683,9 +720,13 @@ class Critter:
         _keys(self.body, "transform", values, 0.7, name="flip")
 
     def wiggle(self) -> None:
+        if _calm():
+            return
         _keys(self.body, "transform.rotation.z", [0, 0.18, -0.18, 0.12, -0.12, 0], 0.6, name="wiggle")
 
     def walk(self, on: bool, fast: bool = False) -> None:
+        if on and _calm():
+            return
         step = 0.16 if fast else 0.22
         for i, foot in enumerate(self.feet):
             foot.removeAnimationForKey_("step")
@@ -704,7 +745,8 @@ class Critter:
         start = Quartz.CGPointMake(CX - 7, 19)
         drop.setPosition_(start)
         self.box.addSublayer_(drop)          # rides along if it walks away
-        _keys(drop, "position.y", [start.y, start.y - 14], 1.0, name="fall")
+        if not _calm():
+            _keys(drop, "position.y", [start.y, start.y - 14], 1.0, name="fall")
         _keys(drop, "opacity", [0, 1, 1, 0], 1.0, [0, 0.1, 0.7, 1], name="fade")
         AppHelper.callLater(1.05, drop.removeFromSuperlayer)
 
@@ -765,7 +807,14 @@ class Critter:
                 _keys(bubble, "transform.rotation.z", [0, 0.12, -0.12, 0], 0.7, repeat=float("inf"),
                       additive=True, name="wobble")
         self.box.addSublayer_(bubble)
-        _spring(bubble, "transform.scale", 0.2, 1.0, damping=8, stiffness=260, name="pop")
+        if _calm():
+            for layer in [bubble] + list(bubble.sublayers() or []):
+                for sub in [layer] + list(layer.sublayers() or []):
+                    for key in ("dot", "work", "wobble"):
+                        sub.removeAnimationForKey_(key)
+            _fade(bubble, 1.0, 0.2)
+        else:
+            _spring(bubble, "transform.scale", 0.2, 1.0, damping=8, stiffness=260, name="pop")
         self.bubble = bubble
 
     def hide_bubble(self, quick: bool = False) -> None:
@@ -778,7 +827,8 @@ class Critter:
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setAnimationDuration_(0.2)
         bubble.setOpacity_(0.0)
-        bubble.setTransform_(Quartz.CATransform3DMakeScale(0.3, 0.3, 1))
+        if not _calm():
+            bubble.setTransform_(Quartz.CATransform3DMakeScale(0.3, 0.3, 1))
         Quartz.CATransaction.commit()
         AppHelper.callLater(0.25, bubble.removeFromSuperlayer)
 
@@ -791,7 +841,10 @@ class Critter:
         p = self.box.position()
         tag.setPosition_(Quartz.CGPointMake(p.x, FLOOR - 4 - tag.bounds().size.height / 2))
         root.addSublayer_(tag)
-        _spring(tag, "transform.scale", 0.5, 1.0, damping=10, stiffness=300, name="pop")
+        if _calm():
+            _fade(tag, 1.0, 0.18)
+        else:
+            _spring(tag, "transform.scale", 0.5, 1.0, damping=10, stiffness=300, name="pop")
         self.tag = tag
         if seconds:
             token = id(tag)
@@ -864,16 +917,24 @@ class ToyBox:
         self.direction = direction
 
     def appear(self) -> None:
+        if _calm():
+            _fade(self.root, 1.0)
+            return
         self.root.setOpacity_(1.0)
         _spring(self.root, "transform.scale", 0.05, 1.0, damping=7, stiffness=200, name="appear")
         _keys(self.body, "transform.rotation.z", [0, 0.2, -0.15, 0.08, 0], 0.7, delay=0.1, name="wiggle")
 
     def vanish(self) -> None:
+        if _calm():
+            _fade(self.root, 0.0)
+            return
         _keys(self.root, "transform.scale", [1.0, 1.15, 0.0], 0.4, [0, 0.3, 1], name="vanish")
         _keys(self.root, "opacity", [1.0, 1.0, 0.0], 0.4, [0, 0.5, 1], name="fade")
         _no_actions(lambda: self.root.setOpacity_(0.0))
 
     def wiggle(self) -> None:
+        if _calm():
+            return
         _keys(self.body, "transform.rotation.z", [0, 0.12, -0.12, 0.1, -0.1, 0], 0.4, name="wiggle")
         _keys(self.body, "transform.scale.y", [1, 0.9, 1.06, 1], 0.4, name="squash")
 
@@ -887,6 +948,7 @@ class ToyBox:
         lifted = Quartz.CATransform3DRotate(lifted, -0.55 if direction < 0 else 0.55, 0, 0, 1)
         self.inside.setHidden_(False)
         Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(_calm())
         Quartz.CATransaction.setAnimationDuration_(0.22)
         Quartz.CATransaction.setAnimationTimingFunction_(_ease(Quartz.kCAMediaTimingFunctionEaseOut))
         self.lid.setTransform_(lifted)
@@ -897,6 +959,7 @@ class ToyBox:
         if self.opened:
             return
         Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(_calm())
         Quartz.CATransaction.setAnimationDuration_(0.3)
         Quartz.CATransaction.setAnimationTimingFunction_(_ease(Quartz.kCAMediaTimingFunctionEaseIn))
         self.lid.setTransform_(Quartz.CATransform3DIdentity)
@@ -1243,6 +1306,12 @@ class Stage:
                 critter.box.setOpacity_(1.0)
             _no_actions(place)
             root.insertSublayer_below_(critter.box, toy.root)     # out from inside the box
+            if _calm():                          # Reduce motion: it fades in at its spot, no flight
+                _fade(critter.box, 1.0, 0.3)
+                AppHelper.callLater(0.3, land)
+                if lead is None:
+                    AppHelper.callLater(0.6, toy.close)
+                return
             fly = Quartz.CAKeyframeAnimation.animationWithKeyPath_("position")
             fly.setPath_(path)
             fly.setDuration_(0.62)
@@ -1262,7 +1331,7 @@ class Stage:
             critter.state = "out"
             critter.squish()
             dust = []
-            for side in (-1, 1):
+            for side in (() if _calm() else (-1, 1)):
                 puff = _shape(_ellipse(0, 0, 7, 5), WHITE, alpha=0.8, bounds=(0.01, 0.01))
                 puff.setPosition_(Quartz.CGPointMake(critter.x + side * 12, FLOOR + 2))
                 root.addSublayer_(puff)
@@ -1300,6 +1369,18 @@ class Stage:
             return
         seconds = max(0.35, distance / (110 if fast else 55))
         token = critter.token
+        if _calm():                              # Reduce motion: fade out here, fade in there
+            _fade(critter.box, 0.0, 0.15)
+
+            def moved():
+                if token != critter.token:
+                    return
+                _no_actions(lambda: critter.box.setPosition_(Quartz.CGPointMake(x, FLOOR)))
+                _fade(critter.box, 1.0, 0.2)
+                if then:
+                    then()
+            AppHelper.callLater(0.16, moved)
+            return
         critter.walk(True, fast)
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setAnimationDuration_(seconds)
@@ -1338,7 +1419,8 @@ class Stage:
             critter.set_mood("sad")
             critter.show_bubble("tool", "cloud.rain.fill")
             AppHelper.callLater(0.3, lambda: critter.tear(root))
-            _keys(critter.body, "transform.scale.y", [1, 0.9, 0.9], 0.5, name="droop")
+            if not _calm():
+                _keys(critter.body, "transform.scale.y", [1, 0.9, 0.9], 0.5, name="droop")
             critter.show_tag(root, "couldn't finish", seconds=2.0)
             wait, fast = 2.3, False
         else:
@@ -1373,6 +1455,10 @@ class Stage:
             self._walk_to(critter, self.box_x + self.direction * 30, then=at_door, fast=fast)
 
         def into_lead(lead):
+            if _calm():
+                _fade(critter.box, 0.0, 0.3)
+                AppHelper.callLater(0.3, vanish)
+                return
             here = critter.box.position()
             target = lead.box.position()
             end = Quartz.CGPointMake(target.x, target.y + 20)
@@ -1418,6 +1504,10 @@ class Stage:
             if token != critter.token:
                 return
             self.toy.open()
+            if _calm():                          # Reduce motion: it fades out where it stands
+                _fade(critter.box, 0.0, 0.3)
+                AppHelper.callLater(0.3, gone)
+                return
             here = critter.box.position()
             path = _path(("m", here.x, here.y), ("q", (here.x + self.box_x) / 2, FLOOR + 50, self.box_x, FLOOR + 16))
             _no_actions(lambda: (critter.box.setPosition_(Quartz.CGPointMake(self.box_x, FLOOR + 16)),
@@ -1700,7 +1790,7 @@ class Stage:
                      [PINK, (1.0, 0.85, 0.35), (0.6, 0.85, 1.0), (0.6, 1.0, 0.8), (0.8, 0.7, 1.0)], amount=2.2)
 
             def bow():
-                for c in everyone():
+                for c in ([] if _calm() else everyone()):
                     _keys(c.body, "transform.rotation.z", [0, 0.28 * self.direction, 0.28 * self.direction, 0],
                           0.9, [0, 0.3, 0.7, 1], additive=True, name="bow")
                     _keys(c.body, "transform.scale.y", [1, 0.86, 0.86, 1], 0.9, [0, 0.3, 0.7, 1], name="bowy")
@@ -1753,6 +1843,234 @@ class Stage:
             event = {"kind": kind, "run": run, "agent": name, "color": color, "text": text, **extra}
             AppHelper.callLater(i * step, lambda e=event: self._handle_safe(e))
         return run
+
+
+# --- pals: a species' face, small (the coding agents in the notch, notch_agents) -----------------------------
+# Grok-Bot style: a solid ball in one hue per species with dark pill eyes, plus just enough of the species
+# (ears, tufts, horns, leaves, a beak) to tell them apart at 11 pt. Drawn on a 24-unit grid, scaled, so it is
+# vector-crisp at any size; details (cheeks, mouth, shine, whiskers) only appear where they can be seen.
+
+HUES = {
+    "sprout": (0.55, 0.83, 0.27),     # lime
+    "kit":    (0.90, 0.28, 0.30),     # red
+    "chick":  (0.96, 0.65, 0.14),     # amber
+    "owl":    (0.62, 0.38, 1.00),     # violet
+    "cat":    (0.33, 0.68, 0.98),     # sky
+    "bun":    (1.00, 0.44, 0.71),     # pink
+    "drake":  (0.31, 0.76, 0.63),     # teal
+    "bear":   (0.29, 0.37, 0.90),     # indigo (bluer and deeper than the violet, so they don't blur together)
+}
+_FACE_INK = (0.07, 0.06, 0.10)
+
+
+def species_hue(species: str) -> tuple:
+    """The one hue a species wears as an agent pal (teal, red, amber, violet, sky, pink, lime, indigo)."""
+    return HUES.get(species, HUES["drake"])
+
+
+def _grid(k):
+    """Path steps on the 24-unit grid -> a CGPath scaled by k."""
+    def make(*steps):
+        scaled = []
+        for s in steps:
+            if s[0] == "e":
+                scaled.append(("e", s[1] * k, s[2] * k, s[3] * k, s[4] * k))
+            elif s[0] == "r":
+                scaled.append(("r", s[1] * k, s[2] * k, s[3] * k, s[4] * k, s[5] * k))
+            else:
+                scaled.append((s[0],) + tuple(v * k for v in s[1:]))
+        return _path(*scaled)
+    return make
+
+
+def _oval(cx, cy, w, h):
+    return ("e", cx - w / 2, cy - h / 2, w, h)
+
+
+def mini_face(species: str, size: float, rgb: tuple | None = None):
+    """Just the head of a species, `size` points square (crisp from 11 to 64 pt), centred on its position.
+    Change it with face_mood(), face_blink(), face_look()."""
+    species = species if species in HUES else "drake"
+    rgb = rgb or species_hue(species)
+    S = float(size)
+    k = S / 24.0
+    g = _grid(k)
+    b = (S, S)
+    face = Quartz.CALayer.layer()
+    face.setBounds_(Quartz.CGRectMake(0, 0, S, S))
+    face.setValue_forKey_(species, "mintSpecies")
+    detail = S >= 15
+    edge = gfx.mix(rgb, DARK, 0.45)
+
+    # What sticks out of the head, in the fur colour: each piece its own path (one path with both ears would
+    # cut holes where a reversed triangle overlaps the head), all under one shading.
+    fur = [[_oval(12, 10.6, 19.6, 19.6)]]
+    extra_back, extra_front = [], []
+    inner = gfx.mix(PINK, rgb, 0.35)
+    if species == "owl":
+        fur += [[("m", 4.4, 14.2), ("l", 4.0, 22.4), ("l", 9.6, 18.4), ("z",)],
+                [("m", 19.6, 14.2), ("l", 20.0, 22.4), ("l", 14.4, 18.4), ("z",)]]
+    elif species == "bun":
+        fur += [[_oval(8.2, 19.2, 4.6, 10.4)], [_oval(15.8, 19.2, 4.6, 10.4)]]
+        if detail:
+            extra_front.append((g(_oval(8.2, 20.0, 2.0, 6.6), _oval(15.8, 20.0, 2.0, 6.6)), inner, 1.0))
+    elif species in ("kit", "cat"):
+        tip = 23.6 if species == "kit" else 22.4
+        fur += [[("m", 3.8, 14.0), ("l", 4.8, tip), ("l", 10.8, 18.6), ("z",)],
+                [("m", 20.2, 14.0), ("l", 19.2, tip), ("l", 13.2, 18.6), ("z",)]]
+        if detail:
+            extra_front.append((g(("m", 5.4, 17.0), ("l", 5.8, tip - 3.0), ("l", 9.0, 18.6), ("z",),
+                                  ("m", 18.6, 17.0), ("l", 18.2, tip - 3.0), ("l", 15.0, 18.6), ("z",)),
+                                inner if species == "cat" else gfx.mix(rgb, DARK, 0.35), 1.0))
+    elif species == "bear":
+        fur += [[_oval(5.0, 18.0, 6.8, 6.8)], [_oval(19.0, 18.0, 6.8, 6.8)]]
+        if detail:
+            extra_front.append((g(_oval(5.0, 18.0, 3.2, 3.2), _oval(19.0, 18.0, 3.2, 3.2)), inner, 1.0))
+    elif species == "chick":
+        fur += [[_oval(10.2, 21.0, 2.6, 4.6)], [_oval(12.0, 21.8, 2.8, 5.6)], [_oval(13.8, 21.0, 2.6, 4.6)]]
+    elif species == "drake":
+        horn = (1.0, 0.93, 0.78)
+        extra_back.append((g(("m", 7.2, 18.0), ("l", 5.6, 23.4), ("l", 10.6, 19.6), ("z",),
+                             ("m", 16.8, 18.0), ("l", 18.4, 23.4), ("l", 13.4, 19.6), ("z",)), horn, 1.0))
+    elif species == "sprout":
+        leaf = (0.30, 0.74, 0.36)
+        extra_back.append((g(("m", 12, 19.0), ("l", 12, 21.6)), None, 1.0, gfx.mix(leaf, DARK, 0.3), 1.1 * k))
+        extra_back.append((g(("m", 12, 21.4), ("q", 9.6, 24.4, 5.4, 23.4), ("q", 7.6, 20.4, 12, 21.4), ("z",),
+                             ("m", 12, 21.4), ("q", 14.4, 24.4, 18.6, 23.4), ("q", 16.4, 20.4, 12, 21.4), ("z",)),
+                           leaf, 1.0))
+
+    def add(spec):
+        path, fill, alpha = spec[0], spec[1], spec[2]
+        layer = _shape(path, fill, spec[3] if len(spec) > 3 else None, spec[4] if len(spec) > 4 else 0.0,
+                       alpha, bounds=b)
+        face.addSublayer_(layer)
+        return layer
+
+    for spec in extra_back:
+        add(spec)
+    # The head and ears: a soft top-lit gradient clipped to their silhouette.
+    shading = Quartz.CAGradientLayer.layer()
+    shading.setFrame_(Quartz.CGRectMake(0, 0, S, S))
+    shading.setColors_([gfx.cg(gfx.mix(rgb, DARK, 0.10)), gfx.cg(rgb), gfx.cg(gfx.mix(rgb, WHITE, 0.30))])
+    shading.setLocations_([0.0, 0.55, 1.0])
+    shading.setStartPoint_(Quartz.CGPointMake(0.5, 0.0))
+    shading.setEndPoint_(Quartz.CGPointMake(0.5, 1.0))
+    silhouette = Quartz.CALayer.layer()
+    silhouette.setFrame_(Quartz.CGRectMake(0, 0, S, S))
+    for piece in fur:
+        silhouette.addSublayer_(_shape(g(*piece), WHITE, bounds=b))
+    shading.setMask_(silhouette)
+    face.addSublayer_(shading)
+    for spec in extra_front:
+        add(spec)
+    if species == "kit" and detail:
+        add((g(_oval(12, 6.4, 10.4, 6.2)), (1.0, 0.95, 0.88), 1.0))
+    if S >= 14:                                    # a little shine, top left
+        add((g(_oval(7.8, 15.6, 4.6, 2.6)), WHITE, 0.28))
+    if S >= 14:
+        add((g(_oval(6.0, 8.2, 3.4, 1.8), _oval(18.0, 8.2, 3.4, 1.8)), PINK, 0.55))
+
+    # Eyes: one layer per mood, toggled. The group turns about the eyes' line (blinks squash in place).
+    def group(name):
+        layer = Quartz.CALayer.layer()
+        layer.setBounds_(Quartz.CGRectMake(0, 0, S, S))
+        layer.setAnchorPoint_(Quartz.CGPointMake(0.5, 11.4 / 24))
+        layer.setPosition_(Quartz.CGPointMake(S / 2, 11.4 * k))
+        face.addSublayer_(layer)
+        face.setValue_forKey_(layer, name)
+        return layer
+
+    eyes = group("mintEyes")
+    if species == "owl":
+        eyes.addSublayer_(_shape(g(_oval(8.4, 11.6, 6.0, 6.0), _oval(15.6, 11.6, 6.0, 6.0)), WHITE, bounds=b))
+        eyes.addSublayer_(_shape(g(("r", 7.4, 9.8, 2.2, 3.6, 1.1), ("r", 14.4, 9.8, 2.2, 3.6, 1.1)), _FACE_INK,
+                                 bounds=b))
+    else:
+        eyes.addSublayer_(_shape(g(("r", 7.9, 9.4, 2.3, 4.2, 1.15), ("r", 13.8, 9.4, 2.3, 4.2, 1.15)), _FACE_INK,
+                                 bounds=b))
+    if S >= 18:
+        eyes.addSublayer_(_shape(g(_oval(8.9 if species != "owl" else 8.9, 12.6, 0.9, 0.9),
+                                   _oval(14.8 if species != "owl" else 15.9, 12.6, 0.9, 0.9)), WHITE, bounds=b))
+    line = max(0.9, 0.66 * k)
+    happy = group("mintEyesHappy")
+    happy.addSublayer_(_shape(g(("m", 7.2, 10.6), ("q", 9.0, 13.6, 10.8, 10.6),
+                                ("m", 13.2, 10.6), ("q", 15.0, 13.6, 16.8, 10.6)), None, _FACE_INK, line, bounds=b))
+    sad = group("mintEyesSad")
+    sad.addSublayer_(_shape(g(("m", 7.6, 10.9), ("l", 10.4, 10.9), ("m", 13.6, 10.9), ("l", 16.4, 10.9)),
+                            None, _FACE_INK, line, bounds=b))
+    worried = group("mintEyesWorried")
+    worried.addSublayer_(_shape(g(("r", 8.1, 9.6, 1.9, 3.2, 0.95), ("r", 14.0, 9.6, 1.9, 3.2, 0.95)), _FACE_INK,
+                                bounds=b))
+    worried.addSublayer_(_shape(g(("m", 7.0, 14.2), ("l", 10.2, 15.4), ("m", 17.0, 14.2), ("l", 13.8, 15.4)),
+                                None, _FACE_INK, line * 0.85, bounds=b))
+    if S >= 14:
+        worried.addSublayer_(_shape(g(("m", 20.0, 17.4), ("q", 21.6, 14.6, 20.0, 14.0), ("q", 18.4, 14.6, 20.0, 17.4),
+                                      ("z",)), (0.62, 0.86, 1.0), bounds=b))
+    beak = species in ("owl", "chick")
+    if beak:
+        add((g(("m", 10.6, 9.0), ("l", 13.4, 9.0), ("l", 12.0, 6.8), ("z",)), (1.0, 0.62, 0.18), 1.0))
+    if S >= 16:
+        mouth = _shape(None, None, _FACE_INK, max(0.8, line * 0.8), bounds=b)
+        face.addSublayer_(mouth)
+        face.setValue_forKey_(mouth, "mintMouth")
+    if species == "cat" and S >= 20:
+        add((g(("m", 4.6, 8.0), ("l", 0.8, 8.8), ("m", 4.6, 6.8), ("l", 1.0, 6.2),
+               ("m", 19.4, 8.0), ("l", 23.2, 8.8), ("m", 19.4, 6.8), ("l", 23.0, 6.2)), None, 1.0, edge, 0.5 * k))
+    face_mood(face, "normal")
+    return face
+
+
+_MOOD_EYES = {"normal": "mintEyes", "asking": "mintEyes", "happy": "mintEyesHappy", "done": "mintEyesHappy",
+              "sad": "mintEyesSad", "failed": "mintEyesSad", "worried": "mintEyesWorried"}
+
+
+def face_mood(face, mood: str) -> None:
+    """normal / happy / sad / worried / asking on a mini_face."""
+    want = _MOOD_EYES.get(mood, "mintEyes")
+    if face.valueForKey_("mintMood") == mood:
+        return
+    face.setValue_forKey_(mood, "mintMood")
+
+    def apply():
+        for name in set(_MOOD_EYES.values()):
+            layer = face.valueForKey_(name)
+            if layer is not None:
+                layer.setHidden_(name != want)
+        mouth = face.valueForKey_("mintMouth")
+        if mouth is not None:
+            g = _grid(face.bounds().size.width / 24.0)
+            beak = face.valueForKey_("mintSpecies") in ("owl", "chick")
+            path = {"happy": g(("m", 10.2, 7.4), ("q", 12.0, 5.0, 13.8, 7.4)),
+                    "done": g(("m", 10.2, 7.4), ("q", 12.0, 5.0, 13.8, 7.4)),
+                    "sad": g(("m", 10.6, 5.8), ("q", 12.0, 7.4, 13.4, 5.8)),
+                    "failed": g(("m", 10.6, 5.8), ("q", 12.0, 7.4, 13.4, 5.8)),
+                    "worried": g(("m", 10.0, 6.4), ("q", 11.0, 7.4, 12.0, 6.4), ("q", 13.0, 5.4, 14.0, 6.4)),
+                    "asking": g(_oval(12.0, 6.4, 1.8, 2.0))}.get(mood, g(("m", 10.8, 7.2), ("q", 12.0, 6.0, 13.2, 7.2)))
+            mouth.setPath_(path)
+            mouth.setHidden_(beak and mood in ("normal", "asking"))
+    _no_actions(apply)
+
+
+def face_blink(face) -> None:
+    eyes = face.valueForKey_("mintEyes")
+    if eyes is not None and not eyes.isHidden():
+        _keys(eyes, "transform.scale.y", [1.0, 0.12, 1.0], 0.18, name="blink")
+
+
+def face_look(face, dx: float, dy: float) -> None:
+    """Eyes toward a direction (any length vector), about a twentieth of the face at most."""
+    length = math.hypot(dx, dy)
+    k = face.bounds().size.width / 24.0
+    reach = 1.1 * k * min(1.0, length / 60.0)
+    ox, oy = (reach * dx / length, reach * 0.8 * dy / length) if length > 0.5 else (0.0, 0.0)
+    pos = Quartz.CGPointMake(face.bounds().size.width / 2 + ox, 11.4 * k + oy)
+
+    def apply():
+        for name in set(_MOOD_EYES.values()):
+            layer = face.valueForKey_(name)
+            if layer is not None:
+                layer.setPosition_(pos)
+    _no_actions(apply)
 
 
 def _short(text: str, limit: int = 44) -> str:

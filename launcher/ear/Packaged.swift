@@ -52,6 +52,71 @@ enum Packaged {
         }
     }
 
+    // --- where the app lives -------------------------------------------------------------
+
+    /// Opened from the disk image, or from Downloads or the Desktop (macOS then runs it from a hidden read-only
+    /// copy, "App Translocation", and it could never update itself): offer to move it into Applications once.
+    /// The user has just approved this app with macOS (it is running), so the copy is not marked as downloaded
+    /// again and opens without a second approval - the same thing dragging it there and choosing Open Anyway
+    /// would end with. true = moved and the copy is opening; this process should quit.
+    static func moveIntoApplications() -> Bool {
+        let fm = FileManager.default
+        let here = Bundle.main.bundlePath
+        let home = NSHomeDirectory()
+        let translocated = here.contains("/AppTranslocation/")
+        let onDiskImage = here.hasPrefix("/Volumes/")
+        let loose = [home + "/Downloads/", home + "/Desktop/", home + "/Documents/"].contains { here.hasPrefix($0) }
+        guard translocated || onDiskImage || loose else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Move Hey Mint to Applications?"
+        alert.informativeText = "Hey Mint keeps itself up to date - but only from the Applications folder. "
+            + "It moves itself there and opens again; you won't be asked to approve it again."
+        alert.addButton(withTitle: "Move to Applications")
+        alert.addButton(withTitle: "Not Now")
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        var folder = "/Applications"
+        if !fm.isWritableFile(atPath: folder) {
+            folder = home + "/Applications"
+            try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        }
+        let target = folder + "/Hey Mint.app"
+        do {
+            if fm.fileExists(atPath: target) {
+                try fm.trashItem(at: URL(fileURLWithPath: target), resultingItemURL: nil)   // an older copy: a backup
+            }
+            let copy = Process()
+            copy.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")   // keeps the signature and permissions
+            copy.arguments = [here, target]
+            try copy.run()
+            copy.waitUntilExit()
+            guard copy.terminationStatus == 0, fm.fileExists(atPath: target + "/Contents/MacOS") else {
+                throw NSError(domain: "HeyMint", code: Int(copy.terminationStatus),
+                              userInfo: [NSLocalizedDescriptionKey: "copying it to \(folder) failed"])
+            }
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "Hey Mint could not move itself"
+            failed.informativeText = "\(error.localizedDescription)\n\nDrag Hey Mint into the Applications folder yourself, then open it there."
+            failed.runModal()
+            return false
+        }
+        for attribute in ["com.apple.quarantine", "com.apple.provenance"] {
+            let clear = Process()
+            clear.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+            clear.arguments = ["-dr", attribute, target]
+            try? clear.run()
+            clear.waitUntilExit()
+        }
+        if loose { try? fm.trashItem(at: URL(fileURLWithPath: here), resultingItemURL: nil) }   // not a second copy
+        Log.write("[app] moved from \(here) to \(target)")
+        let reopen = Process()                    // after this process has quit, so only one Mint runs
+        reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+        reopen.arguments = ["-c", "sleep 1; /usr/bin/open \"$1\"", "sh", target]
+        try? reopen.run()
+        return true
+    }
+
     // --- API keys ------------------------------------------------------------------------
 
     static let keys: [(name: String, label: String, hint: String, required: Bool)] = [

@@ -217,7 +217,12 @@ else
   ln -s /Applications "$STAGE/Applications"
   hdiutil create -quiet -volname "Hey Mint" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 fi
-if [[ "$IDENTITY" != "-" ]]; then
+# The disk image itself is signed only when it will be notarized (Developer ID). A DMG signed by anyone else -
+# the free self-signed release certificate included - is what macOS Sequoia and later refuse to open ("Apple could
+# not verify 'Hey-Mint-….dmg' is free of malware"), before the app inside is even seen; an unsigned DMG simply
+# opens (tested 7 Oct 2026 on macOS 26: a quarantined unsigned DMG mounted through Finder with no prompt), and
+# macOS asks once, for the app. The app inside is signed either way.
+if [[ "$IDENTITY" == "Developer ID Application:"* && -n "${NOTARY_PROFILE:-}" ]]; then
   dmg_flags=(--force --sign "$IDENTITY")
   [[ -n "${SIGN_KEYCHAIN:-}" ]] && dmg_flags+=(--keychain "$SIGN_KEYCHAIN")
   [[ "${SIGN_TIMESTAMP:-1}" == 0 ]] && dmg_flags+=(--timestamp=none) || dmg_flags+=(--timestamp)

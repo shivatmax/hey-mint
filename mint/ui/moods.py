@@ -87,6 +87,12 @@ CONTEXT_RULES = (
     "the literal words. Choose none for ordinary, neutral or practical exchanges (commands, facts, questions, "
     "'sorry, which one?'): most turns need no expression.")
 
+# When a feeling's expression ends, the orb's own eyes keep a quiet echo of it for a moment
+# (orb.expression): flat after a sad one, content arcs after a laugh...
+LINGER = {"cry": ("dash", 2.5), "sleepy": ("dash", 2.0), "laugh": ("arc", 1.6), "smile": ("arc", 1.4),
+          "blush": ("arc", 1.4), "clap": ("arc", 1.2), "angry": ("halfmoon", 2.0), "surprised": ("wide", 1.2),
+          "thinking": ("dot", 1.4)}
+
 # Tools that are bookkeeping, not a task done for the user.
 QUIET = {"express", "move_orb", "set_voice", "screen_share_visibility", "find_skill", "use_skill",
          "recall_memory", "remember", "save_memory", "show_chat", "set_preference", "get_status",
@@ -230,10 +236,13 @@ class Moods:
         if state == "awake" and previous in ("working", "speaking", "thinking"):
             with self._lock:
                 done = self._did_work and not self._failed
+                failed = self._failed
                 self._did_work = self._failed = False
             if done:
                 # After the orb's tick badge has faded and its face is back.
                 AppHelper.callLater(1.3, self._style)
+            elif failed:
+                AppHelper.callLater(1.0, lambda: self._eyes("dash", 3.0))     # tired, flat eyes
 
     # --- showing (main thread for the checks) --------------------------------------------
 
@@ -262,7 +271,20 @@ class Moods:
             from mint.ui.emotes import emotes
             print(f"  [orb feels: {name} ({why})]", flush=True)
             emotes.play(name)
+            echo = LINGER.get(name)
+            if echo:
+                from mint.ui.emotes import EMOTES
+                AppHelper.callLater(EMOTES.get(name, (2.5,))[0] + 0.3, lambda: self._eyes(*echo))
         AppHelper.callAfter(go)
+
+    def _eyes(self, name: str, seconds: float) -> None:
+        """An eyes-only expression on the orb (main thread)."""
+        orb = getattr(self.hud, "orb", None)
+        if orb is not None and hasattr(orb, "expression"):
+            try:
+                orb.expression(name, seconds)
+            except Exception:
+                log.debug("eye expression failed", exc_info=True)
 
     def _style(self) -> None:
         now = time.monotonic()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -91,7 +92,7 @@ def list_windows() -> str:
         title = window.get("kCGWindowName") or ""
         layer = window.get("kCGWindowLayer", 0)
         # Layer 0 is ordinary app windows; higher layers are menus and overlays.
-        if layer != 0 or not owner:
+        if layer != 0 or not owner or window.get("kCGWindowOwnerPID") == os.getpid():
             continue
         seen.append(f"{owner}: {title}" if title else owner)
     if not seen:

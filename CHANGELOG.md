@@ -1,5 +1,98 @@
 # Changelog
 
+## 0.6.0 (2026-10-07)
+
+- **Optional Jev key in setup:** the welcome window has a new optional page after Connect - open TypeSafe's console
+  (console.typesafe.ai/keys) in one click, paste the key, and Mint checks it with TypeSafe before saving it
+  (`TYPESAFE_API_KEY`, in .env, mode 600). Skip keeps Gemini making those choices. install.sh asks the same,
+  optionally, after the Gemini key.
+- **Web tasks in seconds (`web_goal`):** a flight search, a form, a result to click through to - done in one go in
+  Mint's own browser tab, usually in seconds, with what the page shows at the end. Ported from browser-use's
+  jev-ultrafast (MIT): each step reads the visible page in one call, and Jev picks the operation and the element in
+  one decision; a small model writes text only for typing (Gemini flash-lite, then OpenAI nano/mini, then Jev
+  choosing from the request's own words). Event-based waits, no screenshots (`mint/tools/webgoal.py`).
+  - Jev is optional: without a TypeSafe key (or while Jev is down) a fast Gemini model makes the same step
+    decision, checked the same way - first through a Gemini Live model's tool call (Live quota is far larger; never a model the conversation needs: its own only with room to spare that minute), then the regular models in one JSON answer (only offered operations and observed elements; no DONE
+    while parts of the goal are undone; told what was typed but not submitted yet), then OpenAI as a last resort.
+  - Headless (nothing on screen, side by side with other jobs), as a window to watch, or in your own Chrome with
+    your logins after a one-time OK - Mint never clicks Chrome's prompt (`mint/tools/cdp.py`).
+  - Your own Chrome, with your logins, the best way available - each one hands over to the next instead of
+    failing: (1) a connection you allowed, held by a small helper so restarting Mint never asks again (Chrome asks
+    "Allow remote debugging?" once per Chrome start; only Mint's own process can use the helper); (2) Chrome's
+    "Allow JavaScript from Apple Events" switch - turned on once, it stays on and nothing is ever asked again; the
+    same engine runs in a background tab through it (`mint/tools/chrome_script.py`); (3) on screen, the old way.
+    When nothing is set up, Mint brings Chrome forward, says in plain words where the switch is, waits, and starts
+    the task by itself. After a "no" it doesn't ask again on its own. A site that turns away Mint's hidden browser
+    with a robot check is tried once as a visible window.
+  - With several Chrome profiles, the task goes to the profile signed in to that site (its tabs and cookies for
+    it, counted, never read), and Mint says which profile it used.
+  - Checked before each action: same page, element still there, nothing covering it; a step that did nothing isn't
+    repeated, and no element is tried more than three times. No passwords, card numbers or codes; sending, buying,
+    booking, deleting asked first; money never moved; page text fenced as data.
+  - `python -m mint.tools.webbench`: five tasks with independent checks (Google Flights, Wikipedia, DuckDuckGo, a
+    form, a local page). 15/15 verified; medians 3-11 s.
+- **Mint checks your coding agents' work:** for Claude Code and Codex sessions, Mint now reads what really happened
+  instead of trusting the agent's word: each test run's result from its own output (pytest, jest, vitest, go, cargo,
+  node:test, mocha and more; "2 of 48 failed - expected 3, got -1"), whether code changed after the last run, retries
+  ("fixed on try 2"), risky steps (`.env` changed, force-push, `reset --hard`, `curl | sh`, a command failing 3
+  times), a test weakened while failing, and two agents changing the same file. Ask "did Claude's tests pass?",
+  "what did my agents do today?", "recap", "how much Codex do I have left?" or "hand this to Codex" (writes a
+  hand-off note and starts Codex on it). Telegram's done messages carry the verdict. A week of finished requests is
+  kept on this Mac (`agent-history.json`). Rules adapted from dotpals (MIT).
+- **Optional fix loop** (Settings > Appearance & Sound > Claude mode, off by default; needs Mint's Claude Code hooks): when Claude tries to
+  finish, commit or push while its tests fail, weren't run after its last change, or pass only because a test was
+  weakened, it's sent back with the reason - at most twice per request. Failures that were there before it changed
+  anything, and requests that changed no code, are never held up. Before an edit, Claude Code asks you if another
+  agent changed that file minutes ago.
+- **Claude's usage limits** (optional): Settings > Appearance & Sound > Claude mode > Show Claude's usage limits sets a small status line that
+  saves Claude Code's 5-hour and weekly limits for Mint and still shows your own status line. Codex's limits are
+  read from its logs.
+- **Agents can ask Mint (MCP):** a small read-only MCP server (`mint/tools/agent_mcp.py`) lets Claude Code, Codex or
+  any MCP client call `check_my_work` before saying "done" ("Not done yet: you changed calc.py after the last test
+  run", then "Looks ready"), plus `test_status`, `recap`, `today`, `risky_steps`, `handoff_note`, `usage_limits` and
+  `agents_now`. Settings > Appearance & Sound > Claude mode > Let agents ask Mint adds it with each tool's own
+  `mcp add`. Tested with a real Codex session.
+- **Newer Codex versions read properly:** commands and patches Codex runs from its tool scripts (`exec`), and its
+  `patch_apply_end` events, now show as steps, test runs and changed files.
+- **An accuracy suite** for the checks: 36 hand-labeled real sessions (from dotpals) score Mint's test verdicts,
+  failure reasons, retries, risky steps and weakened tests - 162 of 174 right, 4 wrong - and CI fails if that drops.
+- **`mint --doctor`** (and Settings > Updates & Help > Check my setup): one checklist for the key, voice models,
+  permissions, the app and updates, Claude Code and Codex, Telegram, email control and disk space.
+
+- **Mint stops taking over your mouse (computer use, after Cua Driver - MIT):** buttons, checkboxes, rows, menus,
+  pop-ups and Send are pressed through Accessibility with the app left where it is - behind your window, even on
+  another Space; your pointer and your front app stay yours. The pointer is only a last resort (web content that
+  ignores Accessibility, double clicks), then said as "(foreground)", with your pointer and front app given back.
+  On the new test app: pointer moved in 0 of 26 tasks and the front app changed in 0 of 26 (was 24 of 26 each).
+  - Every action reports one of CONFIRMED / PARTIAL / UNVERIFIED / SUSPECTED NO-OP / FAILED, with evidence read
+    back from the target and what to try next (`mint/screen/effect.py`). An app that acts and then returns an
+    error is never pressed a second time.
+  - Typing goes straight into the field (accessibility insert, read back), then key events; the clipboard is only
+    a last resort.
+  - Pop-up and context menus: the choices are read and the right one picked through Accessibility, without leaving
+    a menu open in front of you.
+  - A focus guard puts your app back in front if a background press makes the target app jump forward.
+- **Seeing the screen:** window-only captures (another window on top can't confuse it; Mint's own overlays never
+  appear), a 1x/2x pixel check, a 2 s accessibility timeout so a frozen app can't freeze Mint, Electron apps
+  switched on by polling for their web content, apps opened in the background found through their windows, rows
+  scrolled out of view listed as "off screen", web-page buttons inside apps named, and element ids like [s12:7]
+  that stay valid for one look, with "what changed since" (`mint/screen/capture.py`).
+- **Choosing the target:** a strict Jev chooser (at most 24 candidates plus "look again" and "not sure",
+  a confidence floor, ids from role + label + row; delete/send/buy/close never offered), a near-miss check ("Save
+  all" never becomes "Save"), zoomed second looks for small targets, and click_at now finds what you named - the
+  voice model's rough point is only a hint (`mint/screen/choose.py`).
+- **verify_state:** checks up to 8 conditions (window, front app, control value/state, text, file) until they hold
+  twice in a row; "unknown" never counts as done (`mint/screen/verify.py`).
+- **Computer-use test bench:** a fixture app that records what really happened, 26 tasks scored only from its state
+  file, a desktop-disturbance check (did the pointer or front app move?), ScreenSpot-style grounding with "not on
+  screen" items, and offline replay (`bench/run_cu.sh`, `bench/cu_tasks.py`, `mint.groundbench replay`).
+- **Install: approve once, never again.** The DMG is no longer signed with the free certificate (macOS Sequoia
+  and later refused to even open a disk image signed but not notarized; an unsigned one opens), so macOS now asks
+  only once, for the app, with "Open Anyway". Opened from the DMG, Downloads or the Desktop, Hey Mint offers to
+  move itself into Applications (where it can update itself) and opens there without a second question. Updates
+  install themselves without asking and keep the permissions. README, website, release notes and the DMG window
+  now show both ways: the download with the three "Open Anyway" clicks, or one line in Terminal that asks nothing
+  (GitHub link first; some networks block pages.dev).
 ## 0.5.10 (2026-10-06)
 
 - **No more silent or very late answers:** sometimes Gemini had your words (they showed on screen) but never heard
@@ -7,7 +100,7 @@
   answered long after. Now, 1.2 s after your voice stops with nothing back, Mint tells the voice service you're
   done; if there's still no answer 5 s later and you had just said "Hey Mint", it sends your words as text. Mint
   stays listening meanwhile, and a transcript alone no longer counts as an answer for the stall watch.
-- **Always the quickest voice model:** Mint now uses a pool of Gemini Live models - 3.8 Live, 3.8 Live Extended
+- **Always the quickest voice model:** Mint now uses a pool of Gemini Live models - 3.8 Live, 3.1
   Flash Live and 3.8 Live Extended Thinking (its own quota; last, as it sometimes promises an action and doesn't
   call the tool - such a promise with no action in 10 s goes to the next model) - found from your key once a day (newer ones join on their own;
   transcribe/translate/old native-audio models are skipped). Each has its own input-tokens-a-minute limit, and every
@@ -44,9 +137,6 @@
   - "End the call" ends it directly; the model had tried clicking around Chrome instead.
   - A crash when a call started (two audio rebuilds at once) is fixed.
   - The "who joined" message shows the person's name.
-
-## 0.5.8 (unreleased)
-
 - **Several things at once:** hand Mint a job, then another, and keep talking. Long or multi-step requests
   ("research…and put it in a note", "tidy my Downloads", "also…", "meanwhile…") become background jobs that run
   side by side with Mint's own tools, each in its own context, and report when they end - when Mint is quiet,

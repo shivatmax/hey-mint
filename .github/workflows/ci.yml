@@ -1,13 +1,20 @@
 name: CI
+# Actions are pinned by commit SHA (the tag in the comment); Dependabot keeps them current.
 on: [push, pull_request]
 permissions: {contents: read}
 jobs:
   test:
     runs-on: macos-latest
+    # A hung test or build fails the job in minutes, not after GitHub's 6-hour limit.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]    # pyproject.toml: requires-python >= 3.11
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.12", cache: pip}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: {python-version: "${{ matrix.python }}", cache: pip}
       - name: No secrets or personal files
         run: |
           ! git ls-files | grep -E '(^|/)(\.env|custom\.json|settings\.json|agents\.json|history\.jsonl|memory\.md)$'

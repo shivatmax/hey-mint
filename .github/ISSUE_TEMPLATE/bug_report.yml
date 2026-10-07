@@ -2,6 +2,28 @@ name: Bug report
 description: Something Mint did wrong, or didn't do
 labels: [bug]
 body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Hey Mint's version. Settings ▸ Updates & Help shows it (or say “which version are you?”).
+      placeholder: "0.5.10 — Settings ▸ Updates & Help"
+    validations: {required: true}
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      multiple: true
+      options:
+        - Voice
+        - Notch
+        - Coding agents
+        - Google Meet
+        - Email
+        - Telegram
+        - Settings/Onboarding
+        - Updater
+        - Other
   - type: textarea
     attributes: {label: What you said or typed, placeholder: "“Hey Mint, open the on-call channel in Slack”"}
     validations: {required: true}

@@ -91,6 +91,16 @@ def _remember(bridge, sent, key: str) -> None:
             bridge.agent_msgs.pop(next(iter(bridge.agent_msgs)))
 
 
+def _checks(s) -> str:
+    """How its tests stand and anything risky, under a done / failed message ("" when there's nothing)."""
+    try:
+        from mint.tools import agent_checks
+        line = agent_checks.emoji_line(s)
+    except Exception:
+        return ""
+    return f"\n\n{esc(line)}" if line else ""
+
+
 def alert(bridge, kind: str, s) -> None:
     from mint.tools import agent_hooks
     from mint.tools import agent_remote
@@ -118,14 +128,14 @@ def alert(bridge, kind: str, s) -> None:
         if can_type:
             text += "\n\n↩️ <i>Reply to this message with your answer.</i>"
     elif kind == "failed":
-        text = f"❌ {head} failed.\n{esc((s.summary or '')[:900])}"
+        text = f"❌ {head} failed.\n{esc((s.summary or '')[:900])}" + _checks(s)
     else:
         took = ""
         if s.turn_started and s.since > s.turn_started:
             secs = int(s.since - s.turn_started)
             took = f" ({secs // 60} min {secs % 60:02d} s)" if secs >= 60 else f" ({secs} s)"
         from mint.ui.notch_agents import _plain
-        text = f"✅ {head} is done{took}.\n{esc(_plain(s.summary)[:1500])}"
+        text = f"✅ {head} is done{took}.\n{esc(_plain(s.summary)[:1500])}" + _checks(s)
         if can_type:
             text += "\n\n↩️ <i>Reply to this message to tell it what to do next.</i>"
     bid = bridge._keep(bridge.agent_btns, {"key": s.key, "approval": None})
