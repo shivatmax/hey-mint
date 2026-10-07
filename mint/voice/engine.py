@@ -13,6 +13,11 @@ Living alongside other apps (calls, music, meetings) shaped the rest:
 * With headphones or AirPods there is no echo to cancel, so in "auto" mode
   voice processing is simply off - no ducking at all, no hidden aggregate
   device.
+* Only during a conversation (7 Oct): asleep - listening for "Hey Mint" while the
+  user watches a video - voice processing is off too, so other apps play at full
+  volume and the microphone hears as it is. It comes on once the user has said
+  their request (converse(True): ~1 s to build, while the model thinks) so Mint
+  can be talked over, and goes off when Mint falls asleep again.
 * The engine stops itself whenever the audio setup changes (a device plugged
   in, another app starting voice processing). Before, Mint then went deaf
   without a word; now it rebuilds, and a watchdog restarts a silent mic.
@@ -48,6 +53,7 @@ _au.AudioUnitSetProperty.restype = ctypes.c_int32
 _CURRENT_DEVICE = 2000        # kAudioOutputUnitProperty_CurrentDevice
 _SCOPE_GLOBAL = 0
 _DUCK_MIN = 10                # AVAudioVoiceProcessingOtherAudioDuckingLevelMin
+MIN_GAP = 2.0                 # seconds between two rebuilds of the engine
 
 
 def _resample(samples: np.ndarray, source: float, target: float) -> np.ndarray:
@@ -65,7 +71,8 @@ def _resample(samples: np.ndarray, source: float, target: float) -> np.ndarray:
 
 
 class VoiceAudio:
-    def __init__(self, echo: str = "auto", input_uid: str = "", output_uid: str = "", defer: bool = False) -> None:
+    def __init__(self, echo: str = "auto", input_uid: str = "", output_uid: str = "", defer: bool = False,
+                 quiet_asleep: bool = True) -> None:
         self.muted = False
         self.playing = False
         self.echo_mode = echo                  # auto | on | off
@@ -75,6 +82,10 @@ class VoiceAudio:
         self.suspended = False
         self.silent = False                    # a Google Meet call has Mint's voice: the speaker plays silence
         self.resting = False                   # the mic is off (Mint paused): no engine running for nothing
+        self.conversation = False              # in a conversation: echo cancellation may run (converse())
+        self.quiet_asleep = quiet_asleep       # asleep: the plain mic (False: echo cancellation all the time)
+        self._relax_after_play = False         # go back to the plain mic once Mint has finished speaking
+        self._switching = False                # a mode switch is scheduled: a reply waits for it
         self._restarting = False               # a rebuild is under way (it takes ~2 s with voice processing)
         self._restarted_at = 0.0
         self.on_reconfigure = None             # callback(audio) after every rebuild
@@ -131,7 +142,7 @@ class VoiceAudio:
         in_id, out_id = self._devices()
         out = audio_devices.describe(out_id)
         self.private_output = audio_devices.is_private_listening(out)
-        want_vp = self.echo_mode == "on" or (self.echo_mode == "auto" and not self.private_output)
+        want_vp = self._wants_echo_cancel()
 
         # With voice processing, one engine: the canceller must see what is
         # played to subtract it. Without, two - one records, one plays - since
@@ -172,6 +183,53 @@ class VoiceAudio:
             for engine in {id(self.engine): self.engine, id(self.out_engine): self.out_engine}.values()]
         self.status = self._describe(in_id, out_id)
         log.info("audio: %s", self.status)
+
+    def _wants_echo_cancel(self) -> bool:
+        """Voice processing for this build: speakers (or forced on), and only in a conversation - asleep it would
+        duck every other app's sound and change what the microphone hears, for nothing (nobody to cancel)."""
+        return (self.conversation or not self.quiet_asleep) and \
+            (self.echo_mode == "on" or (self.echo_mode == "auto" and not self.private_output))
+
+    @property
+    def plain_on_speakers(self) -> bool:
+        """The plain mic where the voiceprint was recorded with echo cancellation (voicelock.capture_shift)."""
+        return not self.echo_cancelled and not self.private_output and self.echo_mode != "off"
+
+    def converse(self, on: bool) -> None:
+        """Any thread, never blocks. on: the user has spoken to Mint - bring echo cancellation up (if this setup
+        uses it) so they can talk over Mint's reply. off: Mint is asleep again - back to the plain microphone, once
+        it has finished speaking."""
+        with self._build_lock:
+            if on == self.conversation:
+                return
+            self.conversation = on
+            if self._closed or self.suspended or self.resting or self._deferred:
+                return                         # the next build reads self.conversation
+            if self._wants_echo_cancel() == self.echo_cancelled:
+                return                         # headphones, or echo off: nothing to change
+            if not on and self.playing:
+                self._relax_after_play = True  # after Mint's last words (_maybe_idle)
+                return
+        self._switch_later("a conversation started" if on else "Mint is asleep: plain microphone")
+
+    def _switch_later(self, reason: str) -> None:
+        """Rebuild for the new mode, at least MIN_GAP after the last rebuild (two rebuilds in quick succession
+        crashed the audio unit once: SIGSEGV in AVAudioIOUnit, 6 Oct)."""
+        wait = max(0.0, MIN_GAP - (time.monotonic() - self._restarted_at))
+        self._switching = True
+
+        def switch() -> None:
+            try:
+                with self._build_lock:
+                    if self._closed or self.suspended or self.resting or \
+                            self._wants_echo_cancel() == self.echo_cancelled:
+                        return                 # changed again meanwhile, or not needed any more
+                self.restart(reason)
+            finally:
+                self._switching = False
+        timer = threading.Timer(wait, switch)
+        timer.daemon = True
+        timer.start()
 
     def _select_devices(self, in_id: int | None, out_id: int | None) -> None:
         """Point the engine at the chosen devices. With voice processing both
@@ -400,6 +458,10 @@ class VoiceAudio:
             if self._pending:
                 return
         self.playing = False
+        if self._relax_after_play:
+            self._relax_after_play = False
+            if not self.conversation:
+                self._switch_later("Mint is asleep: plain microphone")
         if self._on_idle is not None and self._loop is not None:
             self._loop.call_soon_threadsafe(self._on_idle)
 
@@ -411,6 +473,11 @@ class VoiceAudio:
             chunk = await in_queue.get()
             if self.resting:
                 await asyncio.to_thread(self.wake)     # the mic is off but Mint has something to say
+            waited = 0.0
+            while (self._restarting or self._restart_pending or self._switching) and not self.suspended \
+                    and waited < 4.0:
+                await asyncio.sleep(0.05)      # a rebuild (e.g. echo cancellation coming up): the reply waits
+                waited += 0.05
             if self.suspended or not self._started:
                 continue                       # a call has the speaker; say nothing
             samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768

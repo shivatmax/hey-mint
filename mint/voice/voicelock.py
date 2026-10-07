@@ -54,10 +54,17 @@ OPEN_EARLY = {0.8: 0.40, 1.2: 0.42}
 FLOOR = {0.5: 0.30, 0.8: 0.31, 1.2: 0.32, 1.6: 0.32, 2.4: 0.33}
 
 
+# The voiceprint is recorded through voice processing (echo cancellation on speakers). Asleep, Mint now listens
+# through the plain microphone (no voice processing: other apps' sound is not ducked, 7 Oct), which hears the same
+# voice a little differently - so while that is the case every threshold is this much lower (session sets it).
+PLAIN_MIC = -0.05
+capture_shift = 0.0
+
+
 def strictness() -> float:
-    """Settings ▸ Voice ▸ Strictness, as a shift of every threshold."""
+    """Settings ▸ Voice ▸ Strictness, as a shift of every threshold (plus the plain-mic allowance)."""
     from mint.core import prefs
-    return {"relaxed": -0.05, "strict": 0.06}.get(str(prefs.get("lock_strictness")), 0.0)
+    return {"relaxed": -0.05, "strict": 0.06}.get(str(prefs.get("lock_strictness")), 0.0) + capture_shift
 
 
 def _interp(table: dict, seconds: float) -> float:

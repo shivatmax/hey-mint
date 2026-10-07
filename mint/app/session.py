@@ -214,9 +214,11 @@ class Mint:
             self.audio = VoiceAudio(echo=str(_prefs.get("echo_cancellation") or "auto"),
                                     input_uid=str(_prefs.get("input_device") or ""),
                                     output_uid=str(_prefs.get("output_device") or ""),
-                                    defer=_ear.defer_audio())
+                                    defer=_ear.defer_audio(),
+                                    quiet_asleep=_prefs.get("quiet_while_waiting") is not False)
             echo_cancelled = self.audio.full_duplex
             self.audio.on_reconfigure = self._audio_reconfigured
+            self._voice_allowance(self.audio)
             self._print(f"[audio: {self.audio.status}]")
         except Exception as error:
             log.warning("audio engine unavailable (%s); using half duplex", error)
@@ -448,6 +450,16 @@ class Mint:
         self._print(f"[awake: {reason}]")
         self._state("awake")
 
+    def _converse(self, on: bool) -> None:
+        """Echo cancellation (voice processing) only while talking with the user: asleep it ducked every other
+        app's sound - a video, music - and changed what the mic hears (7 Oct). audio_vp.VoiceAudio.converse."""
+        converse = getattr(getattr(self, "audio", None), "converse", None)
+        if converse is not None and (on or getattr(self, "hands_free", True)):
+            try:
+                converse(on)
+            except Exception:
+                log.debug("switching the audio mode failed", exc_info=True)
+
     def go_to_sleep(self, reason: str = "quiet") -> None:
         if self.asleep or not self.hands_free or self.meet is not None:
             return
@@ -462,6 +474,7 @@ class Mint:
         # can sit waiting for the end of "speech" and hold the next request.
         if self.loop is not None and self.session is not None:
             self.loop.call_soon_threadsafe(lambda: self.loop.create_task(self._end_audio_stream()))
+        self._converse(False)                # back to the plain mic: nothing else ducked while Mint waits
         log.info("asleep (%s)", reason)
         self._print(f"[asleep: {reason}]")
         self._state(self._idle_state())
@@ -495,8 +508,16 @@ class Mint:
         timer.daemon = True
         timer.start()
 
+    @staticmethod
+    def _voice_allowance(audio) -> None:
+        """The voice lock's allowance for the plain mic (voicelock.PLAIN_MIC): asleep on speakers Mint no longer
+        uses voice processing, through which the voiceprint was recorded."""
+        from mint.voice import voicelock
+        voicelock.capture_shift = voicelock.PLAIN_MIC if getattr(audio, "plain_on_speakers", False) else 0.0
+
     def _audio_reconfigured(self, audio) -> None:
         """The engine was rebuilt (devices, echo mode, or it had stopped)."""
+        self._voice_allowance(audio)
         if not self._forced_half_duplex:
             # Without echo cancellation on speakers, the mic must close while
             # Mint talks or it hears itself; with headphones it need not.
@@ -722,6 +743,7 @@ class Mint:
             return
         self._spoke_at = now
         self._asked_at = now
+        self._converse(True)                 # the user said their request: echo cancellation, while the model thinks
         self._watch_answer(now)
         self._watch_stall(now)
         if getattr(self, "_voice_watch_task", None) is None or self._voice_watch_task.done():
@@ -969,8 +991,9 @@ class Mint:
         audio = voicelock.voiced(voicelock.to_float(self._preroll.peek()),
                                  floor=self._gate.speech_threshold())
         verdict, phrase, voice = voicelock.lock.wake_verdict(audio)
+        mic = ", plain mic" if voicelock.capture_shift else ""       # to tune voicelock.PLAIN_MIC from real wakes
         if verdict == "yes":
-            log.info("wake word voice check: phrase %.2f voice %.2f", phrase, voice)
+            log.info("wake word voice check: phrase %.2f voice %.2f%s", phrase, voice, mic)
             return True
         if verdict == "maybe":
             self._pending_wake = time.monotonic()
@@ -979,9 +1002,9 @@ class Mint:
             # it is cut from what is sent once the voice is confirmed.
             self._wake_cut = wake_phrase_cut(held, getattr(self._wake, "phrase_end_lag", None))
             self._gate.begin_pending(held)
-            self._print(f"[Hey Mint - checking the voice (phrase {phrase:.2f}, voice {voice:.2f})]")
+            self._print(f"[Hey Mint - checking the voice (phrase {phrase:.2f}, voice {voice:.2f}{mic})]")
             return False
-        self._print(f"[Hey Mint in another voice - ignored] (phrase {phrase:.2f}, voice {voice:.2f})")
+        self._print(f"[Hey Mint in another voice - ignored] (phrase {phrase:.2f}, voice {voice:.2f}{mic})")
         self._preroll.drain()
         return False
 
@@ -1422,6 +1445,8 @@ class Mint:
         if response.data or response.tool_call is not None or (
                 response.server_content is not None and response.server_content.output_transcription):
             self._model_active_at = time.monotonic()      # for the autopilot's "quiet for 2 s"
+            if not self.asleep:
+                self._converse(True)          # (no voice lock, so no end-of-words signal: the answer is the cue)
             self._note_latency(self._model_active_at)
             # The model is answering: the user's words are in by now, so this
             # is when to ask whether they were meant for Mint at all.
@@ -2737,6 +2762,8 @@ class Mint:
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()
         Mint.live = self                  # found by others without a gc scan (extra_tools._live_mint)
+        if not self.hands_free:
+            self._converse(True)            # always listening (no wake word): a conversation from the start
         from mint.agents import runtime as agent_hub
         agent_hub.hub.attach(self)          # sub-agents report to this session
         from mint.tools import automations

@@ -1079,6 +1079,7 @@ class Notch:
                            home=(mode == "home"))
         if mode == "battery":
             wings = True                        # the battery owns both wings for the moment
+        self._mode_now = mode
         if not wings or agent_wing:
             self._indicator(state, activity, now)    # (with music on: the agent takes the right wing)
         else:
@@ -2296,6 +2297,8 @@ class Notch:
     def _wing_faces(self, want: bool) -> bool:
         """The closed notch's right wing as the agents' faces (up to 4: 1 big, 2, a 2x2, or 3 and "+N"), just
         right of the camera - never over it. True while they show."""
+        # A plain notch (hidden, or the idle face off) is just the notch: no faces sticking out of it.
+        want = want and getattr(self, "_mode_now", None) != "plain" and not getattr(self.hud, "hidden", False)
         mod = self._agents_mod() if want and self._agents_hooked else None
         try:
             width = float(mod.wing_width()) if mod is not None and hasattr(mod, "wing_view") else 0.0

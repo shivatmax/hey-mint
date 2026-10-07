@@ -139,6 +139,9 @@ DEFAULTS: dict = {
     # After Mint is done, it listens this many seconds for a follow-up, then needs the wake word
     # again (listening.py). 0 = the wake word every time.
     "follow_up_seconds": 6,
+    # While Mint only waits for "Hey Mint", the plain microphone: other apps' sound (a video, music) is not turned
+    # down and the mic hears as it is. Echo cancellation comes on in a conversation (audio_vp). False = always on.
+    "quiet_while_waiting": True,
     # A voice model that stalls, answers slowly or fails: use the next one for a while (live_models.py).
     "switch_when_slow": True,
     # The voice models to use, best first ([] = Mint's pool), and each one's tokens-a-minute limit.

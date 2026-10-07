@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.6.1 (2026-10-07)
+
+- **A livelier Mint (character system):** a small status badge on Mint's face - dots while it works, red on an
+  error, green when done, the word when you point at it - with the lower half of the face tinted to match. The eyes
+  curve round the ball as they follow your cursor, blink like a real blink, and change shape with the mood (flat,
+  half-moon, happy arcs). Poke Mint: a slap; three quick ones make it dizzy; keep going and it gets annoyed. The menu
+  bar icon is Mint's face too, showing its state.
+- **The notch, smoother and clearer:** it opens in one smooth move (cards blur in one after another, Mint's face
+  travels into the open card) and closes 8 s after you leave, with a thin countdown line; sliding past never pops it
+  open. Its outline says the state - a light sweeping while busy, amber when something needs you, a green flash when
+  done, a red shake on an error - and alerts come one at a time.
+- **New notch scenes:** a sparkly hello the first time Mint wakes each day; an error card with a Retry button; a
+  drop zone where Mint turns into a folder; a progress bar with Mint's face as the moving thumb; and a "+" to type a
+  request right in the notch.
+- **Coding agents get faces:** each Claude Code or Codex session gets its own critter. The closed notch shows them
+  as a little cluster; the open notch has a focus card with a rolling list of steps, test results and risk flags, and
+  colored chips for the others (click one to focus it). A new diff line types itself in. A compact, centred bar under
+  the notch shows the lead agent's current step.
+- **A glow round the window Mint is working in** (Apple-Intelligence colours), so you can see where it is; windows in
+  front still cover it, and it never catches your clicks.
+- **Soft sounds,** made by Mint itself: the notch opening, a task done or failed, pokes, the morning hello. Quiet while
+  you dictate or are on a call.
+- **Settings > Appearance & Sound,** one page for all of it: where Mint lives (orb or notch), theme, what the open
+  notch shows first; how much it moves (Full, Calm - no bounce, fewer idle tricks - or Minimal, fades only; macOS
+  Reduce motion always means Minimal); every effect on its own switch; sounds on/off, a volume slider, and the notch,
+  task and play sounds each on their own.
+- **Fixes:** after "+" in the notch, the header buttons and the chat button work again and an empty box no longer
+  keeps the notch open; a hidden Mint no longer shows the coding agents' faces poking out of the notch.
+
+- **Your videos and music keep their volume while Mint waits:** echo cancellation (Apple's voice processing) used
+  to run all the time on the Mac's speakers, and macOS turns every other app down while it runs - so a YouTube
+  video or an anime played quieter with Mint just sitting there, and the mic heard you differently. Now, waiting
+  for "Hey Mint", Mint uses the plain microphone: nothing else is turned down. Echo cancellation comes on once you
+  have said your request (about 1 s, while Gemini thinks), so you can still talk over Mint's reply, and goes off
+  when Mint is asleep again. Headphones never needed it. The voice lock allows a little for the plain mic
+  (`voicelock.PLAIN_MIC`); Settings key `quiet_while_waiting: false` brings back the old behaviour.
+
 ## 0.6.0 (2026-10-07)
 
 - **Optional Jev key in setup:** the welcome window has a new optional page after Connect - open TypeSafe's console
