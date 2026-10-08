@@ -2267,7 +2267,11 @@ class Mint:
         # Let its own goodbye play - the first ~2 s of it - then nothing more:
         # it used to add "Goodbye!" and "I've already stopped listening. Feel
         # free to reach out..." after stop_listening answered.
-        if self._farewell_bytes < 0 and not self._hush:
+        if _SLEEP_ONLY.search(self._heard):
+            self._hush = True                  # asked to sleep: nothing said at all
+            self._farewell_bytes = -1
+            self._flush_playback()
+        elif self._farewell_bytes < 0 and not self._hush:
             self._farewell_bytes = 0
         if self.hands_free:
             self.go_to_sleep("you said bye")
@@ -3359,11 +3363,15 @@ def _describe(name: str, args: dict) -> str:
 
 
 _GOODBYE = re.compile(
-    r"^(?:(?:ok(?:ay)?|thanks?|thank you|chalo|acha|achha|theek hai|right|alright|cool)[,.!]?\s+)*"
-    r"(?:bye(?:[- ]bye)?|by|bi|buy|good ?bye|good ?night|see you(?: later)?|go to sleep|sleep now|"
-    r"so jao|alvida|that'?s all|that is all|that'?s it|nothing else|band karo|stop listening)"
-    r"(?:[,.!]?\s+(?:mint|a mint|means|meant|then|now|for now|ji|bye|buddy|dost))*[\s.!?]*$",
+    r"^(?:(?:ok(?:ay)?|thanks?|thank you|chalo|acha|achha|theek hai|right|alright|cool|for now|now|so|"
+    r"please|just|you can|mint)[,.!]?\s+)*"
+    r"(?:bye(?:[- ]bye)?|by|bi|buy|good ?bye|good ?night|see you(?: later)?|(?:go (?:to )?)?sleep(?: now)?|"
+    r"go to bed|so jao|alvida|that'?s all|that is all|that'?s it|nothing else|band karo|stop listening)"
+    r"(?:[,.!]?\s+(?:mint|a mint|means|meant|then|now|for now|ji|bye|buddy|dost|please))*[\s.!?]*$",
     re.IGNORECASE)
+# "Sleep" (not "bye"): no goodbye at all, just sleep (8 Oct: "for now sleep" was missed here, went to the model,
+# and a fallback voice model answered "A system error occurred.").
+_SLEEP_ONLY = re.compile(r"\b(sleep|so jao|go to bed|stop listening)\b", re.IGNORECASE)
 
 
 def _is_goodbye(text: str) -> bool:

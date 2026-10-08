@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.5 (2026-10-08)
+
+- **"Sleep" just sleeps:** "sleep", "for now sleep", "go sleep", "so jao" are caught on the Mac and Mint goes to
+  sleep at once without a word (only "bye" gets a two-word goodbye). "For now sleep" used to reach the voice model,
+  and a fallback model answered "A system error occurred." instead of sleeping. Sentences that only mention sleep
+  ("what time should I sleep") are not taken as a command.
+
 ## 0.6.4 (2026-10-08)
 
 - **Video downloads, completed:** pages whose player streams the video with no file or playlist to fetch are now
