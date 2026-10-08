@@ -212,3 +212,204 @@ def test_report_says_where_and_what(tmp_path, monkeypatch):
     video.write_bytes(b"x" * 2048)
     text = vd._report({"path": str(video), "title": "Talk", "height": 1080, "duration": 754})
     assert "Downloaded “Talk” (1080p, 12:34, 2 KB)" in text and str(video.name) in text
+
+
+# --- playlists, subtitles, stop, disk space, Telegram ------------------------------------------------------
+
+def test_playlist_and_subtitle_options(tmp_path):
+    opts = vd._options(tmp_path, "best", {"playlist": True, "subtitles": "hi"})
+    assert opts["noplaylist"] is False and opts["playlistend"] == vd.PLAYLIST_MAX
+    assert "%(playlist_index|0)03d" in opts["outtmpl"]
+    if vd._ffmpeg():
+        assert opts["subtitleslangs"][0] == "hi" and "hi-orig" in opts["subtitleslangs"]
+        assert "hi.*" not in opts["subtitleslangs"]                       # never machine translations
+        assert opts["postprocessors"][0]["key"] == "FFmpegEmbedSubtitle"
+    english = vd._options(tmp_path, "best", {"subtitles": "yes"})
+    if vd._ffmpeg():
+        assert english["subtitleslangs"][0] == "en"
+
+
+def test_playlist_report():
+    text = vd._report({"paths": ["/x/a.mp4", "/x/b.mp4"], "path": "/x/a.mp4", "count": 2, "failed": 1,
+                       "title": "Talks", "folder": "/x"})
+    assert text.startswith("Downloaded 2 videos of “Talks”") and "1 couldn't be downloaded" in text
+
+
+def test_no_download_that_would_fill_the_disk(monkeypatch, tmp_path):
+    import collections
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(vd.shutil, "disk_usage", lambda p: usage(1, 1, 5_000_000_000))
+    vd._room(tmp_path, 1_000_000_000)                                      # fine
+    with pytest.raises(RuntimeError, match="not enough free space"):
+        vd._room(tmp_path, 4_000_000_000)
+    monkeypatch.setattr(vd.shutil, "disk_usage", lambda p: usage(1, 1, 900_000_000))
+    with pytest.raises(RuntimeError, match="not enough free space"):
+        vd._room(tmp_path)
+
+
+def test_stop_cancels_and_leaves_nothing_half_done(tmp_path, monkeypatch):
+    import threading
+    import time as _time
+    monkeypatch.setattr(vd, "SYNC_WAIT", 0.2)
+    monkeypatch.setattr(vd, "FOLDER", tmp_path)
+    monkeypatch.setattr(vd, "_notify", lambda text: None)
+    started = threading.Event()
+
+    def slow(url, quality, folder, state, script=False):
+        (folder / "clip.mp4.part").write_bytes(b"half")
+        started.set()
+        while not state.get("cancel"):
+            _time.sleep(0.05)
+        raise vd.Stopped("stopped")
+    monkeypatch.setattr(vd, "download", slow)
+    reply = vd.download_video({"url": "https://example.com/v"})
+    assert "background" in reply
+    started.wait(2)
+    assert "Stopping" in vd.download_video({"stop": True})
+    for _ in range(40):
+        if not vd._jobs:
+            break
+        _time.sleep(0.05)
+    assert not vd._jobs and not list(tmp_path.glob("*.part"))
+    assert vd.download_video({"stop": True}) == "No video is downloading."
+
+
+def test_a_long_download_from_telegram_is_sent_there(tmp_path, monkeypatch):
+    sent = []
+
+    class Bridge:
+        def paired(self):
+            return {"chat": 1}
+
+        def send_file(self, path, caption=""):
+            sent.append(("file", Path(path).name, caption))
+
+        def send(self, text):
+            sent.append(("text", text))
+    try:
+        from mint.app import telegram
+    except ImportError:
+        from mint import telegram
+    monkeypatch.setattr(telegram, "bridge", Bridge())
+    small = tmp_path / "Talk.mp4"
+    small.write_bytes(b"x" * 1000)
+    vd._send_to_phone(small, "Talk")
+    big = tmp_path / "Film.mp4"
+    with open(big, "wb") as fh:
+        fh.truncate(telegram.MAX_UPLOAD + 1)
+    vd._send_to_phone(big, "Film")
+    assert sent[0] == ("file", "Talk.mp4", "🎬 Talk")
+    assert sent[1][0] == "text" and "too big to send here" in sent[1][1]
+
+
+# --- recording a page's player (MSE capture) ----------------------------------------------------------------
+
+def _box(kind: bytes, payload: bytes) -> bytes:
+    return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+
+def test_fmp4_timestamps_are_read():
+    mdhd = _box(b"mdhd", b"\x00\x00\x00\x00" + b"\x00" * 8 + (90000).to_bytes(4, "big") + b"\x00" * 8)
+    assert vd._timescale(_box(b"ftyp", b"isom") + mdhd) == 90000
+    tfdt0 = _box(b"tfdt", b"\x00\x00\x00\x00" + (180000).to_bytes(4, "big"))
+    tfdt1 = _box(b"tfdt", b"\x01\x00\x00\x00" + (900000).to_bytes(8, "big"))
+    assert vd._tfdt(_box(b"moof", tfdt0)) == 180000 and vd._tfdt(_box(b"moof", tfdt1)) == 900000
+    assert vd._tfdt(b"no boxes here") is None
+
+
+def _chunk(sniffer, track, data, first=True, mime=None):
+    import base64
+    import json as _json
+    payload = {"t": track, "mime": mime} if mime else {"t": track, "n": 0, "first": first,
+                                                         "b": base64.b64encode(data).decode()}
+    sniffer._chunk({"name": "__mintChunk", "payload": _json.dumps(payload)}, "s1")
+
+
+def test_capture_skips_resent_pieces_and_splits_on_quality_switch(tmp_path):
+    s = vd.Sniffer(browser=None, capture=tmp_path)
+    s.sessions.add("s1")
+    init = _box(b"ftyp", b"isom") + _box(b"mdhd", b"\x00" * 12 + (1000).to_bytes(4, "big") + b"\x00" * 8)
+
+    def frag(seconds):
+        return _box(b"moof", _box(b"tfdt", b"\x00\x00\x00\x00" + (seconds * 1000).to_bytes(4, "big"))) + b"m" * 100
+    _chunk(s, 1, b"", mime='video/mp4; codecs="avc1.4d401f"')
+    _chunk(s, 1, init)
+    _chunk(s, 1, frag(0))
+    _chunk(s, 1, frag(4))
+    _chunk(s, 1, frag(4))                                                  # sent again after a seek: skipped
+    _chunk(s, 1, b"tail of the same append", first=False)                 # (part of a skipped append: skipped)
+    _chunk(s, 1, init)                                                     # a quality switch: a new run
+    _chunk(s, 1, frag(6))
+    track = s.tracks[("s1", 1)]
+    assert len(track["runs"]) == 2 and track["mime"].startswith("video/mp4")
+    first = track["runs"][0].read_bytes()
+    assert first.count(b"tfdt") == 2 and b"tail of the same" not in first
+    assert track["runs"][1].read_bytes().count(b"tfdt") == 1
+
+
+@pytest.mark.skipif(not vd._ffmpeg(), reason="needs ffmpeg")
+def test_recorded_tracks_become_one_video(tmp_path):
+    import subprocess
+    ffmpeg = vd._ffmpeg()
+    frag = ["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"]
+    v1, v2, a = tmp_path / "v1.bin", tmp_path / "v2.bin", tmp_path / "a.bin"
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=25", "-t", "2",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", *frag, str(v1)], check=True)
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=25", "-t", "3",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", *frag, str(v2)], check=True)
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "5", "-c:a", "aac",
+                    *frag, str(a)], check=True)
+    tracks = {("s", 1): {"mime": "video/mp4", "runs": [v1, v2], "sizes": [v1.stat().st_size + 30_000,
+                                                                          v2.stat().st_size + 30_000]},
+              ("s", 2): {"mime": "audio/mp4", "runs": [a], "sizes": [a.stat().st_size + 30_000]}}
+    got = vd._join_tracks(tracks, tmp_path, tmp_path / "out", {"title": "Joined", "d": 5}, ffmpeg, subprocess,
+                          "https://example.com")
+    out = subprocess.run([ffmpeg, "-hide_banner", "-i", got["path"]], capture_output=True, text=True).stderr
+    assert "640x360" in out and "Audio: aac" in out
+    m = __import__("re").search(r"Duration: 00:00:0(\d)\.(\d\d)", out)
+    assert m and 4.8 <= float(f"{m.group(1)}.{m.group(2)}") <= 5.3                  # 2 s + 3 s, in order
+
+
+@pytest.mark.skipif(not os.environ.get("MINT_BROWSER_TESTS"), reason="opens Chrome: MINT_BROWSER_TESTS=1")
+def test_a_page_that_only_streams_to_its_player_is_recorded(tmp_path):
+    """A local page that feeds its <video> through MediaSource from files with no type or extension."""
+    import http.server
+    import socketserver
+    import subprocess
+    import threading
+    ffmpeg = vd._ffmpeg()
+    media = tmp_path / "site" / "media"
+    media.mkdir(parents=True)
+    frag = ["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"]
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=30", "-t", "6",
+                    "-c:v", "libx264", "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-g", "30", *frag,
+                    str(media / "v")], check=True)
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "6", "-c:a", "aac",
+                    *frag, str(media / "a")], check=True)
+    (tmp_path / "site" / "index.html").write_text("""<!doctype html><title>Tour</title><video id=v muted></video>
+<script>(async () => { const v = document.getElementById('v'); const ms = new MediaSource();
+v.src = URL.createObjectURL(ms); await new Promise(r => ms.addEventListener('sourceopen', r, {once: true}));
+const vb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"'), ab = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+const get = async u => new Uint8Array(await (await fetch(u)).arrayBuffer());
+const feed = async (sb, b) => { sb.appendBuffer(b); await new Promise(r => sb.addEventListener('updateend', r, {once: true})); };
+const [x, y] = await Promise.all([get('/media/v'), get('/media/a')]); await Promise.all([feed(vb, x), feed(ab, y)]);
+ms.endOfStream(); })();</script>""")
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **k):
+            super().__init__(*a, directory=str(tmp_path / "site"), **k)
+
+        def guess_type(self, path):
+            return "application/octet-stream" if "/media/" in path else "text/html"
+
+        def log_message(self, *a):
+            pass
+    server = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        got = vd.download(f"http://127.0.0.1:{server.server_address[1]}/", "best", tmp_path / "out", {})
+    finally:
+        server.shutdown()
+    assert "recorded from the page's player" in got["note"]
+    out = subprocess.run([ffmpeg, "-hide_banner", "-i", got["path"]], capture_output=True, text=True).stderr
+    assert "640x360" in out and "Audio: aac" in out

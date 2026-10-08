@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.6.4 (2026-10-08)
 
+- **Video downloads, completed:** pages whose player streams the video with no file or playlist to fetch are now
+  recorded from the player itself (played muted at ~4x in Mint's background Chrome, re-sent pieces skipped by their
+  timestamps, quality switches joined into one .mp4, played-out data released so the player never stalls; never
+  for DRM). New: "download the whole playlist" (up to 50, into a folder), "with subtitles" (the video's own
+  captions embedded; translations never requested), "stop the download" (removes the half-done file), a free-space
+  check before big downloads, and a long download asked from Telegram is sent back there when it's saved (up to
+  50 MB). Fixed: the video tools' guide on find_tools now carries download_video's instructions.
 - **"What Mint can do", any time:** Settings ▸ General ▸ Getting to know Mint ▸ Show me (or the menu bar's "What Mint
   can do…") opens setup's "What I can do" page on its own - no Back, no Skip, Done puts it away and setup's own state
   stays as it was. "Welcome tour…" next to it runs the whole setup again.

@@ -662,12 +662,16 @@ class Sniffer:
             return
         init = d.get("first") and (data[4:8] == b"ftyp" or data[:4] == b"\x1aE\xdf\xa3")
         if d.get("first") and not init:
-            stamp = _tfdt(data)                  # a piece the player sends again (after a seek): skip it
-            track["skip"] = stamp is not None and stamp <= track.get("last", -1)
-            if stamp is not None and not track["skip"]:
-                track["last"] = stamp
+            # A piece the player sends again (after a seek, or re-fetched at a new quality): skip it. Compared in
+            # seconds: each quality's init segment has its own time scale.
+            stamp = _tfdt(data)
+            seconds = stamp / track.get("scale", 1) if stamp is not None and track.get("scale") else None
+            track["skip"] = seconds is not None and seconds <= track.get("last", -1.0) + 0.01
+            if seconds is not None and not track["skip"]:
+                track["last"] = seconds
         elif init:
-            track["skip"], track["last"] = False, -1
+            track["skip"] = False
+            track["scale"] = _timescale(data) or track.get("scale") or 0
         if track.get("skip"):
             return
         if init or not track["runs"]:
@@ -774,13 +778,23 @@ class Sniffer:
             self.tab.close()
 
 
+def _timescale(init: bytes) -> int:
+    """The media time scale in an fMP4 init segment (its mdhd box), or 0."""
+    i = init.find(b"mdhd")
+    if i < 0 or len(init) < i + 20:
+        return 0
+    if init[i + 4] == 1:
+        return int.from_bytes(init[i + 24:i + 28], "big") if len(init) >= i + 28 else 0
+    return int.from_bytes(init[i + 16:i + 20], "big")
+
+
 def _tfdt(data: bytes):
     """The decode time of the first fragment in an fMP4 piece (its moof's tfdt), or None."""
     i = data.find(b"tfdt", 0, 4096)
-    if i < 0 or len(data) < i + 16:
+    if i < 0 or len(data) < i + 12:
         return None
     if data[i + 4] == 1:
-        return int.from_bytes(data[i + 8:i + 16], "big")
+        return int.from_bytes(data[i + 8:i + 16], "big") if len(data) >= i + 16 else None
     return int.from_bytes(data[i + 8:i + 12], "big")
 
 
@@ -987,14 +1001,62 @@ def capture(url: str, folder: Path, state: dict, browser=None) -> dict:
         shutil.rmtree(work, ignore_errors=True)
 
 
+def _dims(ffmpeg: str, path: Path, subprocess) -> tuple[int, int]:
+    out = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, timeout=60).stderr
+    m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", out)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def _one_track(track: dict, work: Path, ffmpeg: str, subprocess) -> Path | None:
+    """A track's recording as one file. The player may switch quality mid-way (a new init segment starts a new
+    run): one run is used as it is; several are joined in order, re-encoded to the largest picture."""
+    runs = [p for p, n in zip(track["runs"], track["sizes"]) if n > 20_000]     # (an init segment alone isn't)
+    if not runs:
+        return None
+    if len(runs) == 1:
+        return runs[0]
+    video = "video" in track["mime"]
+    parts = []
+    for n, run in enumerate(runs):                 # each run is a complete fMP4 / WebM stream on its own
+        part = work / f"{run.stem}-part{n}.{'mp4' if 'mp4' in track['mime'] else 'mkv'}"
+        done = subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(run), "-c", "copy", str(part)],
+                              capture_output=True, text=True, timeout=600)
+        if done.returncode == 0 and part.exists():
+            parts.append(part)
+    if not parts:
+        return None
+    joined = work / f"{runs[0].stem}-joined.mp4"
+    cmd = [ffmpeg, "-v", "error", "-y"]
+    for part in parts:
+        cmd += ["-i", str(part)]
+    if video:
+        w, h = max((_dims(ffmpeg, p, subprocess) for p in parts), key=lambda d: d[0] * d[1])
+        w, h = (w or 1280) // 2 * 2, (h or 720) // 2 * 2
+        chains = "".join(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:"
+                         f"(oh-ih)/2,setsar=1,fps=30[v{i}];" for i in range(len(parts)))
+        graph = chains + "".join(f"[v{i}]" for i in range(len(parts))) + f"concat=n={len(parts)}:v=1:a=0[v]"
+        cmd += ["-filter_complex", graph, "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-pix_fmt", "yuv420p"]
+    else:
+        graph = "".join(f"[{i}:a]" for i in range(len(parts))) + f"concat=n={len(parts)}:v=0:a=1[a]"
+        cmd += ["-filter_complex", graph, "-map", "[a]", "-c:a", "aac", "-b:a", "160k"]
+    done = subprocess.run(cmd + [str(joined)], capture_output=True, text=True, timeout=3600)
+    if done.returncode == 0 and joined.exists():
+        track["joined"] = True
+        return joined
+    log.info("joining %d runs failed: %s", len(parts), done.stderr[-300:])
+    return max(zip(track["sizes"], track["runs"]))[1]
+
+
 def _join_tracks(tracks: dict, work: Path, folder: Path, info: dict, ffmpeg: str, subprocess, url: str) -> dict:
     files = []
     for track in tracks.values():
         if not track["runs"]:
             continue
-        best = max(range(len(track["runs"])), key=lambda i: track["sizes"][i])
-        if track["sizes"][best] > 50_000:
-            files.append((track["runs"][best], track["mime"]))
+        one = _one_track(track, work, ffmpeg, subprocess)
+        if one is not None:
+            files.append((one, "video/mp4; codecs=avc1" if track.get("joined") and "video" in track["mime"]
+                          else track["mime"]))
     if not files:
         raise RuntimeError("the page's player didn't give anything to record (it may need you signed in)")
     files.sort(key=lambda f: 0 if "video" in f[1] else 1)
@@ -1311,7 +1373,8 @@ def download_video(args: dict) -> str:
         except Exception:
             log.debug("save_to", exc_info=True)
     state: dict = {"step": "Starting", "started": time.time(), "url": url,
-                   "playlist": bool(args.get("playlist")), "subtitles": args.get("subtitles") or ""}
+                   "playlist": bool(args.get("playlist")), "subtitles": args.get("subtitles") or "",
+                   "phone": _from_telegram()}
     key = f"dl-{time.time():.3f}"
 
     def run():
@@ -1349,6 +1412,8 @@ def download_video(args: dict) -> str:
         if late:
             _notify("(Mint's video downloader, not the user.) The download finished:\n" + state["result"]
                     + "\nTell the user in a sentence.")
+            if state.get("phone") and state.get("path"):
+                _send_to_phone(Path(state["path"]), state.get("title") or "")
 
     thread = threading.Thread(target=run, daemon=True, name="video-download")
     with _lock:
@@ -1366,6 +1431,31 @@ def download_video(args: dict) -> str:
         return (f"Downloading{(' “' + title + '”') if title else ''} - {step.lower()}. It continues in the "
                 "background; a message comes when it's saved. Tell the user in a few words, then carry on.")
     return state["result"]
+
+
+def _from_telegram() -> bool:
+    """The request came from Telegram (a long download then sends the video there when it's saved)."""
+    try:
+        from mint.app import telegram
+        request = telegram.bridge.request
+        return request is not None and not getattr(request, "finished", True)
+    except Exception:
+        return False
+
+
+def _send_to_phone(path: Path, title: str) -> None:
+    try:
+        from mint.app import telegram
+        bridge = telegram.bridge
+        if not bridge.paired():
+            return
+        home = str(path).replace(str(Path.home()), "~")
+        if path.stat().st_size <= telegram.MAX_UPLOAD:
+            bridge.send_file(path, caption=f"🎬 {title or path.stem}")
+        else:
+            bridge.send(f"🎬 Saved on the Mac: {home} ({_size(path.stat().st_size)}, too big to send here)")
+    except Exception:
+        log.info("couldn't send the video to Telegram", exc_info=True)
 
 
 def _notify(text: str) -> None:
