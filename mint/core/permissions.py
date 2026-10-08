@@ -144,14 +144,29 @@ def _automation() -> str:
     return "allowed" if connectors.AE_OK in answers else "ask"
 
 
+def granted_now(kind: str) -> bool:
+    """Calendars / Reminders, looked at afresh: a running app's status() can stay "not asked" after the switch
+    is turned on in System Settings, but a new store sees the lists at once. Off the main thread."""
+    try:
+        import EventKit
+        entity = EventKit.EKEntityTypeEvent if kind == "calendar" else EventKit.EKEntityTypeReminder
+        return bool(EventKit.EKEventStore.alloc().init().calendarsForEntityType_(entity))
+    except Exception:
+        log.debug("fresh look at %s", kind, exc_info=True)
+        return False
+
+
 def open_pane(kind: str) -> None:
     AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(
         f"x-apple.systempreferences:com.apple.preference.security?{PANES[kind]}"))
 
 
-def ask(kind: str, asked: set) -> None:
+def ask(kind: str, asked: set, done=None) -> None:
     """Main thread (a click). macOS's own prompt the first time it can ask, else the pane of System Settings
-    where the user turns Mint on. `asked` (the caller's set) remembers what was asked already."""
+    where the user turns Mint on. `asked` (the caller's set) remembers what was asked already.
+    done(ok), for Calendars and Reminders, gets macOS's answer (any thread). macOS only shows those two boxes
+    for the app in front, so asking from the notch brings Mint to the front first (the caller puts the app
+    you were in back)."""
     if kind == "automation":                # reading it asks other apps, and asking waits for an answer: a thread
         first = kind not in asked
         asked.add(kind)
@@ -183,10 +198,18 @@ def ask(kind: str, asked: set) -> None:
                 import EventKit
                 if _store[0] is None:
                     _store[0] = EventKit.EKEventStore.alloc().init()
+                if done is not None:
+                    AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+                def answered(ok, error):
+                    if error is not None:
+                        log.info("%s request: %s", kind, error)
+                    if done is not None:
+                        done(bool(ok))
                 if kind == "calendar":
-                    _store[0].requestFullAccessToEventsWithCompletion_(lambda ok, error: None)
+                    _store[0].requestFullAccessToEventsWithCompletion_(answered)
                 else:
-                    _store[0].requestFullAccessToRemindersWithCompletion_(lambda ok, error: None)
+                    _store[0].requestFullAccessToRemindersWithCompletion_(answered)
                 return
     except Exception:
         log.debug("permission request %s", kind, exc_info=True)

@@ -345,6 +345,16 @@ class Notch:
         self._cd = None                      # the countdown line's (start, end)
         self._sweep_w = 0.0
         self._scene = None                   # (kind, view, controller): the one scene in the body (notch_fx/composer)
+        # "Set up" chips (notch_tips): waiting for macOS's answer since, just set up until, what the Mint pane says.
+        self._tip_wait: dict = {}
+        self._tip_prompted: set = set()      # ... the ones macOS showed its own box for (it can say "denied")
+        self._tip_party: dict = {}
+        self._tip_say = None                 # (title, words, until)
+        self._tip_hold = 0.0                 # the notch stays open until then (you're answering macOS's box)
+        self._tip_hover = None
+        self._tip_polling = False
+        self._tip_front = None               # the app in front before Mint asked macOS (it goes back there)
+        self._mouse_through = None           # last setIgnoresMouseEvents_ value (set only when it changes)
         self._scene_since = 0.0
         self._scene_shown = False
         self._failed = None                  # (when, reason, the user's words): a failed step, for the error card
@@ -375,6 +385,7 @@ class Notch:
         panel.setBackgroundColor_(AppKit.NSColor.clearColor())
         panel.setHasShadow_(False)
         panel.setIgnoresMouseEvents_(True)
+        self._mouse_through = True
         panel.setHidesOnDeactivate_(False)
         panel.setFloatingPanel_(True)
         panel.setLevel_(LEVEL)           # after setFloatingPanel, which resets the level to 3
@@ -428,6 +439,8 @@ class Notch:
             layer.removeAllAnimations()
             layer.setHidden_(True)
         self.orb.in_notch = True                # expressions float their extras downwards, inside the notch
+        # Mic off: a small crossed-out mic tucked against the little Mint's lower right (it flies with the face).
+        self.mic_badge = self._build_mic_badge(host)
         self._crisp(host, 2.0 * PANE_FACE)      # grown into the pane it stays sharp
         # The wing's ambient light: a soft state-coloured glow behind the face, bleeding into the black (clipped
         # to the island with everything in the box). Under the face, and it flies with it.
@@ -1103,6 +1116,8 @@ class Notch:
         showing_face = mode != "plain" and not wings and not (scene and self._scene[0] != "composer")
         # The little Mint, a shared element: grown into the Mint pane while it shows, back in the wing otherwise.
         self._place_face("pane" if mode == "home" and getattr(self, "_mint_pane_on", False) else "wing")
+        self._mic_badge(showing_face and self._face_where == "wing" and not prefs.get("mic") and activity is None
+                        and state not in ("speaking", "thinking", "working"))
         self._show_status(state, activity, alert, mode)
         self._countdown(now, mode)
         self._calm = (mode in ("compact", "plain") and not music and not activity and not caption and not guests
@@ -1116,8 +1131,11 @@ class Notch:
             Quartz.CATransaction.setAnimationDuration_(0.2)
             self.face_host.setOpacity_(1.0 if showing_face else 0.0)
             Quartz.CATransaction.commit()
-        # Clicks only on the shape itself; everywhere else the window is air.
-        self.panel.setIgnoresMouseEvents_(not inside)
+        # Clicks only on the shape itself; everywhere else the window is air. (Only when it changes: telling the
+        # window server every frame, with the pointer on the shape, could leave the pointer hidden.)
+        if self._mouse_through != (not inside):
+            self._mouse_through = not inside
+            self.panel.setIgnoresMouseEvents_(not inside)
         self.mode = mode
 
     def _stirring(self, hud, mouse, now: float) -> bool:
@@ -1237,6 +1255,7 @@ class Notch:
         self._faces.clear()
         self._styled.clear()
         self.panel.setIgnoresMouseEvents_(True)
+        self._mouse_through = True
 
     def _wrap(self, island_rect, guests, compact_w):
         """Stack the island's scene and the guests under the notch (never on top of each other)
@@ -1576,6 +1595,8 @@ class Notch:
         """Something opened from the notch is up (Quick Look, a menu, a share sheet): don't close under it."""
         if getattr(self, "_menus", 0) > 0 or self._search_dragging():
             return True
+        if time.monotonic() < getattr(self, "_tip_hold", 0.0):
+            return True                         # a "Set up" chip waits for your answer in macOS's box
         composer = self._scene_ctl("composer") if getattr(self, "_scene", None) is not None else None
         try:
             if composer is not None and composer.holding():
@@ -1768,12 +1789,26 @@ class Notch:
             from mint.ui.hud import TITLES
             state = getattr(self.hud, "_state", "")
             title = "Mic off" if not prefs.get("mic") else (TITLES.get(state, "") or "Listening")
+            # The "Set up" chips talk here: what a chip is for (pointer on it), what to do in macOS's box, "connected".
+            note = None if words else self._tip_words(time.monotonic())
+            if note is not None and note[0]:
+                title = note[0]
+            from mint.voice.wake import display_phrase
+            hint = words or (note[1] if note is not None else None) or (
+                f"Say “{display_phrase()}”, or press the chat button." if prefs.get("mic")
+                else "Press the chat button, or turn the mic on below.")
+            said = getattr(self, "_pane_said", None)
+            if not words and said and (title, hint) != said and not h["hint"].isHidden() \
+                    and h["hint"].alphaValue() > 0.5:
+                if h["hint"].layer() is not None:
+                    kinetics.wipe_in(h["hint"].layer(), 0.28)          # new words wipe in over the old
+                if title != said[0] and h["title"].layer() is not None:
+                    kinetics.wipe_in(h["title"].layer(), 0.28)
+            self._pane_said = (title, hint)
             h["title"].setStringValue_(title)
             h["hint"].setMaximumNumberOfLines_(3 if words else 2)
-            h["hint"].setTextColor_(_white(0.85 if words else 0.55))
-            from mint.voice.wake import display_phrase
-            h["hint"].setStringValue_(words or (f"Say “{display_phrase()}”, or press the chat button." if prefs.get("mic")
-                                                else "Press the chat button, or turn the mic on below."))
+            h["hint"].setTextColor_(_white(0.85 if words or note is not None else 0.55))
+            h["hint"].setStringValue_(hint)
             # The little Mint flies in on the left (_place_face); the words sit beside it and wipe in.
             tx = left + FACE * PANE_FACE + 14
             self._reveal(h["title"], AppKit.NSMakeRect(tx, body_top - 34, left + PLAYER_W - tx, 22),
@@ -1812,17 +1847,23 @@ class Notch:
 
     def _tips(self, on: bool, left: float, body_top: float) -> None:
         """Between the hint and the controls, while Mint is idle on the home tab: a chip per thing not set up
-        (Calendars, Claude Code, the shelf...). Statuses are read off the main thread every few seconds."""
+        (Calendars, Claude Code, the shelf...). Statuses are read off the main thread every few seconds. A chip
+        just set up stays a moment longer, green with a tick, before it shrinks away."""
         h = self.home
         tips = self._mod("notch_tips") if on else None
         keys = []
         if tips is not None:
-            self._tips_check(time.monotonic())
+            now = time.monotonic()
+            self._tips_check(now)
             keys = tips.pick(getattr(self, "_tips_facts", None) or {}, tips.dismissed())
+            party = {k for k, until in self._tip_party.items() if now < until}
+            if party:
+                keys = [k for k, *_ in tips.TIPS if k in party or k in keys]
         strip = h.get("tips")
         if keys and strip is None:
             try:
                 strip = h["tips"] = tips.Strip(PLAYER_W + 4)      # (the calendar pane starts 12 pt further)
+                strip.on_hover = self._tip_hovered
                 strip.view.setHidden_(True)
                 self.box.addSubview_(strip.view)
             except Exception:
@@ -1863,27 +1904,197 @@ class Notch:
         threading.Thread(target=read, daemon=True, name="notch-tips").start()
 
     def _tip_clicked(self, key: str) -> None:
+        """A chip: it starts waiting (a spinning ring, the Mint pane says what to do in macOS's box) and the notch
+        stays open while you answer; the answer is looked for twice a second, and lands as a green tick."""
         tips = self._mod("notch_tips")
         if tips is None:
             return
-        if key in tips.PERMISSION_TIPS:
-            tips.ask(key)                       # macOS's prompt, or its pane in System Settings
-        elif key == "claude":
-            from mint.ui import notch_agents
-            notch_agents._connect_hooks()       # asks first, then writes Claude Code's hooks
-        elif key == "shelf":
-            self._tips_shelf_until = time.monotonic() + 90.0
+        now = time.monotonic()
+        strip = (self.home or {}).get("tips")
+        if key in tips.PERMISSION_TIPS or key == "claude":
+            if key in self._tip_wait:
+                return                          # already waiting for this one
+            prompt = tips.will_prompt(key) if key != "claude" else True
+            self._tip_wait[key] = now
+            (self._tip_prompted.add if prompt else self._tip_prompted.discard)(key)
+            self._tip_say = (*tips.waiting_note(key, prompt), now + self.TIP_WAIT)
+            self._tip_hold = now + self.TIP_WAIT
+            if strip is not None:
+                strip.busy(key, True)
+            _sfx("tick")
+            if key == "claude":
+                from mint.ui import notch_agents
+                AppHelper.callLater(0.3, notch_agents._connect_hooks)     # asks first, then writes the hooks
+            else:
+                # A beat first: the chip shows it's on it, and the click is over before macOS's box takes focus.
+                # (Calendars and Reminders: Mint comes to the front for macOS's box, and the answer comes back here.)
+                self._tip_front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+                AppHelper.callLater(0.3, lambda: tips.ask(
+                    key, lambda ok: AppHelper.callAfter(self._tip_answer, key, ok)))
+            self._tip_poll()
+            return
+        if key == "shelf":
+            self._tips_shelf_until = now + 90.0
             tips.dismiss("shelf")               # (seen: the shelf is its own explanation)
             self._set_tab("shelf")
         elif key == "phone":
             self.hud._fire("open_settings", "accounts")
-        for delay in (1.0, 3.0, 8.0, 20.0):     # an answer to macOS's prompt shows up soon after
+        for delay in (1.0, 3.0, 8.0):
             AppHelper.callLater(delay, lambda: self._tips_check(time.monotonic(), force=True))
+
+    TIP_WAIT = 60.0                             # how long a chip waits for macOS's answer (and holds the notch open)
+
+    def _tip_poll(self) -> None:
+        """Twice a second while a chip waits: is it set up yet? (Read on a thread; never prompts.)"""
+        if not self._tip_wait or self._tip_polling:
+            return
+        self._tip_polling = True
+        tips = self._mod("notch_tips")
+        waiting = dict(self._tip_wait)
+
+        def read():
+            answers = {}
+            for key in waiting:
+                try:
+                    if key == "claude":
+                        from mint.tools import agent_hooks
+                        answers[key] = "allowed" if agent_hooks.installed() else "ask"
+                    else:
+                        from mint.core import permissions
+                        answers[key] = permissions.status(key, set())
+                        if answers[key] != "allowed" and key in ("calendar", "reminders") \
+                                and permissions.granted_now(key):
+                            answers[key] = "allowed"   # (turned on in System Settings: the old status lags)
+                except Exception:
+                    log.debug("tip status %s", key, exc_info=True)
+
+            def apply():
+                self._tip_polling = False
+                now = time.monotonic()
+                for key, answer in answers.items():
+                    if key not in self._tip_wait:
+                        continue
+                    if answer == "allowed":
+                        self._tip_success(key)
+                    elif answer == "denied" and key in ("calendar", "reminders") and key in self._tip_prompted \
+                            and now - self._tip_wait[key] > 0.8:
+                        self._tip_failed(key)          # (Calendars and Reminders say so; the rest can't tell)
+                    elif now - self._tip_wait[key] > self.TIP_WAIT:
+                        self._tip_gave_up(key)
+                if self._tip_wait:
+                    AppHelper.callLater(0.5, self._tip_poll)
+            AppHelper.callAfter(apply)
+        import threading
+        threading.Thread(target=read, daemon=True, name="notch-tip-poll").start()
+
+    def _tip_answer(self, key: str, ok: bool) -> None:
+        """macOS's answer to the Calendars / Reminders box. No box at all (it can't ask from here): its pane in
+        System Settings opens instead, and the chip keeps waiting for the switch."""
+        front, self._tip_front = getattr(self, "_tip_front", None), None
+        try:
+            mine = AppKit.NSRunningApplication.currentApplication()
+            if front is not None and front != mine and mine.isActive():
+                front.activateWithOptions_(0)      # back to the app you were in
+        except Exception:
+            log.debug("front app", exc_info=True)
+        if key not in self._tip_wait:
+            return
+        if ok:
+            self._tip_success(key)
+            return
+        from mint.core import permissions
+        if permissions.status(key, set()) == "denied":
+            self._tip_failed(key)
+            return
+        tips = self._mod("notch_tips")
+        now = time.monotonic()
+        permissions.open_pane(key)
+        self._tip_prompted.discard(key)
+        self._tip_wait[key] = now
+        self._tip_say = (tips.waiting_note(key, False)[0], tips.SETTINGS_WORDS, now + self.TIP_WAIT)
+        self._tip_hold = now + self.TIP_WAIT
+
+    def _tip_success(self, key: str) -> None:
+        tips = self._mod("notch_tips")
+        now = time.monotonic()
+        self._tip_wait.pop(key, None)
+        facts = dict(getattr(self, "_tips_facts", None) or {})
+        if key == "claude":
+            facts["claude_connected"] = True
+        else:
+            facts[key] = "allowed"
+        self._tips_facts = facts                # (so the chip doesn't come back before the next full read)
+        print(f"  [set up from the notch: {tips.tip(key)[3]}]", flush=True)
+        self._tip_party[key] = now + 1.7        # green with a tick for a moment, then it shrinks away
+        self._tip_say = (*tips.done_note(key), now + 6.0)
+        self._tip_hold = now + 4.5
+        strip = (self.home or {}).get("tips")
+        if strip is not None:
+            strip.done(key)
+        _sfx("done")
+        try:
+            self.orb.hop()
+            self.orb.burst(gfx.GREEN, stars=True, amount=0.45)
+        except Exception:
+            log.debug("tip celebration", exc_info=True)
+        if key == "calendar":
+            self._side_to_calendar()            # the week slides in on the right
+        self._cursor_back()
+        AppHelper.callLater(1.0, lambda: self._tips_check(time.monotonic(), force=True))
+
+    def _tip_failed(self, key: str) -> None:
+        tips = self._mod("notch_tips")
+        now = time.monotonic()
+        self._tip_wait.pop(key, None)
+        self._tip_say = (*tips.DENIED, now + 6.0)
+        self._tip_hold = now + 3.0
+        strip = (self.home or {}).get("tips")
+        if strip is not None:
+            strip.nope(key)
+        self._cursor_back()
+
+    def _tip_gave_up(self, key: str) -> None:
+        self._tip_wait.pop(key, None)
+        self._tip_say = ("Not set up yet", "No rush: click it again whenever you like.", time.monotonic() + 5.0)
+        self._tip_hold = 0.0
+        strip = (self.home or {}).get("tips")
+        if strip is not None:
+            strip.busy(key, False)
+
+    def _tip_hovered(self, key) -> None:
+        self._tip_hover = key
+
+    def _tip_words(self, now: float):
+        """(title or None, words) for the Mint pane while the chips have something to say, else None."""
+        hover = self._tip_hover
+        if hover and hover not in self._tip_wait and hover not in self._tip_party:
+            tips = self._mod("notch_tips")
+            try:
+                return None, tips.tip(hover)[4]
+            except Exception:
+                return None
+        say = self._tip_say
+        if say is not None and now < say[2]:
+            return say[0], say[1]
+        return None
+
+    def _cursor_back(self) -> None:
+        """macOS's box can leave the pointer hidden over the notch: show it again if it is over us."""
+        try:
+            if self._inside(AppKit.NSEvent.mouseLocation()):
+                AppKit.NSCursor.setHiddenUntilMouseMoves_(False)
+                AppKit.NSCursor.arrowCursor().set()
+                self.panel.invalidateCursorRectsForView_(self.root)
+        except Exception:
+            log.debug("cursor", exc_info=True)
 
     def _tip_closed(self, key: str) -> None:
         tips = self._mod("notch_tips")
         if tips is not None:
             tips.dismiss(key)
+        self._tip_wait.pop(key, None)
+        if self._tip_hover == key:
+            self._tip_hover = None
 
     def _side_to_calendar(self) -> None:
         """Calendars were just allowed: the right-hand pane becomes the week calendar (it was the battery)."""
@@ -1926,6 +2137,7 @@ class Notch:
             self.drag_until = time.monotonic() + 0.6
             self.tab = "shelf"
             self.panel.setIgnoresMouseEvents_(False)
+            self._mouse_through = False
             self._drop_zone()
 
     def _drop_zone(self):
@@ -2375,10 +2587,8 @@ class Notch:
             if kind.startswith("task:"):
                 from mint.ui import activity as act
                 glyph = act.SYMBOLS.get(kind[5:], "sparkles")
-            elif kind == "mic-off":
-                glyph, tint = "mic.slash.fill", (1.0, 0.3, 0.3)
-            elif kind == "sleep":
-                glyph, tint = "moon.zzz.fill", (0.75, 0.78, 0.9)
+            elif kind in ("mic-off", "sleep"):
+                glyph = None                        # resting: just the little Mint (mic off: its own small badge)
             elif kind == "meet":
                 glyph, tint = "video.fill", (1.0, 0.36, 0.36)
             elif kind.startswith("agent:"):
@@ -2551,6 +2761,46 @@ class Notch:
             left = WIN_W / 2 - HOME_W / 2 + 16
             return left + FACE * PANE_FACE / 2 + 2, WIN_H - self.nh - 8 - 42, PANE_FACE
         return self.face_center[0], self.face_center[1], 1.0
+
+    MIC_BADGE = 9.0
+
+    def _build_mic_badge(self, host):
+        d = self.MIC_BADGE
+        x, y = self.face_center
+        badge = Quartz.CALayer.layer()
+        badge.setBounds_(Quartz.CGRectMake(0, 0, d, d))
+        # Lower right of the face, short of the camera housing (the face sits 13 pt left of it).
+        badge.setPosition_(Quartz.CGPointMake(x + 7.0, y - 6.0))
+        badge.setCornerRadius_(d / 2)
+        badge.setBackgroundColor_(gfx.cg((0.13, 0.13, 0.15), 1.0))
+        badge.setBorderWidth_(1.0)
+        badge.setBorderColor_(gfx.cg((0.0, 0.0, 0.0), 1.0))
+        glyph = Quartz.CALayer.layer()
+        glyph.setFrame_(Quartz.CGRectMake(1.5, 1.5, d - 3, d - 3))
+        glyph.setBackgroundColor_(gfx.cg((1.0, 0.36, 0.36)))
+        mask = Quartz.CALayer.layer()
+        mask.setFrame_(Quartz.CGRectMake(0, 0, d - 3, d - 3))
+        mask.setContents_(gfx.symbol("mic.slash.fill", 12, "bold"))
+        mask.setContentsGravity_(Quartz.kCAGravityResizeAspect)
+        glyph.setMask_(mask)
+        badge.addSublayer_(glyph)
+        badge.setOpacity_(0.0)
+        badge.setHidden_(True)
+        host.addSublayer_(badge)
+        self._mic_on_face = False
+        return badge
+
+    def _mic_badge(self, on: bool) -> None:
+        badge = getattr(self, "mic_badge", None)
+        if badge is None or on == self._mic_on_face:
+            return
+        self._mic_on_face = on
+        if on:
+            badge.setHidden_(False)
+            badge.removeAnimationForKey_("kin-fade")
+            kinetics.pop(badge, "bouncy", start=0.3, delay=0.1)
+        else:
+            kinetics.fade(badge, False, 0.15)
 
     def _place_face(self, where: str) -> None:
         """The face travels between its wing spot and the Mint pane on one spring (kinetics.fly), from wherever
@@ -2821,6 +3071,7 @@ class Notch:
             if self.phase in ("off", None, ""):
                 self.phase = "docking"
                 self.panel.setIgnoresMouseEvents_(True)
+                self._mouse_through = True
                 self.panel.orderFrontRegardless()
                 self.face_host.setOpacity_(0.0)
                 for layer in list(self.bars) + [self.ring, self.glyph]:

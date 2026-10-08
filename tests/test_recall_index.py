@@ -22,6 +22,8 @@ def _t(when: dt.datetime) -> str:
 
 
 NOW = dt.datetime.now().replace(second=0, microsecond=0)
+# "Earlier today" that is still today just after midnight (30 minutes ago at 00:20 was yesterday).
+TODAY_AGO = min(30, (NOW - NOW.replace(hour=0, minute=0)).total_seconds() / 60 / 2)
 
 
 def row(minutes_ago: float, role: str, text: str) -> dict:
@@ -219,7 +221,7 @@ def test_recall_history_sends_only_the_matching_part(home, monkeypatch):
 
 
 def test_small_ranges_go_whole_and_vague_questions_still_work(home, monkeypatch):
-    write(home / "history.jsonl", [row(30, "user", "open the calendar"), row(30, "mint", "Opened it.")])
+    write(home / "history.jsonl", [row(TODAY_AGO, "user", "open the calendar"), row(TODAY_AGO, "mint", "Opened it.")])
     prompts = []
     monkeypatch.setattr(llm, "generate", lambda prompt, *a, **k: (prompts.append(prompt) or "You opened it.", "m"))
     answer = journal.recall_history("what did we do", "today")

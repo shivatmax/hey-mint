@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.13 (2026-10-09)
+
+- **Setting up from the notch, smoothly:** click a "Set up" chip and it shows it's on it (a ring spins round its
+  icon), the Mint pane says exactly what to do ("Choose “Allow Full Access” in the box macOS just opened"), and the
+  notch stays open while you answer. The moment it's allowed the chip turns green with a tick, Mint hops, the pane
+  says what you can try now, and the chip shrinks away while the others glide over. A "no" shakes it and says how to
+  turn it on in System Settings. Resting on a chip explains it in the pane (no tooltip).
+- **Reminders and Calendar from the notch actually ask now:** macOS only shows those boxes for the app in front, so
+  the chip spun forever with nothing on screen. Mint comes to the front for the box (and gives the front back), and if
+  macOS still can't ask, System Settings opens on the right page. Turning it on there is noticed at once too.
+- **No more folding by accident:** a click between the chips or on "Set up" used to fold the notch.
+- **A calmer resting notch:** asleep, the right side is empty - no moon, no crossed-out mic. With the mic off, a tiny
+  crossed-out mic sits against the little Mint instead.
+
 ## 0.6.12 (2026-10-08)
 
 - **The open notch is whole again in the app from the DMG:** it showed only the music player - Search, the file shelf,
