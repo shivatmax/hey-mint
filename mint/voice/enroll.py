@@ -45,7 +45,7 @@ SENTENCES = [
 
 def _name() -> str:
     """The name in the wake phrase the user trains with: from a custom "Hey <name>" phrase when one
-    is set (Settings ▸ Voice & wake word), else the assistant's name."""
+    is set (Settings ▸ Microphone & voice), else the assistant's name."""
     from mint.core import prefs
     from mint.voice import wake
     phrase = wake.active_phrases()[0]

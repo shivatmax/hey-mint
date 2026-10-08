@@ -318,6 +318,7 @@ open ~/Applications/Mint.app</pre>
 <section id="telegram" data-group="From anywhere">
   <h2>Control Mint from your phone (Telegram)</h2>
   <p class="lead">Text your own Telegram bot, or send it a voice note, from anywhere. Mint does it on your Mac and shows its work in the chat as it goes: one message that ticks off each step, then the answer, with screenshots and files it made.</p>
+  {{video telegram 640 | “Send me yesterday's sales report” from the phone: the bot's one working message ticks off each step while the notch works on the Mac, then the report arrives in the chat.}}
   <ol><li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, pick a name and a username ending in “bot”, and copy the token it gives you.</li>
     <li>In Mint, open Settings ▸ Accounts &amp; keys ▸ Telegram remote control, add the token and switch it on.</li>
     <li>Send your bot the 6-digit code shown there. From then on only your Telegram account can control Mint.</li></ol>
@@ -495,6 +496,7 @@ open ~/Applications/Mint.app</pre>
 <section id="briefing" data-group="Using Mint">
   <h2>Briefings, email, translation and more</h2>
   <p class="lead">A one-minute spoken rundown of your day. Your Apple Shortcuts by voice. Any screenshot, found by what's in it.</p>
+  {{video notch-mail 640 | “Anything important in my inbox?”: Mint reads and sorts the new mail, drafts the replies (nothing is sent), and the notch shows the three that need you.}}
   {{video island-schedule 380 | <b>Your day, at a glance.</b> The weather, today's timeline (now highlighted, the next one “in 2h”), reminders and headlines. It shows with a briefing or “what's on my calendar today?”}}
   <p>Reminders, notes and events go where you say: “on my Work calendar”, “in my Groceries list”, “in the Recipes folder”. A clash is spotted before booking (“use the next free half hour if it clashes”). Email drafts open in the Mail app when you say so.</p>
   <ul class="say"><li><q>good morning, brief me</q></li><li><q>every weekday at 8:30, give me my daily briefing</q></li>
@@ -548,7 +550,7 @@ open ~/Applications/Mint.app</pre>
   </div>
   <ul class="say"><li><q>have Astra research the best mechanical keyboards</q></li><li><q>ask Codex to make a tiny hello-world page</q></li>
     <li><q>how's Luna doing?</q></li><li><q>tell Luna to use pytest</q></li><li><q>stop all agents</q></li><li><q>create an agent called Nova that writes tweets</q></li></ul>
-  <p><strong>Codex on or off.</strong> Settings ▸ Models &amp; agents ▸ Agents has a switch on Codex. Off, Mint never offers it and gives building work to Luna; without the ChatGPT app (which brings Codex) on the Mac, it is off by itself and says how to get it.</p>
+  <p><strong>Codex on or off, and its model.</strong> Settings ▸ Models &amp; agents ▸ Agents has a model menu and a switch on Codex. <em>Auto</em> runs whatever model you picked in Codex itself (the menu shows which); or pick any model Codex offers your account - the list comes from Codex. Off, Mint never offers it and gives building work to Luna; without the ChatGPT app (which brings Codex) on the Mac, it is off by itself and says how to get it.</p>
   <details><summary>Teams, folders and limits</summary>
     <p>An agent can bring in teammates when their specialty helps (Sage asks Astra for research) and reports back for all of them. Each works in its own folder under <code>~/Documents/Mint/agents</code>. Up to six at once; stopping the lead stops its helpers. Finished work goes into Mint's memory.</p>
   </details>

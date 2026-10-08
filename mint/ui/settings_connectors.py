@@ -1,12 +1,12 @@
-"""Settings ▸ Connectors: the apps and services Mint works with (connectors.py), and making new ones
-(connector_maker.py).
+"""Settings ▸ Accounts & connections, the lower half: the apps and services Mint works with (connectors.py),
+and making new ones (connector_maker.py). (It was its own page, Connectors; show("connectors") still lands here.)
 
-    Connected               ready now: Test (a read-only check), or where its settings live
+    Connected apps          ready now: Test (a read-only check), or where its settings live
     Available on this Mac   installed but not set up: Connect (asks macOS / opens the right settings), Make…
-                            for apps a connector can be made for; then every other scriptable app
-    Your connectors         made from plain words: Test, Remove
-    Connect any app         "Integrate an app, e.g. Things": Plan it (read back here), then Create
-    More                    not installed: Get… opens where to get it
+                            for apps a connector can be made for; advanced: every other scriptable app
+    Your connectors         made from plain words: Test, Remove (advanced, or when there are some)
+    Connect any app         advanced: "Integrate an app, e.g. Things": Plan it (read back here), then Create
+    Not on this Mac         advanced: not installed: Get… opens where to get it
 
 The page is built from a quick snapshot (bundle ids, permission states that never prompt), read off
 the main thread by `facts` (Settings shows "Loading…" until it is there); a fuller check (Mail's
@@ -98,7 +98,7 @@ def page(win, page, facts: dict) -> None:
 
     def later(fn) -> None:
         def run() -> None:
-            if win.window is not None and win.page_key == "connectors":
+            if win.showing("connectors"):
                 fn()
         AppHelper.callAfter(run)
 
@@ -125,6 +125,7 @@ def page(win, page, facts: dict) -> None:
         background(run, "connectors-deep")
 
     snap = facts["snap"]
+    advanced = win._advanced()
     deep_refresh()
 
     # --- one row -------------------------------------------------------------------------------------------
@@ -175,7 +176,7 @@ def page(win, page, facts: dict) -> None:
         if lib is None:
             return
         if lib.settings_page and item["state"] != "missing":
-            win.select(lib.settings_page)
+            win.select(lib.settings_page, anchor=lib.id)          # that page, scrolled to its part
             return
         say(item, "Connecting…")
 
@@ -249,7 +250,7 @@ def page(win, page, facts: dict) -> None:
     missing = [r for r in library if r["state"] == "missing"]
 
     # --- Connected ---
-    page.section("Connected")
+    page.section("Connected apps")
     page.text(f"Apps and services {name} can use right now. Everything happens on this Mac - through macOS accounts, "
               "app scripting and links - with no server in between.", size=12, alpha=0.7)
     for item in map(dict, connected):
@@ -259,12 +260,12 @@ def page(win, page, facts: dict) -> None:
 
     # --- Available on this Mac ---
     page.section("Available on this Mac")
-    if not setup and not snap["scriptable"]:
+    scriptable = snap["scriptable"] if advanced else []
+    if not setup and not scriptable:
         page.text("Everything installed is connected." if not state["deep_busy"] else "Checking your apps…",
                   size=12, alpha=0.7)
     for item in map(dict, setup):
         row(item, buttons_for(item), "setup", item["detail"])
-    scriptable = snap["scriptable"]
     if scriptable:
         shown = scriptable if state["all"] else scriptable[:FIRST_SCRIPTABLE]
         for app in shown:
@@ -277,63 +278,21 @@ def page(win, page, facts: dict) -> None:
                 refresh()
             win._row_buttons(page, "", [("Show fewer" if state["all"] else f"Show all {len(scriptable)}", 130,
                                          toggle)])
-    elif state["deep_busy"]:
+    elif state["deep_busy"] and advanced:
         page.text("Looking for scriptable apps…", size=11, alpha=0.55)
     page.end("Connect asks macOS for permission once, or opens the right page of System Settings.")
 
-    # --- Your connectors ---
-    page.section("Your connectors")
-    if not snap["custom"]:
-        page.text(f"None yet. Make one below - {name} reads the app's scripting dictionary and plans a few "
-                  "actions for you to check.", size=12, alpha=0.7)
-    for item in snap["custom"]:
-        acts = item.get("actions") or []
-        item = dict(item, enables=(item.get("enables") or "") + (f" · {', '.join(acts[:4])}" if acts else ""))
-        row(item, [("Test", 64, lambda i=item: test(i)), ("Remove", 84, lambda i=item: remove(i))], item["state"],
-            item["detail"])
-    page.end("Saved in ~/Library/Application Support/Mint/connectors. Say “what can you connect to?” to hear them.")
-
-    # --- Connect any app ---
-    state["jump_y"] = max(0.0, page.y - 40)
-    page.section("Connect any app")
-    page.text(f"Name an app on this Mac or a web service. {name} reads what the app can be told to do (its "
-              "scripting dictionary and links) and plans a small connector; nothing is saved until Create.",
-              size=12, alpha=0.7)
-    card, top, x, h = page.row("", height=52, control_w=page.width - 32)
-    field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + 14, page.width - 32 - 212, 24))
-    field.setStringValue_(state["desc"])
-    field.setPlaceholderString_("Integrate an app, e.g. Things")
-    field.setBezelStyle_(AppKit.NSTextFieldRoundedBezel)
-    field.cell().setUsesSingleLineMode_(True)
-    field.cell().setScrollable_(True)
-    field.setDelegate_(win.target)
-    win._handlers[objc.pyobjc_id(field)] = lambda c: state.update(desc=str(c.stringValue()))
-    card.addSubview_(field)
-    plan_button = win._button(card, "Plan it", page.width - 16 - 196, top + 12, 96, lambda: plan_it())
-    result = state["plan"]
-    ready = bool(result and result.get("actions") and not result.get("created"))
-    create_button = win._button(card, "Create", page.width - 16 - 92, top + 12, 92, lambda: create())
-    create_button.setEnabled_(ready and not state["creating"])
-    plan_button.setEnabled_(not state["planning"])
-    if result:
-        from mint.tools import connector_maker
-        words = connector_maker.plan_text(result)
-        for prefix in ("FAILED: ", "REFUSED: ", "BUILT IN: "):
-            words = words.removeprefix(prefix)
-        if result.get("actions"):
-            words = words.split("\n", 1)[-1] if "\n" in words else words
-            words = f"{result['name']}: {result.get('summary') or ''}\n{words}"
-        page.text(words, size=12, alpha=0.85)
-    status = page.text(state["status"] or ("Plan it reads the plan back here first." if not result else
-                                          "Not saved yet." if ready else " "), size=11, alpha=0.6)
-    page.end("Actions that change things only run when you ask for them. Mint leaves out anything that could "
-             "delete for good, run shell commands that change the system, or type into other apps.")
+    # Making connectors is advanced - but a plan already under way (a Make… click) stays on screen.
+    making = advanced or bool(state["plan"] or state["planning"] or state["creating"])
+    views = {"field": None, "status": None}
 
     def plan_it(words: str | None = None) -> None:
-        desc = (words if words is not None else str(field.stringValue())).strip()
+        field, status = views["field"], views["status"]
+        desc = (words if words is not None else str(field.stringValue()) if field is not None else "").strip()
         state["desc"] = desc
         if not desc:
-            status.setStringValue_("Name an app first, e.g. “Things”.")
+            if status is not None:
+                status.setStringValue_("Name an app first, e.g. “Things”.")
             return
         state.update(planning=True, status=f"Planning… (reading {desc.removeprefix('integrate ')})", plan=None,
                      jump=True)
@@ -356,7 +315,8 @@ def page(win, page, facts: dict) -> None:
         if not plan or not plan.get("actions"):
             return
         state.update(creating=True, status="Saving and testing one read-only action (macOS may ask once)…")
-        status.setStringValue_(state["status"])
+        if views["status"] is not None:
+            views["status"].setStringValue_(state["status"])
 
         def run() -> None:
             from mint.tools import connector_maker
@@ -366,10 +326,62 @@ def page(win, page, facts: dict) -> None:
             later(refresh)
         background(run, "connector-create")
 
-    # --- More ---
-    if missing:
-        page.section("More")
-        page.text(f"Not on this Mac. Install one and {name} picks it up.", size=12, alpha=0.7)
+    # --- Your connectors ---
+    if making or snap["custom"]:
+        page.section("Your connectors")
+        if not snap["custom"]:
+            page.text(f"None yet. Make one below - {name} reads the app's scripting dictionary and plans a few "
+                      "actions for you to check.", size=12, alpha=0.7)
+        for item in snap["custom"]:
+            acts = item.get("actions") or []
+            item = dict(item, enables=(item.get("enables") or "") + (f" · {', '.join(acts[:4])}" if acts else ""))
+            row(item, [("Test", 64, lambda i=item: test(i)), ("Remove", 84, lambda i=item: remove(i))],
+                item["state"], item["detail"])
+        page.end("Saved in ~/Library/Application Support/Mint/connectors. Say “what can you connect to?” to hear "
+                 "them.")
+
+    # --- Connect any app ---
+    if making:
+        state["jump_y"] = max(0.0, page.y - 40)
+        page.section("Connect any app")
+        page.text(f"Name an app on this Mac or a web service. {name} reads what the app can be told to do (its "
+                  "scripting dictionary and links) and plans a small connector; nothing is saved until Create.",
+                  size=12, alpha=0.7)
+        card, top, x, h = page.row("", height=52, control_w=page.width - 32)
+        field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + 14, page.width - 32 - 212, 24))
+        field.setStringValue_(state["desc"])
+        field.setPlaceholderString_("Integrate an app, e.g. Things")
+        field.setBezelStyle_(AppKit.NSTextFieldRoundedBezel)
+        field.cell().setUsesSingleLineMode_(True)
+        field.cell().setScrollable_(True)
+        field.setDelegate_(win.target)
+        win._handlers[objc.pyobjc_id(field)] = lambda c: state.update(desc=str(c.stringValue()))
+        card.addSubview_(field)
+        views["field"] = field
+        plan_button = win._button(card, "Plan it", page.width - 16 - 196, top + 12, 96, lambda: plan_it())
+        result = state["plan"]
+        ready = bool(result and result.get("actions") and not result.get("created"))
+        create_button = win._button(card, "Create", page.width - 16 - 92, top + 12, 92, lambda: create())
+        create_button.setEnabled_(ready and not state["creating"])
+        plan_button.setEnabled_(not state["planning"])
+        if result:
+            from mint.tools import connector_maker
+            words = connector_maker.plan_text(result)
+            for prefix in ("FAILED: ", "REFUSED: ", "BUILT IN: "):
+                words = words.removeprefix(prefix)
+            if result.get("actions"):
+                words = words.split("\n", 1)[-1] if "\n" in words else words
+                words = f"{result['name']}: {result.get('summary') or ''}\n{words}"
+            page.text(words, size=12, alpha=0.85)
+        views["status"] = page.text(state["status"] or ("Plan it reads the plan back here first." if not result else
+                                                         "Not saved yet." if ready else " "), size=11, alpha=0.6)
+        page.end("Actions that change things only run when you ask for them. Mint leaves out anything that could "
+                 "delete for good, run shell commands that change the system, or type into other apps.")
+
+    # --- Not on this Mac ---
+    if missing and advanced:
+        page.section("Not on this Mac")
+        page.text(f"Install one and {name} picks it up.", size=12, alpha=0.7)
         for item in map(dict, missing):
             row(item, buttons_for(item), "missing", item["detail"])
         page.end()

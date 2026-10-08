@@ -1,6 +1,6 @@
 """The microphone test: is Mint hearing you, and if not, why.
 
-Settings ▸ Voice & wake word ▸ Test microphone, and the "Say Hey Mint" step of
+Settings ▸ Microphone & voice ▸ Test microphone, and the "Say Hey Mint" step of
 onboarding. For a few seconds it listens to exactly what Mint hears (the
 session's own microphone stream, session._mic_probes) while the user says the
 wake word, and reports in plain words:
@@ -59,7 +59,7 @@ def diagnose(facts: dict) -> list[tuple[str, str]]:
         return [("problem", f"{facts['lent_to']} is using the microphone, and Mint is set to step aside during "
                             "calls. Turn on “Listen during calls” to keep the wake word working.")]
     if not facts.get("frames"):
-        return [("problem", "No sound at all reached Mint. Check the microphone in Settings ▸ Audio (or System "
+        return [("problem", "No sound at all reached Mint. Check the microphone in Settings ▸ Microphone & voice (or System "
                             "Settings ▸ Sound ▸ Input), and that it is plugged in.")]
     if facts.get("zeros", 0) > 0.9:
         where = f" - {facts['in_call']} may have it to itself during the call" if facts.get("in_call") else ""
@@ -69,7 +69,7 @@ def diagnose(facts: dict) -> list[tuple[str, str]]:
     if facts.get("peak", 0) < QUIET:
         found.append(("problem", f"Very quiet{device}: Mint barely heard anything. Speak closer, raise the input "
                                  "level in System Settings ▸ Sound ▸ Input, or choose another microphone in "
-                                 "Settings ▸ Audio."))
+                                 "Settings ▸ Microphone & voice."))
     elif facts.get("heard"):
         found.append(("ok", f"Heard “{phrase}” (score {facts['wake_best']:.2f}, needs {facts['wake_need']:.2f})."))
     elif facts.get("speech"):

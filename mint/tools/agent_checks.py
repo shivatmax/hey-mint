@@ -265,7 +265,7 @@ def _limits() -> str:
         parts.append(f"{name}: " + "; ".join(bits) + f" (as of {_ago(x.get('at') or 0)})")
     if "claude" not in lim:
         parts.append("Claude's limits aren't known yet: the Claude app records them while it's open (or, for "
-                     "Claude Code in a terminal, Settings > Appearance & Sound > More options > Claude mode > "
+                     "Claude Code in a terminal, Settings > Appearance & Sound > Show more > Claude mode > "
                      "Show Claude's usage limits)")
     return ". ".join(parts) + "." if parts else "No usage limits seen yet."
 

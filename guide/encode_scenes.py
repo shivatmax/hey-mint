@@ -64,6 +64,8 @@ CUTS = {
     "notch-jobs":      ("notch-jobs", 370, 0, 700, 272, 0, None),
     "notch-guard":     ("notch-guard", 370, 0, 700, 230, 0, None),
     "notch-meet":      ("notch-meet", 370, 0, 700, 230, 0, None),
+    "notch-mail":      ("notch-mail", 370, 0, 700, 300, 0, None),
+    "telegram":        ("telegram", 380, 0, 1060, 812, 0, None),
     # The character system. Orb mode: the orb at the bottom right (centre 1394, 825; the Dock starts at 871).
     "badge":           ("badge", 1130, 756, 310, 112, 0, None),       # the badge, the hover pill, the bubble
     "poke":            ("poke", 1290, 760, 150, 108, 0, None),        # the dizzy stars just above the head
@@ -132,7 +134,8 @@ SKIP_PROBES = {"image-card": {(1180, 300)},
                **{name: {(1000, 120)} for name in ("notch-home", "notch-music", "notch-words", "notch-search",
                                                          "notch-agents", "notch-checks", "notch-jobs", "notch-guard",
                                                          "notch-meet", "notch-greet", "notch-error", "notch-drop",
-                                                         "notch-progress", "notch-compose", "notch-rim", "notch-pals")}}
+                                                         "notch-progress", "notch-compose", "notch-rim", "notch-pals", "notch-mail")},
+               "telegram": {(1000, 120), (1180, 300)}}
 
 
 def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:

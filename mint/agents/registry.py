@@ -87,11 +87,11 @@ DEFAULTS = [
     {
         "name": "Codex",
         "color": "#10A37F",
-        "role": ("Coding in OpenAI Codex (GPT-6 Luna): builds websites, apps and scripts in a project "
+        "role": ("Coding in OpenAI Codex: builds websites, apps and scripts in a project "
                  "folder, runs and checks them, and takes follow-up changes."),
         "runner": "codex",
         "provider": "codex",
-        "models": ["gpt-6-luna"],
+        "models": ["auto"],                  # auto: the model Codex itself is set to (Settings picks another)
         "thinking": "low",
         "tools": [],
         "instructions": "",
@@ -126,6 +126,8 @@ def _normal(agent: dict) -> dict:
         # Codex signs in with the user's ChatGPT account; OpenRouter ids do not apply.
         agent["provider"] = "codex"
         agent["models"] = [m.split("/", 1)[-1] for m in (agent.get("models") or [CODEX_MODEL])]
+        # The model is shown (and chosen) on its own now: an older saved role named one ("(GPT-6 Luna)").
+        agent["role"] = re.sub(r"\s*\(GPT[^)]*\)", "", str(agent.get("role") or ""))
     else:
         agent["models"] = normal_models(agent)
         agent["provider"] = agent["models"][0].split("/", 1)[0]
@@ -233,6 +235,14 @@ def unusable(agent: dict) -> str:
 def active() -> list[dict]:
     """The agents that can take work: on, and (Codex) installed."""
     return [a for a in load() if not unusable(a)]
+
+
+def set_model(name: str, model: str) -> dict | None:
+    """Codex's model: a slug from codex.models(), or "auto" (whatever Codex itself is set to)."""
+    agent = get(name)
+    if agent is None:
+        return None
+    return save(dict(agent, models=[model]))
 
 
 def set_on(name: str, on: bool) -> dict | None:

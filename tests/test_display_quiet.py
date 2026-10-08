@@ -301,3 +301,67 @@ def test_installed_reads_the_sessions_folders(tmp_path, monkeypatch):
     (tmp_path / ".codex").mkdir()
     monkeypatch.setattr(agent_watch, "_installed", {"at": -1e9, "apps": {}})
     assert agent_watch.installed() == {"claude": True, "codex": True}
+
+
+# --- Codex's model: Auto (what Codex is set to) or one Codex offers -------------------------------------------------
+
+def _codex_home(tmp_path, monkeypatch):
+    from mint.agents import codex
+    home = tmp_path / ".codex"
+    home.mkdir(exist_ok=True)
+    (home / "models_cache.json").write_text(json.dumps({"models": [
+        {"slug": "gpt-6-luna", "display_name": "GPT-6-Luna", "visibility": "list", "priority": 4},
+        {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol", "visibility": "list", "priority": 0},
+        {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide", "priority": 43}]}))
+    (home / "config.toml").write_text('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "xhigh"\n')
+    monkeypatch.setattr(codex, "CODEX_HOME", home)
+    return codex, home
+
+
+def test_codex_models_come_from_codex_itself(tmp_path, monkeypatch):
+    codex, home = _codex_home(tmp_path, monkeypatch)
+    assert codex.models() == [("gpt-6.1-sol", "GPT-6.1-Sol"), ("gpt-6-luna", "GPT-6-Luna")]   # best first, no hidden
+    assert codex.selected() == "gpt-6.1-sol"
+    (home / "models_cache.json").unlink()
+    (home / "config.toml").unlink()
+    assert codex.models() == [] and codex.selected() == ""
+
+
+def _codex_args(tmp_path, monkeypatch, model):
+    import asyncio
+    import types
+    codex, _ = _codex_home(tmp_path, monkeypatch)
+    monkeypatch.setattr(codex, "binary", lambda: "/usr/bin/true")
+    monkeypatch.setattr(codex, "problem", lambda: "")
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    async def spawn(*args, **kw):
+        seen.append(list(args))
+        raise Stop
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    run = types.SimpleNamespace(agent={"models": [model]}, task="build a page", context="", inbox=[], effort="low",
+                                id="t1", thread_id=None, model="")
+    try:
+        asyncio.run(codex.run(None, run, tmp_path / "out"))
+    except Stop:
+        pass
+    return seen[0], run
+
+
+def test_auto_lets_codex_use_its_own_model(tmp_path, monkeypatch):
+    args, run = _codex_args(tmp_path, monkeypatch, "auto")
+    assert "-m" not in args and run.model == "codex/gpt-6.1-sol"
+    args, run = _codex_args(tmp_path, monkeypatch, "gpt-6-luna")
+    assert args[args.index("-m") + 1] == "gpt-6-luna" and run.model == "codex/gpt-6-luna"
+
+
+def test_choosing_codexs_model_is_kept(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, monkeypatch)
+    assert registry.get("Codex")["models"] == ["auto"]                  # new installs follow Codex
+    registry.set_model("Codex", "gpt-6-luna")
+    assert registry.get("Codex")["models"] == ["gpt-6-luna"]
+    registry.save({**registry.get("Codex"), "role": "Coding in OpenAI Codex (GPT-6 Luna): builds websites"})
+    assert registry.get("Codex")["role"] == "Coding in OpenAI Codex: builds websites"   # the model shows on its own

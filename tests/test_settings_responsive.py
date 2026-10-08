@@ -61,6 +61,9 @@ BLOCKING = ("subprocess.", "shortcut_library.installed(", "user_shortcuts(", "co
     *[getattr(settings_window.SettingsWindow, name) for name in dir(settings_window.SettingsWindow)
       if name.startswith("_page_")],
     settings_window.SettingsWindow._telegram_card, settings_window.SettingsWindow._wake_section,
+    settings_window.SettingsWindow._mic_test_section, settings_window.SettingsWindow._devices_section,
+    settings_window.SettingsWindow._calls_section, settings_window.SettingsWindow._apple_shortcuts_sections,
+    settings_window.SettingsWindow._email_card, settings_window.SettingsWindow._looks_more_rows,
     settings_connectors.page, settings_models.page, settings_models._gemini_section,
     settings_models._providers_section, settings_models._backups_section, settings_models._agents_section,
 ], ids=lambda f: f.__name__)
@@ -155,6 +158,67 @@ def test_try_again_starts_a_new_read(monkeypatch):
     win._retry("usage")                         # no window: refresh() does nothing
     win._facts("usage")
     assert win._jobs["usage"] is not first
+
+
+# --- fewer pages, basic and advanced ----------------------------------------------------------------
+
+def test_merged_pages_keep_their_old_keys():
+    """Voice & wake word + Audio, Shortcuts + Apple Shortcuts, Accounts & keys + Connectors are one page each now;
+    show("audio") and the connectors' Settings… buttons (settings_page="apple_shortcuts") still land there."""
+    keys = [key for key, _, _ in settings_window.PAGES]
+    assert not {"audio", "apple_shortcuts", "connectors"} & set(keys)
+    assert dict((k, t) for k, t, _ in settings_window.PAGES)["voice"] == "Microphone & voice"
+    assert dict((k, t) for k, t, _ in settings_window.PAGES)["accounts"] == "Accounts & connections"
+    for old, new in {"audio": "voice", "apple_shortcuts": "shortcuts", "connectors": "accounts", "voice": "voice",
+                     "models": "models", "": "general", "gone": "general"}.items():
+        assert settings_window.page_for(old) == new, old
+    assert prefs.DEFAULTS["settings_advanced"] is False
+
+
+VOICE = {"active": ["Hey Mint"], "stale": False, "enrolled": False, "enrolled_at": "", "status": "",
+         "inputs": [("", "System default")], "outputs": [("", "System default")], "mic_users": []}
+
+
+def _views(view, out=None):
+    out = [] if out is None else out
+    out.append(view)
+    for sub in view.subviews():
+        _views(sub, out)
+    return out
+
+
+def test_advanced_rows_show_only_when_asked(fresh_prefs, monkeypatch):
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_general", lambda self: {"login": False,
+                                                                                       "can_restart": False})
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_voice", lambda self: dict(VOICE))
+    win = _window()
+    for key, technical in (("general", "Ask before deleting or changing"), ("voice", "Echo cancellation")):
+        win.page_key = key
+        words = _texts(win._build_page(_column(), 480).doc)
+        assert technical not in words, key
+        assert "Show advanced settings" in words if key == "general" else "More settings" in words
+    win.page_key = "voice"
+    buttons = [str(v.title()) for v in _views(win._build_page(_column(), 480).doc) if isinstance(v, AppKit.NSButton)]
+    assert "Test microphone" in buttons and "Train my voice…" in buttons and "Test" not in buttons
+    assert "Test this phrase" not in buttons and "Record 4 takes" not in buttons     # the custom wake phrase
+
+    prefs.set("settings_advanced", True)
+    win.page_key = "general"
+    assert "Ask before deleting or changing" in _texts(win._build_page(_column(), 480).doc)
+
+
+def test_one_calls_choice_sets_both_prefs(fresh_prefs, monkeypatch):
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_voice", lambda self: dict(VOICE))
+    win = _window()
+    win.page_key = "voice"
+    popup = next(v for v in _views(win._build_page(_column(), 480).doc)
+                 if isinstance(v, AppKit.NSPopUpButton) and v.numberOfItems() == 3
+                 and str(v.itemTitleAtIndex_(2)) == "Do nothing special")
+    assert str(popup.titleOfSelectedItem()) == "Keep listening for the wake word"      # the defaults
+    for index, expected in ((1, (True, False)), (2, (False, False)), (0, (True, True))):
+        popup.selectItemAtIndex_(index)
+        win._changed(popup)
+        assert (prefs.get("share_mic"), prefs.get("listen_in_calls")) == expected, index
 
 
 # --- settings listeners run off the main thread -----------------------------------------------------

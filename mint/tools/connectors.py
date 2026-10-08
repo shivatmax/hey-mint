@@ -478,7 +478,7 @@ class Connector:
         return list(self.uses) + [t for t in self.optional_tools if t in have]
 
 
-_PAGE_TITLES = {"accounts": "Accounts & keys", "models": "Models & agents", "apple_shortcuts": "Apple Shortcuts"}
+_PAGE_TITLES = {"accounts": "Accounts & connections", "models": "Models & agents", "apple_shortcuts": "Shortcuts"}
 
 
 def _app_status(c: Connector, deep: bool) -> tuple[str, str]:

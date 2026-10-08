@@ -6,18 +6,26 @@ click or a hand edit: listeners in main.py react (audio devices rebuild the engi
 trains its wake word, a new voice or language reconnects, and so on).
 
 Pages
-  General           assistant name, your name, about you, start at login, memory, Quit
-  Voice & wake word the wake word, training your voice, voice lock
-  Speaking          which of the 30 Gemini voices, speaking style, language, captions
-  Audio             microphone, speaker, echo cancellation, stepping aside for calls
-  Appearance & Sound  where Mint lives, theme, animation level, effects, sounds and volume
-  Shortcuts         keys for the chat, talking, dictation, the clipboard
-  Accounts & keys   API keys (Gemini required, OpenAI and TypeSafe optional), Google via Internet Accounts
-  Connectors        the apps and services Mint works with, their status, and making new ones
-  Skills & Memory   counts, and the window to edit them
-  Storage & Privacy the Mint folder, meetings, clipboard, the activity timeline
-  Usage             tokens per model: today, 7 days, 30 days
-  Updates & Help    version, updates, the guide, reporting a problem, restarting Mint
+  General                 assistant name, personality, your name, about you, start at login, Quit,
+                          Show advanced settings
+  Microphone & voice      the microphone test, Train my voice and the voice lock, the wake word and its
+                          sensitivity, microphone and speaker, what to do during calls
+  Speaking                which of the 30 Gemini voices, speaking style, language, captions
+  Appearance & Sound      where Mint lives, theme, animation level, effects, sounds and volume
+  Shortcuts               keys for the chat, talking, dictation, the clipboard; Apple Shortcuts below
+  Accounts & connections  API keys, Google, Telegram, Email control; then the apps Mint works with
+  Models & agents         Gemini keys, the agents (providers and backups when advanced)
+  Skills & Memory         counts, and the window to edit them
+  Storage & Privacy       the Mint folder, meetings, clipboard, the activity timeline
+  Usage                   tokens per model: today, 7 days, 30 days
+  Updates & Help          version, updates, the guide, reporting a problem, restarting Mint
+
+Old page keys still work (ALIASES): "audio" opens Microphone & voice, "apple_shortcuts" Shortcuts,
+"connectors" Accounts & connections.
+
+Basic and advanced: each page shows what most people change; the technical rows (a custom wake phrase,
+echo cancellation, model providers, guard levels…) are built only when the "settings_advanced" pref is on
+(`self._advanced()`): General ▸ Show advanced settings, or Show more at the bottom of a page.
 
 Nothing that can wait runs on the main thread: what a page shows from elsewhere (files, CoreAudio,
 `shortcuts list`, other modules and their locks, the network) is read by its _facts_<page> on a
@@ -49,8 +57,8 @@ from mint.voice import voices
 
 log = logging.getLogger("mint.settings")
 
-W, H = 820, 600
-SIDEBAR = 210
+W, H = 840, 600
+SIDEBAR = 230                 # room for "Accounts & connections"
 PAD = 28                      # the page's side margins
 ROW = 44
 LOAD_WAIT = 0.25              # the main thread waits this long for a page's facts, then shows "Loading…"
@@ -97,19 +105,29 @@ LANGUAGES = [("auto", "Same as I speak (automatic)"), ("English", "English"), ("
              ("Chinese (Mandarin)", "Chinese (Mandarin)"), ("Indonesian", "Indonesian"),
              ("Vietnamese", "Vietnamese"), ("Thai", "Thai")]
 SCREENSHOTS = [("both", "A file and the clipboard"), ("clipboard", "The clipboard only"), ("file", "A file only")]
-KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/apikey"),
-        ("OPENAI_API_KEY", "OpenAI", "Optional - background agents and Codex. Every other model provider "
-                                     "(Claude, Groq, Grok, Ollama…) is in Models & agents."),
-        ("TYPESAFE_API_KEY", "TypeSafe (Jev)", "Optional - surer clicking and typing in any app")]
-PAGES = [("general", "General", "gearshape"), ("voice", "Voice & wake word", "waveform"),
-         ("speaking", "Speaking", "person.wave.2"), ("audio", "Audio", "speaker.wave.2"),
+CALLS = [("listen", "Keep listening for the wake word"), ("stop", "Stop listening until the call ends"),
+         ("nothing", "Do nothing special")]
+# (env, title, hint, advanced only)
+KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/apikey", False),
+        ("TYPESAFE_API_KEY", "TypeSafe (Jev)", "Optional - surer clicking and typing in any app", False),
+        ("OPENAI_API_KEY", "OpenAI", "Optional - background agents. Other model providers (Claude, Groq, "
+                                     "Ollama…) are in Models & agents.", True)]
+PAGES = [("general", "General", "gearshape"), ("voice", "Microphone & voice", "mic"),
+         ("speaking", "Speaking", "person.wave.2"),
          ("looks", "Appearance & Sound", "paintpalette"), ("shortcuts", "Shortcuts", "command"),
-         ("apple_shortcuts", "Apple Shortcuts", "square.stack.3d.up"),
-         ("accounts", "Accounts & keys", "key"), ("connectors", "Connectors", "puzzlepiece.extension"),
+         ("accounts", "Accounts & connections", "person.crop.circle"),
          ("models", "Models & agents", "cpu"),
          ("brain", "Skills & Memory", "brain"),
          ("storage", "Storage & Privacy", "lock.shield"), ("usage", "Usage", "chart.bar"),
          ("help", "Updates & Help", "questionmark.circle")]
+# Pages that were merged into another: show("audio") opens Microphone & voice, and so on.
+ALIASES = {"audio": "voice", "apple_shortcuts": "shortcuts", "connectors": "accounts"}
+
+
+def page_for(key: str | None) -> str:
+    """The page a key opens: itself, the page it was merged into, or General for a key that isn't one."""
+    key = ALIASES.get(key or "", key or "")
+    return key if key in {k for k, _, _ in PAGES} else "general"
 
 
 class _SettingsTarget(AppKit.NSObject):
@@ -249,6 +267,10 @@ class SettingsWindow:
         self._ended_handlers: dict[int, callable] = {}      # text fields: Enter or leaving the field
         self._jobs: dict[str, dict] = {}                    # page -> its newest facts read (_facts)
         self._jobs_lock = threading.Lock()
+        self._shown_parts: set[str] = set()                 # facts keys the page on screen uses (_part)
+        self._anchors: dict[str, float] = {}                # name -> y of a part of the page (_anchor)
+        self._reveal = ""                                   # scroll to this anchor once it is built (select)
+        self._opened: set[str] = set()                      # cards opened with Set up… (Telegram, Email)
 
     # --- building blocks -------------------------------------------------------------
 
@@ -393,6 +415,53 @@ class SettingsWindow:
         label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingMiddle)
         return label
 
+    # Basic and advanced: one pref for the whole window.
+
+    def _advanced(self) -> bool:
+        """Show the technical rows too (General ▸ Show advanced settings, or Show more on a page)."""
+        return bool(prefs.get("settings_advanced"))
+
+    def _set_advanced(self, on: bool) -> None:
+        prefs.set("settings_advanced", bool(on))
+        # After the click has finished: the rebuild replaces the control that was clicked.
+        AppHelper.callAfter(lambda: self.refresh(keep_scroll=True))
+
+    def _more_section(self, page, what: str) -> None:
+        """The last card of a page that has advanced rows: Show more / Show less, and what "more" is."""
+        on = self._advanced()
+        page.section()
+        self._row_buttons(page, "Advanced settings" if on else "More settings",
+                          [("Show less" if on else "Show more", 110, lambda: self._set_advanced(not on))],
+                          hint=("Shown on every page. Show less goes back to the essentials." if on else what))
+        page.end()
+
+    def _anchor(self, page, name: str) -> None:
+        """Remember where `name` starts on this page, for select(page, anchor=name) (a connector's Settings…)."""
+        self._anchors[name] = page.y
+
+    def _open_card(self, name: str) -> None:
+        self._opened.add(name)
+        self._reveal = name
+        self.refresh(keep_scroll=True)
+
+    def showing(self, key: str) -> bool:
+        """Is the window open on `key`'s page (old keys count for the page they are part of now)?"""
+        return self.window is not None and self.page_key == page_for(key)
+
+    def _part(self, page, key: str, build, title: str = "") -> None:
+        """Part of a page that reads its own facts (`_facts_<key>`, off the main thread), so the rest of the page
+        does not wait for it: "Loading…" in its place until they arrive, then the page is built again."""
+        self._shown_parts.add(key)
+        facts = self._facts(key)
+        if facts is None:
+            self._loading_card(page, key, title)
+            return
+        ok, value = facts
+        if not ok:
+            self._problem_card(page, key, value)
+            return
+        build(page, value)
+
     # --- pages -----------------------------------------------------------------------
 
     def _facts_general(self) -> dict:
@@ -425,29 +494,31 @@ class SettingsWindow:
         page.section(f"Getting to know {name}")
         self._row_buttons(page, f"What {name} can do",
                           [("Show me", 110, self._show_tour)],
-                          "The \"What I can do\" page from setup on its own: each thing it can do, with what to "
-                          "say. Setup itself isn't touched.")
+                          "Each thing it can do, with what to say.")
         self._row_buttons(page, "The whole setup again", [("Welcome tour…", 130, self._show_setup)],
                           "Name, voice, permissions, shortcuts and the clips - your answers are kept.")
         page.end()
 
+        advanced = self._advanced()
         page.section("Behaviour")
         card, top, x, h = page.row(f"Start {name} when I log in", control_w=38)
         self._switch(card, x, top + (h - 22) / 2, facts["login"],
                      lambda on: self._background("login", lambda: power.set_start_at_login(on)))
         self._row_switch(page, "listen_while_working", "Keep listening while it works",
                          "Say “stop” any time to cut it off.")
-        self._row_switch(page, "share_visible", "Visible in screen sharing",
-                         "Shows in Meet, Zoom and screenshots. Off hides Mint from them (the eye button does the same).")
-        self._row_popup(page, "follow_up_seconds", "Keep listening after a reply", FOLLOW_UP,
-                        f"Then it waits for “{__import__('mint.voice.wake', fromlist=['x']).display_phrase()}” again. Talk not meant for Mint never keeps it "
-                        "open.", w=230)
-        self._row_popup(page, "guard", "Ask before deleting or changing", GUARD_LEVELS,
-                        "Mint (and its helpers, and Claude Code when connected) explains and waits for your yes - "
-                        "at the Mac or on Telegram.", w=230)
-        self._row_popup(page, "unload_after_minutes", "Free memory when asleep", UNLOAD, w=220,
-                        hint="Unloads (~270 MB freed); a small listener (~35 MB) keeps the orb, ⌘J and the wake "
-                             "word. Waking takes about a second longer.")
+        if advanced:
+            self._row_switch(page, "share_visible", "Visible in screen sharing",
+                             "Shows in Meet, Zoom and screenshots. Off hides Mint from them (the eye button does "
+                             "the same).")
+            self._row_popup(page, "follow_up_seconds", "Keep listening after a reply", FOLLOW_UP,
+                            f"Then it waits for “{__import__('mint.voice.wake', fromlist=['x']).display_phrase()}” again. "
+                            "Talk not meant for Mint never keeps it open.", w=230)
+            self._row_popup(page, "guard", "Ask before deleting or changing", GUARD_LEVELS,
+                            "Mint (and its helpers, and Claude Code when connected) explains and waits for your "
+                            "yes - at the Mac or on Telegram.", w=300)
+            self._row_popup(page, "unload_after_minutes", "Free memory when asleep", UNLOAD, w=220,
+                            hint="Unloads (~270 MB freed); a small listener (~35 MB) keeps the orb, ⌘J and the "
+                                 "wake word. Waking takes about a second longer.")
         page.end()
 
         page.section()
@@ -458,47 +529,78 @@ class SettingsWindow:
                           hint="Stops everything it started too.")
         page.end()
 
+        page.section("Settings window")
+        card, top, x, h = page.row("Show advanced settings",
+                                   "Technical settings on every page: your own wake phrase, echo cancellation, "
+                                   "model providers, follow-ups, safety levels… Off: just the essentials.",
+                                   control_w=38)
+        self._switch(card, x, top + (h - 22) / 2, advanced, self._set_advanced)
+        page.end()
+
     def _facts_voice(self) -> dict:
+        """The wake word and the voice lock, CoreAudio's devices and who records now, and the engine's state."""
         from mint.voice import wake
         from mint.voice import wake_train  # noqa: F401 - imported here, off the main thread
         lock = voicelock.lock
+        status = self.actions.get("audio_status")
         return {"active": wake.active_phrases(), "stale": bool(lock.stale), "enrolled": bool(lock.enrolled),
-                "enrolled_at": str(lock.enrolled_at or "")}
+                "enrolled_at": str(lock.enrolled_at or ""),
+                "inputs": self._devices(False), "outputs": self._devices(True), "mic_users": audio_devices.mic_users(),
+                "status": status() if status else ""}
 
     def _page_voice(self, page, facts: dict) -> None:
+        """Microphone & voice: one test, one training, the wake word, the devices, and calls."""
         name = prefs.name()
-        self._mic_test_section(page, facts["active"][0] if facts.get("active") else f"Hey {name}")
-        self._wake_section(page, facts["active"])
+        active = facts.get("active") or [f"Hey {name}"]
+        advanced = self._advanced()
+        self._mic_test_section(page, active[0])
 
         if facts["stale"]:
-            status = "Needs retraining (the voice model was upgraded)."
+            status = "Needs training again (the voice model was upgraded)"
         elif facts["enrolled"]:
-            status = f"Trained {facts['enrolled_at']}."
+            status = f"Trained {facts['enrolled_at']}".rstrip()
         else:
-            status = "Not trained yet - anyone's voice can wake it."
+            status = "Not trained yet"
         page.section("Your voice")
-        buttons = [("Retrain…" if facts["enrolled"] or facts["stale"] else "Train my voice…", 130,
-                    lambda: self._act("train_voice"))]
-        if facts["enrolled"]:
-            buttons.append(("Forget", 80, lambda: self._act("forget_voice")))
-        self._row_buttons(page, status, buttons,
-                          hint=f"About two minutes in a quiet room: say “Hey {name}” eight times, then read eight "
-                               "short sentences.")
-        self._row_switch(page, "voice_lock", "Voice lock", f"Only your voice reaches {name}.")
-        self._row_popup(page, "lock_strictness", "Strictness", STRICTNESS, w=220,
-                        hint="Misses you often: retrain where you sit, or choose Relaxed. Someone else gets through: "
-                             "choose Strict.")
-        self._row_switch(page, "addressee_check", "Ignore talk meant for others",
-                         f"Things you say to other people, not to {name}.")
+        trained = facts["enrolled"] or facts["stale"]
+        self._row_buttons(page, status, [("Retrain my voice…" if trained else "Train my voice…", 150,
+                                          lambda: self._act("train_voice"))],
+                          hint=f"About two minutes in a quiet room: say “{active[0]}” eight times, then read eight "
+                               f"short sentences. {name} then wakes more surely for you, and the voice lock knows "
+                               "you.")
+        self._row_switch(page, "voice_lock", "Voice lock",
+                         f"Only your voice reaches {name}." + ("" if trained else " Train your voice first."))
+        if advanced:
+            self._row_popup(page, "lock_strictness", "Voice lock strictness", STRICTNESS, w=220,
+                            hint="Misses you often: train again where you sit, or choose Relaxed. Someone else gets "
+                                 "through: choose Strict.")
+            self._row_switch(page, "addressee_check", "Ignore talk meant for others",
+                             f"Things you say to other people, not to {name}.")
+            if facts["enrolled"]:
+                self._row_buttons(page, "Forget my voice", [("Forget", 90, lambda: self._act("forget_voice"))],
+                                  hint="Deletes your voiceprint. Anyone's voice can wake it again.")
         page.end()
+
+        page.section("Wake word")
+        self._row_value(page, "Listening for", " · ".join(f"“{p}”" for p in active), w=300)
+        self._row_popup(page, "wake_sensitivity", "Sensitivity", WAKE_SENSITIVITY, w=220,
+                        hint="Misses you often: choose High. Wakes up on its own: choose Low.")
+        page.end()
+        if advanced:
+            self._wake_section(page, active)
+
+        self._devices_section(page, facts)
+        self._calls_section(page, facts)
+        self._more_section(page, "Your own wake phrase, voice lock strictness, echo cancellation, and the apps "
+                                 "Mint makes way for on calls.")
 
     def _mic_test_section(self, page, phrase: str) -> None:
         """Is Mint hearing me? A live level, "Hey Mint" caught or not, and what is in the way (mictest.py)."""
         name = prefs.name()
         page.section("Microphone test")
-        card, top, x, h = page.row("Is it hearing me?", f"Press Test and say “{phrase}”. It checks the "
-                                   f"microphone, the wake word and - if it's on - the voice lock.", control_w=330)
-        meter = AppKit.NSLevelIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 16) / 2, 200, 16))
+        card, top, x, h = page.row(f"Is {name} hearing me?", f"Press Test microphone and say “{phrase}”. It checks "
+                                   "the microphone, the wake word and - if it's on - the voice lock.", control_w=318)
+        meter = AppKit.NSLevelIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 16) / 2, 160, 16))
         meter.setLevelIndicatorStyle_(AppKit.NSLevelIndicatorStyleContinuousCapacity)
         meter.setMinValue_(0)
         meter.setMaxValue_(1)
@@ -507,12 +609,17 @@ class SettingsWindow:
         card.addSubview_(meter)
         # Room for a few findings (the label does not grow after the page is laid out).
         results = page.text("Not tested yet.\n \n \n \n ", size=12, alpha=0.8)
-        fix = [None]
 
         def level(value, score, need):
             AppHelper.callAfter(lambda: (meter.setDoubleValue_(value),
                                          results.setStringValue_(f"Listening… say “{phrase}”   "
                                                                  f"(wake word {score:.2f} / {need:.2f})")))
+
+        def mic_on_then_test():
+            turn_on = self.actions.get("mic_on")
+            if turn_on:
+                turn_on()
+            test()
 
         def done(findings, facts):
             def show():
@@ -521,10 +628,12 @@ class SettingsWindow:
                 results.setStringValue_("\n".join(f"{marks.get(kind, '•')} {words}" for kind, words in findings)
                                         or "No problems found.")
                 button.setEnabled_(True)
-                button.setTitle_("Test again")
-                if not facts.get("mic_on", True) and fix[0] is None:
-                    fix[0] = self._button(card, "Turn mic on", x + 210, top + (h - 28) / 2, 120,
-                                          lambda: (self._act("mic_on"), test()))
+                if not facts.get("mic_on", True):          # the microphone is switched off in Mint
+                    button.setTitle_("Turn mic on")
+                    self._on(button, lambda c: mic_on_then_test())
+                else:
+                    button.setTitle_("Test again")
+                    self._on(button, lambda c: test())
             AppHelper.callAfter(show)
 
         def test():
@@ -535,19 +644,17 @@ class SettingsWindow:
             button.setEnabled_(False)
             results.setStringValue_(f"Listening… say “{phrase}”")
             run(level, done)
-        button = self._button(card, "Test", x + 210, top + (h - 28) / 2, 120, test)
-        self._row_switch(page, "listen_in_calls", "Listen during calls",
-                         f"In Google Meet, Zoom or FaceTime, {name} still hears “{phrase}” (without echo "
-                         "cancellation, so the call is not disturbed). Off: it lets go of the microphone until the "
-                         "call ends.")
+        button = self._button(card, "Test microphone", x + 168, top + (h - 28) / 2, 150, test)
         page.end()
 
     def _wake_section(self, page, active: list[str]) -> None:
-        """A wake phrase of the user's own ("Hey Jarvis"), trained on this Mac in about a minute and a half."""
+        """Advanced: a wake phrase of the user's own ("Hey Jarvis"), trained on this Mac in about a minute and a
+        half. Separate from Train my voice, which teaches the current wake word the user's voice."""
         from mint.voice import wake_train
         state = self.__dict__.setdefault("_wake_state", {"text": "", "takes": [], "busy": False, "progress": 0.0})
-        page.section("Wake word")
-        self._row_value(page, "Listening for", " · ".join(f"“{p}”" for p in active), w=300)
+        page.section("Use a different wake phrase")
+        page.text(f"Wake {prefs.name()} with a phrase of your own instead of “{active[0]}”. This is not Train my "
+                  "voice: it builds a new wake word on this Mac (about a minute and a half).", size=12, alpha=0.7)
         card, top, x, h = page.row("New wake phrase", "Two or three words, like “Hey Jarvis” or “Okay Nova”.",
                                    control_w=250)
         field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 24) / 2, 250, 24))
@@ -579,7 +686,7 @@ class SettingsWindow:
             def run():
                 try:
                     state["takes"] = wake_train.record_samples(4, 2.5, on_take)
-                    say(f"Recorded 4 takes of “{phrase}”. Now press Train.")
+                    say(f"Recorded 4 takes of “{phrase}”. Now press Train this phrase.")
                 finally:
                     state["busy"] = False
             threading.Thread(target=run, daemon=True, name="wake-takes").start()
@@ -606,56 +713,61 @@ class SettingsWindow:
                 report = wake_train.report(phrase)
                 prefs.set("wake_phrase", phrase)
                 say(f"Done: “{phrase}” now wakes {prefs.name()} (it caught {round(100 * report.get('accept_held_out', 0))}% "
-                    "of voices it never heard). If the voice lock is on, retrain your voice below so it knows the "
+                    "of voices it never heard). If the voice lock is on, use Retrain my voice above so it knows the "
                     "new phrase.")
                 AppHelper.callAfter(self.refresh)
             wake_train.start(phrase, state["takes"] or None, progress, done)
 
         def test() -> None:
-            phrase = active[0]
+            """Say the phrase typed above (or, with none typed, the current wake word) and see if it is caught."""
             if state["busy"]:
                 return
             state["busy"] = True
+            typed_phrase = state.get("phrase", "")
 
             def run():
+                phrase = typed_phrase or active[0]
                 try:
+                    if (typed_phrase and typed_phrase.lower() not in (p.lower() for p in active)
+                            and not wake_train.model_path(typed_phrase).exists()):
+                        say(f"“{typed_phrase}” isn't trained yet - press Train this phrase first.")
+                        return
                     take = wake_train.record_samples(1, 3.0, lambda i, n, stage: say(
                         f"Say “{phrase}” now…" if stage == "say" else "Checking…"))[0]
                     got, need = wake_train.score(take, phrase)
-                    say(f"Heard it (score {got:.2f}, needs {need:.2f})." if got >= need else
-                        f"Didn't catch it (score {got:.2f}, needs {need:.2f}). Try closer, or record your "
-                        "voice and train again.")
+                    say(f"Heard “{phrase}” (score {got:.2f}, needs {need:.2f})." if got >= need else
+                        f"Didn't catch “{phrase}” (score {got:.2f}, needs {need:.2f}). Try closer, or record 4 takes "
+                        "and train it again.")
                 except Exception as error:
                     say(f"Couldn't test: {error}")
                 finally:
                     state["busy"] = False
             threading.Thread(target=run, daemon=True, name="wake-test").start()
 
-        self._row_popup(page, "wake_sensitivity", "Sensitivity", WAKE_SENSITIVITY, w=220,
-                        hint="Misses you often (the microphone test shows the score): choose High. Wakes on its "
-                             "own: choose Low.")
-        self._row_buttons(page, "Your voice (optional)", [("Record 4 takes", 130, record)],
-                          hint="Makes it surer for your voice and accent. Takes about 15 seconds.")
+        self._row_buttons(page, "Record yourself saying it (optional)", [("Record 4 takes", 130, record)],
+                          hint="Makes the new phrase surer for your voice and accent. About 15 seconds.")
         card, top, x, h = page.row("", height=ROW, control_w=0)
+        train_x = page.width - 16 - 140
+        test_x = train_x - 8 - 130
         bar = AppKit.NSProgressIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + (h - 12) / 2,
-                                                                                   page.width - 300, 12))
+                                                                                   test_x - 12 - 16, 12))
         bar.setIndeterminate_(False)
         bar.setMinValue_(0)
         bar.setMaxValue_(100)
         bar.setDoubleValue_(100 * state["progress"])
         card.addSubview_(bar)
         self._wake_bar = bar
-        self._button(card, "Test", page.width - 276, top + (h - 28) / 2, 80, test)
-        self._button(card, "Train", page.width - 188, top + (h - 28) / 2, 172, train)
-        status = page.text(state["text"] or "Training takes about a minute and a half, on this Mac.\n ", size=11,
-                           alpha=0.65)
+        self._button(card, "Test this phrase", test_x, top + (h - 28) / 2, 130, test)
+        self._button(card, "Train this phrase", train_x, top + (h - 28) / 2, 140, train)
+        status = page.text(state["text"] or "Type a phrase, optionally record 4 takes, then Train this phrase.\n ",
+                           size=11, alpha=0.65)
         self._wake_status = status
         if str(prefs.get("wake_phrase") or "").strip():
             card, top, x, h = page.row("Also wake on “Hey Mint”", control_w=38)
             extra = prefs.get("wake_models") or []
             self._switch(card, x, top + (h - 22) / 2, "Hey Mint" in extra,
                          lambda on: prefs.set("wake_models", ["Hey Mint"] if on else []))
-            self._row_buttons(page, "Back to “Hey Mint” only", [("Reset", 90, lambda: (
+            self._row_buttons(page, f"Back to “Hey {prefs.name()}” only", [("Reset", 90, lambda: (
                 prefs.set("wake_phrase", ""), prefs.set("wake_models", []), self.refresh()))])
         page.end("Trained here from many built-in voices plus your takes. Nothing leaves your Mac.")
 
@@ -783,42 +895,57 @@ class SettingsWindow:
                 found.append((d["uid"], f"{d['name']}  ({d['transport']})"))
         return found
 
-    def _facts_audio(self) -> dict:
-        """CoreAudio's devices and who records now, and the engine's state (it may be restarting)."""
-        status = self.actions.get("audio_status")
-        return {"inputs": self._devices(False), "outputs": self._devices(True), "mic_users": audio_devices.mic_users(),
-                "status": status() if status else ""}
-
-    def _page_audio(self, page, facts: dict) -> None:
-        page.section("Devices")
+    def _devices_section(self, page, facts: dict) -> None:
+        """Microphone & voice ▸ Microphone and speaker. `facts` from _facts_voice (CoreAudio, read off the main
+        thread)."""
+        page.section("Microphone and speaker")
         self._row_popup(page, "input_device", "Microphone", facts["inputs"], w=300)
         self._row_popup(page, "output_device", "Speaker", facts["outputs"], w=300)
-        self._row_popup(page, "echo_cancellation", "Echo cancellation", ECHO, w=200,
-                        hint="Automatic: off with headphones, on with speakers.")
-        page.end(f"{prefs.name()} picks changes up at once; the microphone restarts in about a second.")
+        if self._advanced():
+            self._row_popup(page, "echo_cancellation", "Echo cancellation", ECHO, w=200,
+                            hint="Automatic: off with headphones, on with speakers.")
+        page.end("Changes apply at once; the microphone restarts in about a second.")
 
+    def _calls_section(self, page, facts: dict) -> None:
+        """Microphone & voice ▸ Calls and meetings: one choice for the two prefs it is made of - share_mic (make
+        way for a call at all) and listen_in_calls (while making way, still listen for the wake word)."""
+        name = prefs.name()
+        phrase = (facts.get("active") or [f"Hey {name}"])[0]
         page.section("Calls and meetings")
-        self._row_switch(page, "share_mic", "Step aside during calls",
-                         "While Zoom, Meet, Teams… use the microphone.")
-        self.mic_users = page.text("", size=11, alpha=0.65)
-        self._row_buttons(page, "", [("Refresh", 90, self.refresh),
-                                     ("Also step aside for these apps", 230, self._add_mic_apps)])
-        self.audio_status = page.text("", size=11, alpha=0.65)
+        current = ("nothing" if not prefs.get("share_mic") else
+                   "stop" if prefs.get("listen_in_calls") is False else "listen")
+        card, top, x, h = page.row("During calls",
+                                   f"Meet, Zoom, FaceTime… Keep listening: {name} still hears “{phrase}” without "
+                                   "disturbing the call. Stop: it lets go of the microphone until the call ends.",
+                                   control_w=270)
+        popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 270, 26),
+                                                                       False)
+        for _, title in CALLS:
+            popup.addItemWithTitle_(title)
+        popup.selectItemAtIndex_([v for v, _ in CALLS].index(current))
+
+        def chosen(control) -> None:
+            value = CALLS[control.indexOfSelectedItem()][0]
+            if value == "nothing":
+                prefs.set("share_mic", False)
+            else:
+                prefs.set("listen_in_calls", value == "listen")
+                prefs.set("share_mic", True)
+        self._on(popup, chosen)
+        card.addSubview_(popup)
+        if self._advanced():
+            users = facts["mic_users"]
+            self._seen = users
+            self.mic_users = page.text("Using the microphone now: " + ", ".join(sorted({u["name"] for u in users}))
+                                       if users else "No other app is using the microphone right now.",
+                                       size=11, alpha=0.65)
+            self._row_buttons(page, "Other call apps", [("Refresh", 90, self.refresh),
+                                                        ("Also make way for these", 190, self._add_mic_apps)],
+                              hint="Common call, meeting and recording apps are known. For another one: start it, "
+                                   "Refresh, then add it.")
+            if facts["status"]:
+                page.text(f"Now: {facts['status']}", size=11, alpha=0.65)
         page.end()
-        page.section("Google Meet calls")
-        self._row_buttons(page, "Sign in to Google (once)", [("Open sign-in…", 150, self._meet_setup)],
-                          "Mint's Meet window has its own Chrome profile. You sign in there; Mint never types "
-                          "passwords.")
-        self._row_popup(page, "meet_share", "Share in the call", MEET_SHARE,
-                        "\"Start a Google Meet\" (or /meet on Telegram): Mint joins, shares this, and sends you the "
-                        "link.", w=200)
-        page.end()
-        users = facts["mic_users"]
-        self._seen = users
-        self.mic_users.setStringValue_(
-            "Using the microphone now: " + ", ".join(sorted({u["name"] for u in users})) if users
-            else "No other app is using the microphone right now.")
-        self.audio_status.setStringValue_(f"Now: {facts['status']}" if facts["status"] else "")
 
     def _add_mic_apps(self) -> None:
         extra = list(prefs.get("share_mic_apps") or [])
@@ -826,7 +953,7 @@ class SettingsWindow:
             if user["bundle"] and user["bundle"] not in extra:
                 extra.append(user["bundle"])
         prefs.set("share_mic_apps", extra)
-        self.mic_users.setStringValue_("Will also step aside for: " + ", ".join(extra) if extra else
+        self.mic_users.setStringValue_("Will also make way for: " + ", ".join(extra) if extra else
                                        "No other app is using the microphone right now.")
 
     def _facts_looks(self) -> dict:
@@ -851,8 +978,9 @@ class SettingsWindow:
                 "agents_here": here}
 
     def _page_looks(self, page, facts: dict) -> None:
-        """Appearance & Sound. The few things most people change, then everything else behind More options."""
+        """Appearance & Sound. The few things most people change; the rest with advanced settings."""
         name = prefs.name()
+        advanced = self._advanced()
         page.section("View")
         self._row_popup(page, "notch_mode", f"Where {name} lives", WHERE,
                         "Switching plays live: the orb flies into the notch, or drops out of it.", w=200)
@@ -861,6 +989,14 @@ class SettingsWindow:
             self._row_popup(page, "position", "Orb position", POSITIONS, w=200)
         self._row_popup(page, "motion", "How much it moves", MOTION,
                         "Calm: gentle, no bounce. Minimal: fades only (as with macOS Reduce motion).", w=200)
+        if advanced:
+            if prefs.get("notch_mode"):
+                self._row_popup(page, "position", "Orb position", POSITIONS, "When it isn't in the notch.", w=200)
+            self._row_popup(page, "notch_open_to", "The open notch shows", OPEN_TO,
+                            "Auto: Home, or your coding agents while they work.", w=200)
+            self._row_switch(page, "face", "Face on the orb")
+            self._row_switch(page, "menubar_face", "Face in the menu bar",
+                             "The menu bar icon is Mint's face and shows what it's doing.")
         key = (prefs.get("shortcuts") or {}).get("hide") or ""
         from mint.core import hotkeys
         page.end(f"To hide {name}, use the menu bar or {hotkeys.display(key) if key else 'Shortcuts'}: it "
@@ -871,24 +1007,30 @@ class SettingsWindow:
                          "Off unless you turn it on. Soft sounds for done, error and pokes; quiet while you "
                          "dictate or are on a call.")
         self._row_slider(page, "sound_volume", "Volume", 0.0, 1.0, on_release=lambda: self._sample_sound("done"))
+        if advanced:
+            self._row_switch(page, "sounds_notch", "Notch opening and closing", "Only with Little sounds on.")
+            self._row_switch(page, "sounds_tasks", "Tasks", "Done, failed, a message sent, a file dropped.")
+            self._row_switch(page, "sounds_play", "Play", "Pokes, dizzy and the morning hello.")
+            self._row_buttons(page, "Hear them", [("Done", 80, lambda: self._sample_sound("done")),
+                                                  ("Error", 80, lambda: self._sample_sound("error")),
+                                                  ("Poke", 80, lambda: self._sample_sound("poke"))])
         page.end()
 
-        page.section("Claude Code and Codex")
+        page.section("Claude mode (coding agents)")
         if not facts.get("agents_here", True):
             self._row_value(page, "Not on this Mac", "",
                             "Neither Claude Code nor Codex is installed, so this stays off. Install one and Mint "
                             "turns on its pop-ups by itself.", w=40)
-            page.end()
         else:
             self._agent_rows(page, facts)
-
-        more = getattr(self, "_looks_more", False)
-        page.section()
-        self._row_buttons(page, "Face, effects, the notch's parts, agent extras",
-                          [("Fewer options" if more else "More options…", 150, self._toggle_looks_more)])
+            if advanced:
+                self._agent_more_rows(page, facts)
         page.end()
-        if more:
+
+        if advanced:
             self._looks_more_rows(page, facts)
+        self._more_section(page, "Face, animations, the notch's parts, which sounds play, and more for Claude Code "
+                                 "and Codex.")
 
     def _agent_rows(self, page, facts: dict) -> None:
         self._row_switch(page, "agent_approvals", "Pop up when one asks you something",
@@ -898,7 +1040,6 @@ class SettingsWindow:
         self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet",
                         "Claude's from the Claude app (it notes them while it's open), Codex's from its logs. "
                         "Ask: \"how much Claude do I have left?\"", w=250)
-        page.end()
 
     def _show_tour(self) -> None:
         from mint.ui import onboarding
@@ -908,21 +1049,8 @@ class SettingsWindow:
         from mint.ui import onboarding
         onboarding.show()
 
-    def _toggle_looks_more(self) -> None:
-        self._looks_more = not getattr(self, "_looks_more", False)
-        self.refresh(keep_scroll=True)
-
     def _looks_more_rows(self, page, facts: dict) -> None:
-        """Everything else on Appearance & Sound (More options)."""
-        page.section("View")
-        if prefs.get("notch_mode"):
-            self._row_popup(page, "position", "Orb position", POSITIONS, "When it isn't in the notch.", w=200)
-        self._row_popup(page, "notch_open_to", "The open notch shows", OPEN_TO,
-                        "Auto: Home, or your coding agents while they work.", w=200)
-        self._row_switch(page, "face", "Face on the orb")
-        self._row_switch(page, "menubar_face", "Face in the menu bar", "The menu bar icon is Mint's face and shows what it's doing.")
-        page.end()
-
+        """Appearance & Sound, advanced: animation, the notch's parts, the music player."""
         page.section("Animation")
         self._row_switch(page, "auto_emotions", "Expressions during conversation",
                          "Smiles, laughs and hearts that follow what you say.")
@@ -937,21 +1065,10 @@ class SettingsWindow:
                          "Click Mint: a slap. Three quick ones make it dizzy; keep going and it gets annoyed.")
         self._row_switch(page, "greeting", "Morning hello", "A sparkly hello the first time Mint wakes up each day.")
         self._row_switch(page, "wander", "Little trips", "Now and then the orb takes a short trip near its spot.")
-        page.end()
-
-        page.section("Which sounds")
-        self._row_switch(page, "sounds_notch", "Notch opening and closing")
-        self._row_switch(page, "sounds_tasks", "Tasks", "Done, failed, a message sent, a file dropped.")
-        self._row_switch(page, "sounds_play", "Play", "Pokes, dizzy and the morning hello.")
-        self._row_buttons(page, "Hear them", [("Done", 80, lambda: self._sample_sound("done")),
-                                              ("Error", 80, lambda: self._sample_sound("error")),
-                                              ("Poke", 80, lambda: self._sample_sound("poke"))])
-        page.end("Only with Little sounds on.")
-
-        page.section("More")
         self._row_switch(page, "music_player_auto", "Music player",
                          "A mini player with the song, art and controls when Spotify or Music plays.")
         page.end()
+
         page.section("Notch (Dynamic Island)")
         self._row_switch(page, "notch_words", "Words in the notch", "What Mint says, word by word, as it drops down.")
         self._row_switch(page, "notch_controls", "Controls on hover", "Mic, voice, chat, sleep and more when you point at it.")
@@ -964,9 +1081,9 @@ class SettingsWindow:
         self._row_switch(page, "notch_search", "Search in the notch", "Find files and apps from the notch; what Mint finds shows there too.")
         self._row_switch(page, "notch_composer", "Type in the notch", "The + in the open notch turns it into a box to type a request.")
         page.end()
-        if not facts.get("agents_here", True):
-            return                                   # no Claude Code or Codex here: nothing to set up
-        page.section("Claude mode (coding agents)")
+
+    def _agent_more_rows(self, page, facts: dict) -> None:
+        """Claude mode, advanced: live progress, Telegram, checks, hooks and the MCP connection."""
         self._row_popup(page, "agent_mode", "Claude Code and Codex", AGENT_MODES,
                         "Pop-ups only: when one asks or finishes. Live: also step by step while they work.", w=200)
         self._row_switch(page, "notch_agents_bar", "Agents bar under the notch",
@@ -996,7 +1113,6 @@ class SettingsWindow:
             page, "Claude's limits in a terminal", [(facts["limits"], 210, self._toggle_limits)],
             "Only for Claude Code in a terminal (the Claude app's are read without this): a status line passes "
             "its 5-hour and weekly limits to Mint, and keeps showing yours.")
-        page.end()
 
     def _meet_setup(self) -> None:
         from mint.app import meet_call
@@ -1004,7 +1120,7 @@ class SettingsWindow:
 
     def _page_shortcuts(self, page, facts: dict) -> None:
         name = prefs.name()
-        page.section("Keys")
+        page.section("Keyboard shortcuts")
         rows = (("toggle", "Open or close the chat", False), ("talk", f"Talk to {name} (no wake word)", False),
                 ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free", False),
                 ("clipboard", "Open the clipboard", False), ("hide", f"Hide or show {name}", False))
@@ -1022,6 +1138,11 @@ class SettingsWindow:
                   "Right ⌃, Right ⇧ or fn.", size=12, alpha=0.7)
         self._row_text(page, "dictation_words", "Words to spell exactly", "names, product words, jargon", w=280)
         page.end()
+
+        # Apple Shortcuts (the Shortcuts app): `shortcuts list` can be slow, so the keys above never wait for it.
+        self._anchor(page, "shortcuts")                  # the Apple Shortcuts connector's Settings…
+        self._part(page, "apple_shortcuts", self._apple_shortcuts_sections, "Apple Shortcuts")
+        self._more_section(page, "Make a new Apple Shortcut by describing it in plain words.")
 
     def _shortcut_button(self, button, key: str, modifier_ok: bool) -> None:
         from mint.core import hotkeys
@@ -1056,8 +1177,9 @@ class SettingsWindow:
         return {"have": have, "registry": shortcut_library.registry(), "theirs": theirs,
                 "allowed": {t: shortcut_library.allowed(t) for t in theirs[:80]}}
 
-    def _page_apple_shortcuts(self, page, facts: dict) -> None:
-        """Shortcuts-app shortcuts (not keys): Mint's own, the user's (run / allow), and making new ones."""
+    def _apple_shortcuts_sections(self, page, facts: dict) -> None:
+        """Shortcuts ▸ Apple Shortcuts (not keys): Mint's own, the user's (run / allow), and - advanced - making
+        new ones. `facts` from _facts_apple_shortcuts, read off the main thread (_part)."""
         from mint.tools import shortcut_library
         from mint.tools import shortcut_maker
         name = prefs.name()
@@ -1066,7 +1188,7 @@ class SettingsWindow:
 
         def later(fn) -> None:
             def run() -> None:
-                if self.window is not None and self.page_key == "apple_shortcuts":
+                if self.showing("apple_shortcuts"):
                     fn()
             AppHelper.callAfter(run)
 
@@ -1106,7 +1228,7 @@ class SettingsWindow:
 
         # --- Mint's own shortcuts ---
         have = facts["have"]
-        page.section("Mint's shortcuts")
+        page.section(f"Apple Shortcuts that {name} uses")
         page.text(f"A few things only the Shortcuts app can do (Image Playground pictures, Do Not Disturb), so {name} "
                   "uses small shortcuts of its own. Add opens one in Shortcuts, where you click “Add Shortcut” once.",
                   size=12, alpha=0.7)
@@ -1143,11 +1265,11 @@ class SettingsWindow:
         page.end()
 
         # --- The user's shortcuts ---
-        page.section("Your shortcuts")
+        page.section("Your Apple Shortcuts")
         theirs = facts["theirs"]
         if not theirs:
-            page.text("None yet. Make one below, or in the Shortcuts app (a Home scene, a Focus, a playlist) - then "
-                      "say “run <its name>”.", size=12, alpha=0.7)
+            page.text("None yet. Make one in the Shortcuts app (a Home scene, a Focus, a playlist) - then say “run "
+                      "<its name>”.", size=12, alpha=0.7)
         ran = None
         for title in theirs[:80]:
             card, top, x, h = page.row(title, control_w=262)
@@ -1173,8 +1295,10 @@ class SettingsWindow:
             background(go, "shortcut-run")
         page.end(f"Switched off, {name} won't run that shortcut when asked. Run here always works.")
 
-        # --- Making a new one ---
-        page.section("Create a shortcut")
+        # --- Making a new one (advanced, or while a plan made here is still on screen) ---
+        if not (self._advanced() or state["plan"] or state["desc"]):
+            return
+        page.section("Make a new Apple Shortcut")
         page.text(f"Say what it should do and {name} plans it from the Shortcuts actions it knows - for example "
                   "“say hello and show today's date” or “set the volume to 30% and turn on dark mode”.",
                   size=12, alpha=0.7)
@@ -1249,8 +1373,15 @@ class SettingsWindow:
         return facts
 
     def _page_accounts(self, page, facts: dict) -> None:
+        """Accounts & connections: keys and accounts first, then the apps and services Mint works with."""
+        from mint.tools import accounts
+        from mint.ui import settings_connectors
+        advanced = self._advanced()
+        name = prefs.name()
         page.section("API keys")
-        for env, title, hint in KEYS:
+        for env, title, hint, more in KEYS:
+            if more and not advanced:
+                continue
             value = os.environ.get(env, "")
             shown = f"Set  ••••{value[-4:]}" if len(value) > 8 else ("Not set" if not value else "Set")
             card, top, x, h = page.row(title, hint, control_w=250)
@@ -1260,17 +1391,21 @@ class SettingsWindow:
                          lambda e=env, t=title: self._change_key(e, t))
         page.end("Keys stay on this Mac, in a file only you can read. Nothing goes through any Hey Mint server - "
                  "there isn't one.")
-        self._telegram_card(page, facts["telegram"])
-        self._email_card(page, facts["email"])
 
-        from mint.tools import accounts
-        page.section("Google: Gmail and Calendar")
+        page.section("Google: Gmail, Calendar and Meet")
         page.text("Add your Google account in System Settings ▸ Internet Accounts (turn on Mail and Calendars). "
-                  f"macOS keeps it in sync, and {prefs.name()} reads, triages and drafts email in Mail and plans "
+                  f"macOS keeps it in sync, and {name} reads, triages and drafts email in Mail and plans "
                   "in Calendar, all on this Mac. No sign-in with Mint and no extra permissions.", size=12, alpha=0.75)
         status = page.text("Checking…\n ", size=11, alpha=0.6)
-        self._row_buttons(page, "", [("Check again", 110, lambda: check()),
-                                     ("Connect Google…", 150, accounts.open_internet_accounts)])
+        self._row_buttons(page, "Mail and Calendar", [("Check again", 110, lambda: check()),
+                                                      ("Connect Google…", 150, accounts.open_internet_accounts)])
+        self._row_buttons(page, "Google Meet (sign in once)", [("Open sign-in…", 150, self._meet_setup)],
+                          f"For “start a Google Meet”: {name}'s Meet window has its own Chrome profile. You sign in "
+                          "there; Mint never types passwords.")
+        if advanced:
+            self._row_popup(page, "meet_share", "Share in the call", MEET_SHARE,
+                            "\"Start a Google Meet\" (or /meet on Telegram): Mint joins, shares this, and sends you "
+                            "the link.", w=200)
         page.end("Drafts only: Mint never sends an email itself - except Email control's answers, which go only "
                  "to the verified, allowed sender of an emailed request, in its thread.")
 
@@ -1282,6 +1417,36 @@ class SettingsWindow:
                 AppHelper.callAfter(status.setStringValue_, words)
             threading.Thread(target=run, daemon=True, name="settings-accounts").start()
         check()
+
+        # Telegram and Email control: a card each once set up (or opened, or with advanced settings); before that,
+        # one line each with Set up…
+        from mint.app import telegram
+        tg, em = facts["telegram"], facts["email"]
+        tg_full = (advanced or "telegram" in self._opened or bool(os.environ.get(telegram.TOKEN_ENV))
+                   or bool(tg.get("enabled") or tg.get("paired")))
+        em_full = advanced or "email" in self._opened or bool(em.get("enabled") or em.get("address"))
+        if not (tg_full and em_full):
+            page.section(f"Control {name} from anywhere")
+            if not tg_full:
+                self._anchor(page, "telegram")
+                self._row_buttons(page, "Telegram", [("Set up…", 100, lambda: self._open_card("telegram"))],
+                                  hint="Text or send voice notes to your own Telegram bot from your phone.")
+            if not em_full:
+                self._anchor(page, "email")
+                self._row_buttons(page, "Email", [("Set up…", 100, lambda: self._open_card("email"))],
+                                  hint="Email a request from anywhere and get the answer by email.")
+            page.end()
+        if tg_full:
+            self._anchor(page, "telegram")
+            self._telegram_card(page, tg)
+        if em_full:
+            self._anchor(page, "email")
+            self._email_card(page, em)
+
+        # The apps and services (settings_connectors): their own read, so the accounts above never wait for it.
+        self._part(page, "connectors", lambda p, f: settings_connectors.page(self, p, f), "Apps and services")
+        self._more_section(page, "The OpenAI key, Meet screen sharing, email rules, making connectors for any app, "
+                                 "and apps not on this Mac yet.")
 
     def _telegram_card(self, page, state: dict) -> None:
         """Telegram remote control: the bot token, the switches, and pairing with one phone. `state` is the
@@ -1359,29 +1524,34 @@ class SettingsWindow:
         email_remote.status() plus Mail's account names, read off the main thread by _facts_accounts."""
         from mint.app import email_remote
         mail = state.get("backend", "mail") == "mail"
+        advanced = self._advanced()
+        prefix = str(prefs.get("email_prefix") or "Mint:").strip()
         page.section("Email control")
         if mail:
             page.text(f"Email {prefs.name()} a request from anywhere - no Telegram needed - and get the answer by "
                       "email. It reads and answers through the Mail app on this Mac, with the account you added "
                       "in System Settings ▸ Internet Accounts: no password to make or paste. Mail opens in the "
-                      "background while this is on.", size=12, alpha=0.75)
+                      f"background while this is on. Start the subject with “{prefix}”.", size=12, alpha=0.75)
         else:
             page.text(f"Email {prefs.name()} a request from anywhere - no Telegram needed - and get the answer by "
                       "email. Give it an address (your Gmail, or one made for it) and that account's app password: "
-                      "for Gmail, turn on 2-Step Verification, then make one at myaccount.google.com/apppasswords.",
-                      size=12, alpha=0.75)
+                      "for Gmail, turn on 2-Step Verification, then make one at myaccount.google.com/apppasswords. "
+                      f"Start the subject with “{prefix}”.", size=12, alpha=0.75)
 
         def changed() -> None:
             email_remote.refresh()
             AppHelper.callLater(0.5, self.refresh)
-        self._row_popup(page, "email_backend", "Read mail with",
-                        [("auto", "Automatic"), ("imap", "Gmail app password"), ("mail", "Apple Mail (no password)")],
-                        hint="Automatic: the app password when one is saved - Gmail tells Mint about a new message at "
-                             "once and answers come back in seconds - else Apple Mail (checks every 30 s; works when "
-                             "Google won't make an app password).", on_change=changed)
+        if advanced:
+            self._row_popup(page, "email_backend", "Read mail with",
+                            [("auto", "Automatic"), ("imap", "Gmail app password"), ("mail", "Apple Mail (no password)")],
+                            hint="Automatic: the app password when one is saved - Gmail tells Mint about a new message "
+                                 "at once and answers come back in seconds - else Apple Mail (checks every 30 s; works "
+                                 "when Google won't make an app password).", on_change=changed)
         self._row_text(page, "email_address", "Email address", "you@gmail.com",
-                       hint=("Your own address, as in Mail: requests from it are allowed when the list below is "
-                             "empty." if mail else "The inbox it watches and answers from."), settle=1.0)
+                       hint=("The inbox it watches and answers from." if not mail else
+                             "Your own address, as in Mail: requests from it are allowed when the list below is "
+                             "empty." if advanced else "Your own address, as in Mail: send requests from it."),
+                       settle=1.0)
         if mail:
             names = state.get("mail_accounts")
             current = state.get("mail_account", "")
@@ -1393,7 +1563,7 @@ class SettingsWindow:
                                   else "Add accounts in System Settings ▸ Internet Accounts (turn on Mail)."
                                   if not names else "The inbox it watches; replies go from that account."),
                             on_change=changed)
-            if state.get("chosen") == "auto":
+            if state.get("chosen") == "auto" and advanced:
                 self._email_password_row(page, state, "Optional: save one and Mint reads Gmail directly - "
                                                       "answers in seconds instead of through Mail.")
             ready = bool(state["address"])
@@ -1420,15 +1590,17 @@ class SettingsWindow:
             email_remote.refresh()
             AppHelper.callLater(3.0, self.refresh)
         self._switch(card, x, top + (h - 22) / 2, state["enabled"], switch)
-        self._row_popup(page, "email_allow", "Who may send requests",
-                        [("list", "Only the addresses below"), ("all", "Anyone who knows the secret word")],
-                        hint="Either way, the mail server must vouch that a message really is from its sender.",
-                        on_change=lambda: AppHelper.callLater(0.5, self.refresh))
-        self._row_text(page, "email_allowed", "Allowed senders", "you@example.com, …",
-                       hint="Separated by commas. Empty: only the address above (email yourself).", settle=1.0)
-        self._row_text(page, "email_prefix", "Subject starts with", "Mint:",
-                       hint="Only these messages are read; newsletters and ads never are. \"Mint: /help\" lists "
-                            "the commands.", w=160, settle=1.0)
+        if advanced or state["allow"] == "all":
+            self._row_popup(page, "email_allow", "Who may send requests",
+                            [("list", "Only the addresses below"), ("all", "Anyone who knows the secret word")],
+                            hint="Either way, the mail server must vouch that a message really is from its sender.",
+                            on_change=lambda: AppHelper.callLater(0.5, self.refresh))
+        if advanced:
+            self._row_text(page, "email_allowed", "Allowed senders", "you@example.com, …",
+                           hint="Separated by commas. Empty: only the address above (email yourself).", settle=1.0)
+            self._row_text(page, "email_prefix", "Subject starts with", "Mint:",
+                           hint="Only these messages are read; newsletters and ads never are. \"Mint: /help\" lists "
+                                "the commands.", w=160, settle=1.0)
         secret = "Set" if state["secret_set"] else ("Needed for \"Anyone\"" if state["allow"] == "all" else "Not set")
         card, top, x, h = page.row("Secret word", "Must also be in the subject. Recommended; required when anyone "
                                    "may send requests.", control_w=250)
@@ -1441,7 +1613,9 @@ class SettingsWindow:
         page.end("A message counts only when the mail server verified its sender (DKIM, or SPF with DMARC): a forged "
                  "From is ignored. Answers go only to that sender, in the same thread; handled messages are marked "
                  "read. Only this Mac talks to the mail server, through Mail or directly. Every request is logged in "
-                 "~/Library/Application Support/Mint/remote.log.")
+                 "~/Library/Application Support/Mint/remote.log." if advanced else
+                 "Only mail from a verified sender counts, and answers go only to that sender. Every request is "
+                 "logged.")
 
     def _email_password_row(self, page, state: dict, hint: str) -> None:
         """The app-password row (Set / Not set, Add… or Change…), for "Automatic" while Mail is the way in."""
@@ -1518,10 +1692,6 @@ class SettingsWindow:
     def _facts_connectors(self) -> dict:
         from mint.ui import settings_connectors
         return settings_connectors.facts(self)
-
-    def _page_connectors(self, page, facts: dict) -> None:
-        from mint.ui import settings_connectors
-        settings_connectors.page(self, page, facts)
 
     def _facts_models(self) -> dict:
         from mint.ui import settings_models
@@ -1736,7 +1906,9 @@ class SettingsWindow:
         self._row_buttons(page, "Something went wrong?", [("Report a problem…", 160, report.open_issue)],
                           hint="Opens a new GitHub issue in your browser. Recent errors (nothing personal) are copied "
                                "for you to paste in if you like. Nothing is sent until you submit it.")
-        self._row_buttons(page, "The log", [("Open log", 110, lambda: _open_file(report.LOG))])
+        if self._advanced():
+            self._row_buttons(page, "The log", [("Open log", 110, lambda: _open_file(report.LOG))],
+                              hint="What Mint did and any errors, as text.")
         self._row_buttons(page, "Is everything set up?", [("Check my setup", 140, self._check_setup)],
                           hint="Checks permissions, keys, models and connections. Read-only.")
         if facts["can_restart"]:
@@ -1746,12 +1918,14 @@ class SettingsWindow:
                                    "menu-bar item that appears when it stops responding.")
         page.end()
 
-        page.section("Files you can edit")
-        self._row_buttons(page, "The settings file", [("Edit…", 110, self._edit_settings_file)],
-                          hint="Every setting, spelled out as text.")
-        self._row_buttons(page, "Accounts, aliases and routines", [("Edit…", 110, self._edit_custom_file)],
-                          hint="Your own routines, spoken aliases and extra accounts.")
-        page.end()
+        if self._advanced():
+            page.section("Files you can edit")
+            self._row_buttons(page, "The settings file", [("Edit…", 110, self._edit_settings_file)],
+                              hint="Every setting, spelled out as text.")
+            self._row_buttons(page, "Accounts, aliases and routines", [("Edit…", 110, self._edit_custom_file)],
+                              hint="Your own routines, spoken aliases and extra accounts.")
+            page.end()
+        self._more_section(page, "The log, and the settings files you can edit by hand.")
 
     def _hooks_title(self) -> str:
         try:
@@ -1955,8 +2129,8 @@ class SettingsWindow:
         return job
 
     def _arrived(self, key: str, job: dict) -> None:
-        if self.window is not None and self.page_key == key and self._jobs.get(key) is job and not job["used"]:
-            self.refresh()
+        if self.window is not None and key in self._shown_parts and self._jobs.get(key) is job and not job["used"]:
+            self.refresh(keep_scroll=True)
 
     def _check_slow(self, key: str, job: dict) -> None:
         """LOAD_SLOW after "Loading…": still reading. Log where the read is stuck - the next report then
@@ -1968,8 +2142,8 @@ class SettingsWindow:
         stack = "".join(traceback.format_stack(frame)) if frame is not None else "  (no Python frame)\n"
         log.warning("settings: the %s page is still loading after %.0f s; the read is here:\n%s", key,
                     time.monotonic() - job["started"], stack)
-        if self.window is not None and self.page_key == key:
-            self.refresh()
+        if self.window is not None and key in self._shown_parts:
+            self.refresh(keep_scroll=True)
 
     def _retry(self, key: str) -> None:
         """Try again: a new read (a stuck one carries on in the background; what it brings is dropped)."""
@@ -1977,10 +2151,10 @@ class SettingsWindow:
             self._jobs.pop(key, None)
         self.refresh()
 
-    def _loading_card(self, page, key: str) -> None:
+    def _loading_card(self, page, key: str, title: str = "") -> None:
         job = self._jobs.get(key)
         slow = bool(job and job["slow"])
-        page.section()
+        page.section(title)
         card, top, _, h = page.row("", height=56)
         spinner = AppKit.NSProgressIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + (h - 16) / 2, 16, 16))
         spinner.setStyle_(AppKit.NSProgressIndicatorStyleSpinning)
@@ -2008,6 +2182,8 @@ class SettingsWindow:
     def _build_page(self, column, width: float) -> _Page:
         """The page's facts (or "Loading…", or what went wrong), then its views."""
         key = self.page_key
+        self._shown_parts = {key}
+        self._anchors = {}
         page = _Page(self, column, width)
         facts = self._facts(key)
         if facts is None:
@@ -2043,9 +2219,9 @@ class SettingsWindow:
     # --- window ------------------------------------------------------------------------
 
     def show(self, page: str | None = None) -> None:
-        """Main thread."""
+        """Main thread. `page`: a page key, or an old one ("audio", "apple_shortcuts", "connectors")."""
         if page:
-            self.page_key = page
+            self.page_key = page_for(page)
         if self.window is not None:
             self.refresh()
             self._front()
@@ -2089,13 +2265,14 @@ class SettingsWindow:
                 glyph.setImage_(image)
             glyph.setContentTintColor_(AppKit.NSColor.whiteColor() if on else accent)
             item.addSubview_(glyph)
-            label = self._label(item, title, 36, 6, SIDEBAR - 60, h=18, size=13)
+            label = self._label(item, title, 36, 6, SIDEBAR - 20 - 36 - 4, h=18, size=13)
             label.setTextColor_(AppKit.NSColor.whiteColor() if on else AppKit.NSColor.labelColor())
             items.addSubview_(item)
             y += 32
 
         # The page: its title, then a scrolling column of cards.
         body_w = W - SIDEBAR
+        self.page_key = page_for(self.page_key)
         title = dict((k, t) for k, t, _ in PAGES)[self.page_key]
         self._label(content, title, SIDEBAR + PAD, H - 58, body_w - 2 * PAD, h=28, size=20, bold=True)
         scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(SIDEBAR, 0, body_w, H - 70))
@@ -2113,9 +2290,14 @@ class SettingsWindow:
         self._scroll = scroll
         self.window.setContentView_(content)
 
-    def select(self, key: str) -> None:
+    def select(self, key: str, anchor: str = "") -> None:
+        """Open a page (old keys work too); `anchor`: scroll to that part of it - and open it if it is a card that
+        starts closed (a connector's Settings… for Telegram)."""
         cancel_recording()
-        self.page_key = key
+        self.page_key = page_for(key)
+        self._reveal = anchor
+        if anchor in ("telegram", "email"):
+            self._opened.add(anchor)
         self.refresh()
 
     def refresh(self, keep_scroll: bool = False) -> None:
@@ -2128,8 +2310,12 @@ class SettingsWindow:
         self._handlers.clear()
         self._ended_handlers.clear()
         self._fill()
+        if self._reveal and self._reveal in self._anchors:          # select(page, anchor=…): there, once built
+            y, self._reveal = max(1.0, self._anchors[self._reveal]), ""
         if y and self._scroll is not None:
             clip = self._scroll.contentView()
+            doc_h = self._scroll.documentView().frame().size.height
+            y = min(y, max(0.0, doc_h - clip.bounds().size.height))
             clip.scrollToPoint_(AppKit.NSMakePoint(0, y))
             self._scroll.reflectScrolledClipView_(clip)
         self.window.setTitle_(f"{prefs.name()} Settings")

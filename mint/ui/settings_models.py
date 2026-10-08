@@ -1,5 +1,8 @@
 """Settings ▸ Models & agents: API keys for every model provider, the backup models, and the sub-agents.
 
+Basic view: the Gemini keys and the agents. Advanced (Settings' "Show more"): how two Gemini keys share the work,
+the other model providers, and the backups for every agent.
+
 - Gemini: key 1 (required, the voice) and an optional key 2; how the two share the work (gemini_keys.py).
 - OpenAI, Anthropic, OpenRouter, Groq, xAI: add / change / remove a key, and Test it (lists its models).
 - Ollama: its address on this Mac, and Test. Custom OpenAI-compatible endpoints: add, test, remove.
@@ -46,7 +49,16 @@ def facts() -> dict:
             "keys": {provider: catalog.key(provider) for provider in KEYED}, "settings": catalog.settings(),
             "custom": {cid: dict(spec, has_key=bool(catalog.key(cid)))
                        for cid, spec in catalog.custom_providers().items()},
-            "agents": registry.load(), "codex_problem": _codex_problem()}
+            "agents": registry.load(), "codex_problem": _codex_problem(), "codex_models": _codex_models()}
+
+
+def _codex_models() -> dict:
+    """What Codex offers ([(slug, name)], from its own cache) and the model it is set to - read with the facts."""
+    try:
+        from mint.agents import codex as codex_runner
+        return {"list": codex_runner.models(), "selected": codex_runner.selected()}
+    except Exception:
+        return {"list": [], "selected": ""}
 
 
 def _codex_problem() -> str:
@@ -59,10 +71,17 @@ def _codex_problem() -> str:
 
 
 def page(win, page, facts: dict) -> None:
+    advanced = win._advanced()
     _gemini_section(win, page, facts)
-    _providers_section(win, page, facts)
-    _backups_section(win, page, facts)
+    if advanced:
+        win._anchor(page, "model_keys")             # the AI model providers connector's Settings…
+        _providers_section(win, page, facts)
+        _backups_section(win, page, facts)
     _agents_section(win, page, facts)
+    if not advanced:
+        win._anchor(page, "model_keys")             # hidden: Show more is where they are
+    win._more_section(page, "Model providers (OpenAI, Claude, Groq, Ollama…) for your agents, backup models, and "
+                            "how two Gemini keys share the work.")
 
 
 # --- Gemini ----------------------------------------------------------------------------------------
@@ -81,7 +100,7 @@ def _gemini_section(win, page, facts: dict) -> None:
         label.setAlignment_(AppKit.NSTextAlignmentRight)
         win._button(card, "Change…" if value else "Add…", x + 158, top + (h - 28) / 2, 92,
                     lambda e=env, t=f"Gemini {title}": _ask_key(win, e, t, required=e == "GEMINI_API_KEY"))
-    if facts["gemini_keys"] > 1:
+    if facts["gemini_keys"] > 1 and win._advanced():
         win._row_popup(page, "gemini_key_mode", "Using two keys",
                        [("split", "Voice on key 1, the rest on key 2"), ("primary", "Key 1 first, key 2 as backup")],
                        hint="Either way each key covers for the other when it is rate-limited or refused.", w=280)
@@ -386,7 +405,7 @@ def _agents_section(win, page, facts: dict) -> None:
         if agent["name"].lower() not in BUILT_IN:
             buttons.append(("Remove", 84, lambda a=agent["name"]: _remove_agent(win, a)))
         if codex:
-            _codex_row(win, page, agent, detail, facts.get("codex_problem", ""))
+            _codex_row(win, page, agent, facts.get("codex_problem", ""), facts.get("codex_models") or {})
         elif buttons:
             win._row_buttons(page, f"●  {agent['name']}", buttons, hint=detail)
         else:
@@ -397,18 +416,43 @@ def _agents_section(win, page, facts: dict) -> None:
     page.end("Mint picks an agent by its role; you can also ask by name (\"ask Nova to…\").")
 
 
-def _codex_row(win, page, agent, detail: str, missing: str) -> None:
-    """Codex with an on/off switch. Without Codex on this Mac (it comes with the ChatGPT app) it is off and can't be
-    turned on: Mint never offers it, and hands building work to Luna instead."""
-    hint = detail + ("\n" + missing.replace("The user needs to", "To use it,") if missing else "")
-    card, top, x, h = page.row(f"●  {agent['name']}", hint, control_w=38)
+def _codex_row(win, page, agent, missing: str, offered: dict) -> None:
+    """Codex: which model it runs (Auto = whatever Codex itself is set to, or one of the models Codex offers this
+    account) and an on/off switch. Without Codex on this Mac (it comes with the ChatGPT app) both are off: Mint never
+    offers it, and hands building work to Luna instead."""
+    chosen = (agent.get("models") or ["auto"])[0]
+    names = dict(offered.get("list") or [])
+    selected = offered.get("selected") or ""
+    auto = f"Auto ({names.get(selected, selected)})" if selected else "Auto (Codex's default)"
+    options = [("auto", auto)] + list(offered.get("list") or [])
+    if chosen not in [v for v, _ in options]:
+        options.append((chosen, chosen))                 # a model Codex no longer lists: still shown, still chosen
+    hint = (f"{agent.get('role', '')}\nRuns in OpenAI Codex (the ChatGPT app). Auto: the model you picked in Codex."
+            + ("\n" + missing.replace("The user needs to", "To use it,") if missing else ""))
+    card, top, x, h = page.row(f"●  {agent['name']}", hint, control_w=210 + 12 + 38)
+    popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 210, 26),
+                                                                   False)
+    for _, title in options:
+        popup.addItemWithTitle_(title)
+    values = [v for v, _ in options]
+    popup.selectItemAtIndex_(values.index(chosen))
+
+    def picked(control) -> None:
+        model = values[control.indexOfSelectedItem()]
+        registry.set_model(agent["name"], model)
+        print(f"  [agents: {agent['name']} runs on {model}]", flush=True)
+        win.refresh(keep_scroll=True)
+    win._on(popup, picked)
+    popup.setToolTip_("The model Codex runs Mint's jobs on. Auto follows the model you picked in Codex.")
+    card.addSubview_(popup)
 
     def switched(on: bool) -> None:
         registry.set_on(agent["name"], on)
         print(f"  [agents: {agent['name']} {'on' if on else 'off'}]", flush=True)
-    switch = win._switch(card, x, top + (h - 22) / 2, not agent.get("off") and not missing, switched)
+    switch = win._switch(card, x + 222, top + (h - 22) / 2, not agent.get("off") and not missing, switched)
     if missing:
         switch.setEnabled_(False)
+        popup.setEnabled_(False)
         switch.setToolTip_(missing)
 
 
@@ -530,5 +574,5 @@ def _edit_agent(win, name: str | None) -> None:
     missing = sorted({m.split("/", 1)[0] for m in new["models"] if not catalog.configured(m.split("/", 1)[0])})
     if missing:
         _confirm(f"Saved {new['name']}.", f"{', '.join(catalog.all_providers()[p]['label'] for p in missing)} has no "
-                 "key yet - add it above; until then the backups run.", only_ok=True)
+                 "key yet - add it under Model providers on this page (Show more); until then the backups run.", only_ok=True)
     win.refresh()

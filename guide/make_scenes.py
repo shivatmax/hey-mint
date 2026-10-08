@@ -1933,6 +1933,316 @@ def _real_notch_cover():
     return w
 
 
+# --- Telegram and email, for the welcome tour ---------------------------------------------------------------------
+
+def _tg_text(html, size=13.5, color=None):
+    """Telegram's HTML (<b>, <i>, entities) as an attributed string, the way the app shows it."""
+    import html as _html
+    import re
+    import AppKit
+    out = AppKit.NSMutableAttributedString.alloc().init()
+    bold = italic = False
+    for part in re.split(r"(</?[bi]>)", html):
+        if part in ("<b>", "</b>"):
+            bold = part == "<b>"
+            continue
+        if part in ("<i>", "</i>"):
+            italic = part == "<i>"
+            continue
+        if not part:
+            continue
+        font = AppKit.NSFont.systemFontOfSize_weight_(size, AppKit.NSFontWeightSemibold if bold
+                                                       else AppKit.NSFontWeightRegular)
+        if italic:
+            font = AppKit.NSFontManager.sharedFontManager().convertFont_toHaveTrait_(font, AppKit.NSItalicFontMask)
+        out.appendAttributedString_(AppKit.NSAttributedString.alloc().initWithString_attributes_(
+            _html.unescape(part), {AppKit.NSFontAttributeName: font,
+                                   AppKit.NSForegroundColorAttributeName: color or AppKit.NSColor.blackColor()}))
+    return out
+
+
+class _Phone:
+    """A phone beside the notch showing the Telegram chat with Mint's bot: the messages are the ones Mint's
+    Telegram bridge really sends (telegram.Request renders the working message and its buttons)."""
+    W, H = 360, 640
+
+    def __init__(self, x, top):
+        import AppKit
+        import Quartz
+        from mint.ui.onboarding import _OnbFlipped
+        self.AppKit, self.Q, self.Flipped = AppKit, Quartz, _OnbFlipped
+        screen = AppKit.NSScreen.mainScreen().frame()
+        rect = AppKit.NSMakeRect(x, screen.size.height - top - self.H, self.W, self.H)
+        win = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            rect, AppKit.NSWindowStyleMaskBorderless, AppKit.NSBackingStoreBuffered, False)
+        win.setOpaque_(False)
+        win.setBackgroundColor_(AppKit.NSColor.clearColor())
+        win.setHasShadow_(True)
+        # Over the cover that hides the real notch (level +4), under the demo notch (+5).
+        win.setLevel_(Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 4)
+        win.setIgnoresMouseEvents_(True)
+        body = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, self.W, self.H))
+        body.setWantsLayer_(True)
+        body.layer().setCornerRadius_(56)
+        body.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(0.08, 0.08, 0.09, 1))
+        win.setContentView_(body)
+        self.win = win
+        screen_view = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(11, 11, self.W - 22, self.H - 22))
+        screen_view.setWantsLayer_(True)
+        screen_view.layer().setCornerRadius_(46)
+        screen_view.layer().setMasksToBounds_(True)
+        wall = Quartz.CAGradientLayer.layer()
+        wall.setFrame_(Quartz.CGRectMake(0, 0, self.W - 22, self.H - 22))
+        wall.setColors_([self._cg(0.80, 0.88, 0.74), self._cg(0.90, 0.93, 0.80)])
+        screen_view.layer().addSublayer_(wall)
+        body.addSubview_(screen_view)
+        self.screen = screen_view
+        self.sw = self.W - 22
+        # The header: the time and status icons, then the chat's title bar.
+        head = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, self.sw, 100))
+        head.setWantsLayer_(True)
+        head.layer().setBackgroundColor_(self._cg(0.97, 0.97, 0.98, 0.96))
+        screen_view.addSubview_(head)
+        self._label(head, "9:41", 30, 16, 80, 15, AppKit.NSFontWeightSemibold)
+        for i, name in enumerate(("battery.100", "wifi", "cellularbars")):
+            self._symbol(head, name, self.sw - 52 - i * 26, 17, 18)
+        island = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(self.sw / 2 - 58, 12, 116, 32))
+        island.setWantsLayer_(True)
+        island.layer().setCornerRadius_(16)
+        island.layer().setBackgroundColor_(self._cg(0, 0, 0))
+        head.addSubview_(island)
+        self._symbol(head, "chevron.left", 14, 62, 20, tint=(0.0, 0.48, 1.0))
+        self._label(head, "Chats", 34, 61, 60, 16, tint=(0.0, 0.48, 1.0))
+        self._label(head, "Mint", 0, 54, self.sw, 16, AppKit.NSFontWeightSemibold, center=True)
+        self._label(head, "bot", 0, 74, self.sw, 12, tint=(0.55, 0.57, 0.62), center=True)
+        avatar = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(self.sw - 54, 54, 38, 38))
+        avatar.setWantsLayer_(True)
+        grad = Quartz.CAGradientLayer.layer()
+        grad.setFrame_(Quartz.CGRectMake(0, 0, 38, 38))
+        grad.setCornerRadius_(19)
+        grad.setColors_([self._cg(0.62, 0.95, 0.82), self._cg(0.42, 0.78, 0.95)])
+        avatar.layer().addSublayer_(grad)
+        for ex in (12, 22):
+            eye = Quartz.CALayer.layer()
+            eye.setFrame_(Quartz.CGRectMake(ex, 16, 4.5, 8))
+            eye.setCornerRadius_(2.25)
+            eye.setBackgroundColor_(self._cg(0.1, 0.12, 0.16))
+            avatar.layer().addSublayer_(eye)
+        head.addSubview_(avatar)
+        # The message box at the bottom.
+        bar = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, self.H - 22 - 74, self.sw, 74))
+        bar.setWantsLayer_(True)
+        bar.layer().setBackgroundColor_(self._cg(0.97, 0.97, 0.98, 0.96))
+        screen_view.addSubview_(bar)
+        self._symbol(bar, "paperclip", 14, 14, 22, tint=(0.55, 0.57, 0.62))
+        box = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(46, 10, self.sw - 96, 32))
+        box.setWantsLayer_(True)
+        box.layer().setCornerRadius_(16)
+        box.layer().setBackgroundColor_(self._cg(1, 1, 1))
+        box.layer().setBorderColor_(self._cg(0.85, 0.86, 0.88))
+        box.layer().setBorderWidth_(0.5)
+        bar.addSubview_(box)
+        self._label(bar, "Message", 60, 16, 120, 15, tint=(0.62, 0.64, 0.68))
+        self._symbol(bar, "mic", self.sw - 38, 14, 22, tint=(0.55, 0.57, 0.62))
+        self.messages = []                         # [view, height]
+        win.orderFrontRegardless()
+
+    def _cg(self, r, g, b, a=1.0):
+        return self.Q.CGColorCreateGenericRGB(r, g, b, a)
+
+    def _label(self, view, text, x, y, w, size, weight=None, tint=(0.05, 0.05, 0.07), center=False):
+        AppKit = self.AppKit
+        field = AppKit.NSTextField.labelWithString_(text)
+        field.setFont_(AppKit.NSFont.systemFontOfSize_weight_(size, weight or AppKit.NSFontWeightRegular))
+        field.setTextColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*tint, 1))
+        if center:
+            field.setAlignment_(AppKit.NSTextAlignmentCenter)
+        field.setFrame_(AppKit.NSMakeRect(x, y, w, size + 6))
+        view.addSubview_(field)
+        return field
+
+    def _symbol(self, view, name, x, y, size, tint=(0.05, 0.05, 0.07)):
+        AppKit = self.AppKit
+        image = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, size + 4, size))
+        config = AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_(size * 0.8,
+                                                                                       AppKit.NSFontWeightMedium)
+        image.setImage_(AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(name, None)
+                        .imageWithSymbolConfiguration_(config))
+        image.setContentTintColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*tint, 1))
+        view.addSubview_(image)
+
+    def _bubble(self, text, mine, buttons=None, doc=None):
+        """One message: a bubble (green for the user, white for the bot), its time, and any buttons under it."""
+        AppKit, Q = self.AppKit, self.Q
+        width_max = 252
+        attributed = text if not isinstance(text, str) else _tg_text(text)
+        if doc:
+            inner_w, inner_h = 232, 50
+        else:
+            size = attributed.boundingRectWithSize_options_(
+                (width_max - 24, 2000), AppKit.NSStringDrawingUsesLineFragmentOrigin).size
+            inner_w, inner_h = max(70, size.width + 10), size.height + 4
+        bw, bh = inner_w + 24, inner_h + 26
+        rows = (buttons or {}).get("inline_keyboard") or []
+        total_h = bh + (len(rows) * 40 + 4 if rows else 0)
+        holder = self.Flipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, self.sw, total_h))
+        x = self.sw - bw - 10 if mine else 10
+        bubble = self.Flipped.alloc().initWithFrame_(AppKit.NSMakeRect(x, 0, bw, bh))
+        bubble.setWantsLayer_(True)
+        bubble.layer().setCornerRadius_(17)
+        bubble.layer().setBackgroundColor_(self._cg(0.88, 0.98, 0.78) if mine else self._cg(1, 1, 1))
+        bubble.layer().setShadowColor_(self._cg(0, 0, 0))
+        bubble.layer().setShadowOpacity_(0.08)
+        bubble.layer().setShadowRadius_(1)
+        bubble.layer().setShadowOffset_(Q.CGSizeMake(0, -1))
+        holder.addSubview_(bubble)
+        if doc:
+            icon = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(12, 9, 46, 46))
+            icon.setWantsLayer_(True)
+            icon.layer().setCornerRadius_(23)
+            icon.layer().setBackgroundColor_(self._cg(0.2, 0.56, 0.98))
+            bubble.addSubview_(icon)
+            self._symbol(bubble, "doc.fill", 23, 21, 20, tint=(1, 1, 1))
+            self._label(bubble, doc[0], 68, 12, 170, 14, AppKit.NSFontWeightSemibold)
+            self._label(bubble, doc[1], 68, 32, 170, 12, tint=(0.45, 0.48, 0.52))
+        else:
+            field = AppKit.NSTextField.wrappingLabelWithString_("")
+            field.setAttributedStringValue_(attributed)
+            field.setFrame_(AppKit.NSMakeRect(12, 8, inner_w, inner_h))
+            bubble.addSubview_(field)
+        stamp = "9:41 ✓✓" if mine else "9:41"
+        self._label(bubble, stamp, bw - (58 if mine else 38), bh - 19, 52, 10,
+                    tint=(0.3, 0.6, 0.3) if mine else (0.6, 0.62, 0.66))
+        y = bh + 4
+        for row in rows:
+            n = len(row)
+            each = (bw - 4 * (n - 1)) / n
+            for i, key in enumerate(row):
+                button = self.Flipped.alloc().initWithFrame_(AppKit.NSMakeRect(x + i * (each + 4), y, each, 36))
+                button.setWantsLayer_(True)
+                button.layer().setCornerRadius_(10)
+                button.layer().setBackgroundColor_(self._cg(0.33, 0.45, 0.30, 0.42))
+                self._label(button, key["text"], 0, 9, each, 13, AppKit.NSFontWeightMedium, tint=(1, 1, 1), center=True)
+                holder.addSubview_(button)
+            y += 40
+        return holder, total_h
+
+    def _layout(self):
+        y = 112
+        for item in self.messages:
+            view, height = item
+            view.setFrameOrigin_((0, y))
+            y += height + 8
+
+    def say(self, text, mine=False, buttons=None, doc=None):
+        view, height = self._bubble(text, mine, buttons, doc)
+        self.screen.addSubview_(view)
+        self.messages.append([view, height])
+        self._layout()
+        view.setWantsLayer_(True)
+        pop = self.Q.CASpringAnimation.animationWithKeyPath_("transform.scale")
+        pop.setFromValue_(0.85)
+        pop.setToValue_(1.0)
+        pop.setDamping_(14)
+        pop.setDuration_(pop.settlingDuration())
+        view.layer().addAnimation_forKey_(pop, "pop")
+        return len(self.messages) - 1
+
+    def update(self, index, text, buttons=None):
+        old, _ = self.messages[index]
+        view, height = self._bubble(text, False, buttons)
+        self.screen.replaceSubview_with_(old, view)
+        self.messages[index] = [view, height]
+        self._layout()
+
+    def close(self):
+        self.win.orderOut_(None)
+
+
+@scene("telegram", 21)
+def telegram_scene(p):
+    """A request from the phone: "send me yesterday's sales report" in Telegram; the Mac's notch works on it while
+    the bot's working message ticks through the real steps; then the report arrives in the chat as a file."""
+    from mint.app import telegram
+    from mint.ui.activity import phrase
+    holder = {}
+    ms.main_sync(lambda: holder.update(phone=_Phone(1050, 150)))
+    phone = holder["phone"]
+    time.sleep(1.4)
+    asked = "Send me yesterday's sales report"
+    ms.main_sync(lambda: phone.say(_tg_text(asked, 14), mine=True))
+    time.sleep(0.9)
+    req = telegram.Request(asked, "text", 1)
+    req.app = "Finder"
+    slot = {}
+    ms.main_sync(lambda: slot.update(i=phone.say(req.render(), buttons=req.buttons())))
+    running = threading.Event()
+    running.set()
+
+    def spin():
+        while running.is_set():
+            time.sleep(0.6)
+            req.frame += 1
+            AppHelper.callAfter(phone.update, slot["i"], req.render(), req.buttons())
+    threading.Thread(target=spin, daemon=True).start()
+    say(p, "user_said", asked.lower(), gap=0.05)
+    p.set_state("thinking")
+    time.sleep(1.0)
+    for tool, args, seconds in (("find_files", {"query": "sales report"}, 1.8),
+                                ("read_file", {"path": "~/Documents/Reports/Sales report Oct 7.pdf"}, 1.8),
+                                ("file_action", {"action": "send", "path": "Sales report Oct 7.pdf"}, 1.4)):
+        req.start_tool(tool, args)
+        p.set_state("working", phrase(tool, args))
+        p.activity_start(tool, args)
+        time.sleep(seconds)
+        req.end_tool(tool, args, "ok")
+        p.activity_end(tool, True)
+    running.clear()
+    req.finished = "done"
+    time.sleep(0.3)
+    ms.main_sync(lambda: phone.update(slot["i"], req.render(), req.buttons()))
+    time.sleep(0.6)
+    ms.main_sync(lambda: phone.say("Here's yesterday's sales report: <b>₹18.4 lakh</b>, up 12% on the week before."))
+    time.sleep(0.7)
+    ms.main_sync(lambda: phone.say("", doc=("Sales report Oct 7.pdf", "1.2 MB · PDF")))
+    p.set_state("speaking")
+    say(p, "assistant_said", "Sent the sales report to your phone.", gap=0.1)
+    time.sleep(1.6)
+    p.set_state("awake")
+    time.sleep(2.6)
+    ms.main_sync(phone.close)
+
+
+@scene("notch-mail", 17)
+def notch_mail_scene(p):
+    """Email, handled: "anything important in my inbox?" - Mint reads and sorts the new mail, drafts the replies
+    (nothing is sent), and the card shows what needs you."""
+    from mint.ui.activity import phrase
+    time.sleep(1.2)
+    threading.Thread(target=_speak_bars, args=(p, 2.2), daemon=True).start()
+    say(p, "user_said", "anything important in my inbox?", gap=0.12)
+    time.sleep(0.4); p.set_state("thinking"); time.sleep(1.0)
+    args = {"action": "triage"}
+    p.set_state("working", phrase("mail", args)); p.activity_start("mail", args)
+    for i, label in enumerate(("Step 1/3: read 24 new emails", "Step 2/3: sort what needs you",
+                               "Step 3/3: draft the replies")):
+        p.progress(i, 3, label); time.sleep(1.3)
+    p.progress(3, 3, "✓ done"); p.activity_end("mail", True); time.sleep(0.4); p.progress(0, 0)
+    _island().show_card({"title": "Needs you", "subtitle": "Inbox · 24 new", "number": 3, "unit": "need a reply",
+                         "icon": "envelope.fill", "tint": "blue",
+                         "items": [{"title": "Nina Sharma", "detail": "Launch plan: final review", "trailing": "draft ready",
+                                    "icon": "person.crop.circle.fill"},
+                                   {"title": "Arjun · Acme", "detail": "A question on invoice #2044",
+                                    "trailing": "draft ready", "icon": "person.crop.circle.fill"},
+                                   {"title": "Electricity bill", "detail": "₹2,340 due Friday", "trailing": "Fri",
+                                    "icon": "bolt.fill"}]}, seconds=7.0)
+    p.set_state("speaking")
+    threading.Thread(target=_speak_bars, args=(p, 3.8), daemon=True).start()
+    say(p, "assistant_said", "Three need you, and the electricity bill is due Friday. The replies are drafted - "
+                             "nothing's sent.", gap=0.12)
+    time.sleep(2.0); p.set_state("awake"); time.sleep(3.0)
+
+
 def tour(p):
     try:
         time.sleep(1.8)
@@ -1940,7 +2250,8 @@ def tour(p):
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
                  notch_agents_scene, notch_checks_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch,
-                 notch_greet, notch_error, notch_drop, notch_progress, notch_compose, notch_rim, notch_pals) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                 notch_greet, notch_error, notch_drop, notch_progress, notch_compose, notch_rim, notch_pals,
+                 telegram_scene, notch_mail_scene) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
                      island_teach, island_video, island_download, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,

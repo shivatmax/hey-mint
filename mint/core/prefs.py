@@ -224,6 +224,9 @@ DEFAULTS: dict = {
     # The voice session declares only the everyday tools; the rest are found with find_tools and run with
     # use_tool (tool_diet.py). False = declare every tool, as before (takes effect at Mint's next start).
     "tool_diet": True,
+    # The Settings window: False shows each page's essentials only; True also shows the technical rows (a custom
+    # wake phrase, echo cancellation, model providers…). Settings ▸ General ▸ Show advanced settings, or Show more.
+    "settings_advanced": False,
 }
 
 THEMES = ("mint", "blue", "aurora", "sunset", "rose", "mono")

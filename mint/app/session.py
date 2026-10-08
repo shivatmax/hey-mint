@@ -709,7 +709,7 @@ class Mint:
         from mint.voice import dictation
         from mint.voice import wake_train
         if wake_train.capturing():
-            wake_train.feed(pcm)                  # Settings ▸ Voice & wake word is recording a take
+            wake_train.feed(pcm)                  # Settings ▸ Microphone & voice is recording a take
             return
         if dictation.capturing():
             # The user is dictating text (dictation.py): the words are theirs to type, not a

@@ -84,95 +84,84 @@ SHORTCUTS = (
     ("clipboard", "doc.on.clipboard.fill", "Open the clipboard", "Everything you copied, and every screenshot.", False),
 )
 
-# What I can do: (symbol, colour, title, text, things to say, (you say, Mint answers, what happens)). Each one is
-# shown as a little live demo drawn here - the words typed in, Mint's answer, its steps ticking off - so the tour
-# needs no clips (it works offline and always looks sharp).
+# The tour: each feature with a real clip of Mint doing it (recorded for the guide by guide/make_scenes.py and
+# made small for here: media/tour/NAME.mp4 + .jpg, shipped with the app; the guide site is the fallback).
 TOUR = (
     ("cursorarrow.click.2", BLUE, "Talk, and it's done",
-     "Ask in plain words. I open apps, click, type and fill things in while you watch, and stop the moment you say “stop”.",
-     ("reply to Sam's email", "open my last invoice"),
-     ("Reply to Sam: Thursday at 3 works.", "On it - writing the reply in Mail.",
-      ("Opened Mail and found Sam's email", "Wrote: “Thursday at 3 works for me.”", "Ready to send - just say “send”"))),
+     "Ask in plain words. The notch shows what I'm doing, step by step, and I answer when it's done.",
+     ("what's on my calendar today?", "reply to Sam's email"), "notch"),
     ("globe", SKY, "Web tasks in seconds",
-     "Flights, forms, prices, a page to dig through - done in a browser tab in seconds, with what the page shows at the end.",
-     ("find a flight to Goa next Friday", "fill in this form"),
-     ("Find the cheapest flight to Goa next Friday.", "Searching in a background tab.",
-      ("Opened Google Flights", "Friday, 1 adult, economy", "Cheapest: 6:40 am nonstop, ₹4,320"))),
+     "Flights, forms, prices: I do it in a browser tab of my own while you keep working.",
+     ("find one-way flights to London on Nov 20",), "web-goal"),
     ("paperplane.fill", (0.16, 0.62, 0.93), "Telegram, from your phone",
-     "Message me on Telegram from anywhere: ask for a file, a summary, or to start something on your Mac. I answer there.",
-     ("send me the sales report", "is my Mac awake?"),
-     ("Send me yesterday's sales report.", "Found it in Documents - sending it to you.",
-      ("Found Sales report.pdf", "Sent to you on Telegram"))),
+     "Message me on Telegram from anywhere. You see every step as I work, and files come back to the chat.",
+     ("send me yesterday's sales report", "is my Mac awake?"), "telegram"),
     ("video.fill", ORANGE, "Google Meet with me",
-     "Start a Google Meet from your phone, Telegram or email: I join, share the screen, and you talk to me while I work.",
-     ("start a Google Meet", "end the call"),
-     ("Start a Google Meet and share my screen.", "Starting the call - the link is on your phone.",
-      ("Meet started", "Screen shared", "Listening in the call"))),
+     "Start a Meet and the link goes to your phone. Join, and talk to me in the call while I work on the Mac.",
+     ("start a Google Meet",), "notch-meet"),
     ("envelope.fill", PINK, "Email, handled",
-     "I read and sort your mail and draft the replies. You can email me a task from anywhere, and I write back when it's done.",
-     ("anything important in my inbox?", "draft a reply"),
-     ("Anything important in my inbox?", "Three need you - and one bill is due Friday.",
-      ("Read 24 new emails", "3 need a reply, 1 bill due Friday", "Drafts ready - nothing sent"))),
+     "I read and sort the new mail and draft the replies. Nothing is sent until you say so.",
+     ("anything important in my inbox?", "draft a reply to Nina"), "notch-mail"),
     ("arrow.down.circle.fill", (1.0, 0.36, 0.33), "Downloads from YouTube",
-     "Say or paste a link: I save the video in the best quality - from YouTube and about 1,800 other sites - into Downloads.",
-     ("download this video", "save it in 4K"),
-     ("Download this YouTube video.", "Downloading - I'll tell you when it's ready.",
-      ("Found it: 1080p, 12 min", "Downloading… 100%", "Saved to Downloads"))),
+     "Say “download this video” on any page: YouTube and about 1,800 other sites, saved to Downloads.",
+     ("download the video on this page", "save it in 4K"), "island-download"),
     ("square.stack.3d.down.right", VIOLET, "Several things at once",
      "Long jobs run in the background while we keep talking. Each one tells you when it's done.",
-     ("research standing desks", "also tidy my Downloads"),
-     ("Research standing desks - and tidy my Downloads.", "Both started. Keep talking, I'll report back.",
-      ("Research: 6 sources read", "Downloads: 41 files sorted", "Both done"))),
+     ("find flights to Goa", "also tidy my Downloads"), "notch-jobs"),
     ("person.3.fill", (0.24, 0.72, 0.62), "A team of agents",
-     "For bigger jobs I hand parts to helper agents - Astra researches, Sage writes, another checks - and bring it together.",
-     ("ask Astra to research this", "write a brief from it"),
-     ("Write me a one-page brief on electric scooters.", "Astra researches, then I write it up.",
-      ("Astra: 9 sources, the key numbers", "One-page brief written", "Saved to Notes"))),
+     "For bigger jobs I hand parts to helper agents. Astra researches, Sage writes, and they report back.",
+     ("ask Astra to research this", "write a brief from it"), "agent"),
     ("chevron.left.forwardslash.chevron.right", INK, "Claude Code in the notch",
-     "Claude Code and Codex, live: every step, the diff and the tests. Allow or Deny from the notch or your phone.",
-     ("what is Claude Code doing?", "tell Claude to push"),
-     ("What is Claude Code doing?", "Fixing the invoice tests - it's on try 2.",
-      ("Edited invoice.ts", "npm test: 48 passed", "Waiting for your OK to push"))),
-    ("checkmark.shield", OK, "Nothing deleted without your yes",
-     "Before anything is deleted, overwritten or changed, I show exactly what and wait for your answer.",
-     ("delete last year's invoices",),
-     ("Delete last year's invoices.", "That's 38 files, 210 MB. Move them to the Trash?",
-      ("Listed all 38 files", "Waiting for your yes"))),
+     "Claude Code and Codex, live: every step, the diff and the tests. Allow or Deny right from the notch.",
+     ("what is Claude Code doing?", "tell Claude to push"), "notch-agents"),
+    ("checkmark.shield", OK, "Asks before deleting",
+     "Before anything is deleted or overwritten, I show exactly what and wait for your answer.",
+     ("delete last year's invoices",), "notch-guard"),
     ("calendar", BLUE, "Your day at a glance",
-     "Your next meetings, reminders and what's playing, right at the notch.",
-     ("what's on my calendar today?", "put lunch with Sam on Friday"),
-     ("What's on my calendar today?", "Three meetings - the design review at 11 is the big one.",
-      ("11:00  Design review", "13:00  Lunch with Sam", "16:30  Ship the beta build"))),
+     "The weather, today's meetings, reminders and the headlines, in one card.",
+     ("what's on my calendar today?", "put lunch with Sam on Friday"), "island-schedule"),
     ("record.circle", (1.0, 0.36, 0.33), "Meeting notes",
      "On a call I turn into a recorder. When it ends you get the notes, the decisions and who does what.",
-     ("record this meeting",),
-     ("Record this meeting.", "Recording. You'll get the notes when it ends.",
-      ("42 minutes recorded", "3 decisions, 5 to-dos with names", "Notes saved"))),
+     ("record this meeting", "summarize the call so far"), "island-meeting"),
     ("mic.fill", PINK, "Dictate anywhere",
      "Hold the dictate key, talk, let go. Clean, punctuated text lands wherever your cursor is.",
-     ("um, looks good, no wait, ship it Thursday",),
-     ("um, looks good, no wait… ship it Thursday", "Typed where your cursor is:",
-      ("“Looks good - ship it Thursday.”",))),
+     ("um, looks good, no wait, ship it Thursday",), "dictation"),
     ("doc.on.clipboard", VIOLET, "A clipboard that remembers",
      "Everything you copy and every screenshot, kept. Pick several and paste them in order.",
-     ("open my clipboard",),
-     ("Open my clipboard.", "Here's everything you copied today.",
-      ("12 things, 4 screenshots", "Pick several, paste them in order"))),
+     ("paste the last 5 screenshots in the chat", "open my clipboard"), "clipboard-window"),
     ("doc.richtext", ORANGE, "Documents",
      "Copy the text off anything, turn a table into Excel, or a PDF into a Word document in another language.",
-     ("make an Excel of this table",),
-     ("Make an Excel of this table.", "Done - it's in Downloads.",
-      ("Read the table on screen", "12 rows, 5 columns", "Table.xlsx saved"))),
+     ("make an Excel of this table", "convert this PDF to a Hindi doc"), "convert"),
     ("music.note", GREEN, "Music",
-     "Say a song, an artist or a mood: I play it on Spotify or Music, and the player sits right at the notch.",
-     ("play something calm", "next song"),
-     ("Play something calm for focus.", "Playing Deep Focus.",
-      ("Spotify: Deep Focus", "The player is in the notch"))),
+     "Say a song, an artist or a mood. I play it, and the notch becomes the player.",
+     ("play something calm", "next song"), "notch-music"),
     ("photo.fill", (0.95, 0.45, 0.75), "Pictures from words",
-     "Describe a picture and I make it: an icon idea, an illustration, an image for a slide.",
-     ("make a cute mint-green robot icon",),
-     ("Make a cute mint-green robot icon.", "Here are a few - pick the one you like.",
-      ("4 pictures made", "Saved to Pictures"))),
+     "Describe a picture and I make it, then change it as you ask.",
+     ("a lighthouse on a cliff at sunset", "add a small sailing boat"), "image-card"),
+    ("magnifyingglass", BLUE, "Find your files",
+     "Ask for files in your own words. They open in the notch, ready to drag anywhere.",
+     ("find my launch files",), "notch-search"),
+    ("tray.and.arrow.down", (0.24, 0.72, 0.62), "Drop files on me",
+     "Drag files to the notch: they wait on the Shelf, and I offer what fits.",
+     ("summarize this", "send these with AirDrop"), "notch-drop"),
+    ("character.bubble", SKY, "Translate in place",
+     "Text in another language is translated right where it is on screen.",
+     ("translate what's on my screen",), "translate"),
+    ("film", ORANGE, "Edit videos by voice",
+     "Trim, reframe for Reels, add captions, cut the silences. I check the result before I say it's done.",
+     ("make it vertical and add captions", "cut the first 10 seconds"), "video-edit"),
+    ("play.rectangle.fill", (1.0, 0.36, 0.33), "Watch a video for you",
+     "Give me a video and I watch it: the key moments, what was said, and a summary.",
+     ("what's this video about?", "summarize this talk"), "island-video"),
+    ("graduationcap", VIOLET, "Teach me a task",
+     "Show me once while I watch. Next time, just ask and I'll do it the same way.",
+     ("watch how I do this", "do my expense report"), "island-teach"),
+    ("bell.badge", ORANGE, "Let me know when…",
+     "I keep an eye on downloads, uploads, long commands and Claude sessions, and tell you when they finish.",
+     ("tell me when the download finishes",), "island-trackers"),
+    ("scope", PINK, "Point at things on screen",
+     "I box, highlight or point at what you asked about, with a note beside it.",
+     ("where's the deadline in this PDF?",), "marks"),
 )
 
 TRY = (
@@ -1692,47 +1681,62 @@ class Onboarding:
             "WHAT I CAN DO", {AppKit.NSKernAttributeName: 1.6, AppKit.NSForegroundColorAttributeName: _ns(DEEP),
                               AppKit.NSFontAttributeName: _font(12, AppKit.NSFontWeightBold)}))
         items.append(head)
+        # The features, in a list that scrolls (there are more than fit).
+        top, bottom = 96, H - 96
+        scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(22, top, 272, bottom - top))
+        scroll.setDrawsBackground_(False)
+        scroll.setHasVerticalScroller_(True)
+        scroll.setAutohidesScrollers_(True)
+        scroll.setScrollerStyle_(AppKit.NSScrollerStyleOverlay)
+        step, tall = 36, 32
+        doc = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 262, len(TOUR) * step + 6))
+        scroll.setDocumentView_(doc)
+        page.addSubview_(scroll)
+        self.tour_scroll = scroll
         self.tour_items = []
-        # The list fits between the heading and Back, however many features there are.
-        step = min(38.0, (H - 96 - 78) / len(TOUR))
-        tall = min(34.0, step - 3)
-        for i, (symbol, _rgb, title, _text, _say, _demo) in enumerate(TOUR):
-            row = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(28, 96 + i * step, 256, tall))
+        for i, (symbol, _rgb, title, _text, _say, _clip) in enumerate(TOUR):
+            row = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(6, 2 + i * step, 250, tall))
             row.setWantsLayer_(True)
             row.layer().setCornerRadius_(10)
             icon = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(12, (tall - 16) / 2, 16, 16))
             icon.setImage_(gfx.symbol(symbol, 12))
             row.addSubview_(icon)
-            label = self._label(row, title, 38, (tall - 18) / 2, 210, size=13, weight=AppKit.NSFontWeightMedium)
+            label = self._label(row, title, 38, (tall - 18) / 2, 206, size=13, weight=AppKit.NSFontWeightMedium)
             row.icon, row.text = icon, label
             row.on_click = lambda n=i: self._show_feature(n, by_hand=True)
             row.on_hover = lambda over, r=row: getattr(r, "chosen", False) or r.layer().setBackgroundColor_(
                 _cg(WHITE, 0.45 if over else 0.0))
-            page.addSubview_(row)
+            doc.addSubview_(row)
             self.tour_items.append(row)
-            items.append((row, 0.0, 1.0))
-        # The demo stage: a little live scene per feature (_show_feature draws it).
+        items.append((scroll, 0.0, 1.0))
+        # The stage: the feature's clip (its poster first, so there is never an empty frame).
         frame = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(316, 70, 624, 366))
         frame.setWantsLayer_(True)
         frame.layer().setCornerRadius_(18)
         frame.layer().setMasksToBounds_(True)
-        frame.layer().setBackgroundColor_(_cg((0.97, 0.98, 1.0)))
+        frame.layer().setBackgroundColor_(_cg((0.93, 0.92, 0.98)))      # the clips' own backdrop
         frame.layer().setBorderColor_(_cg(WHITE, 0.95))
         frame.layer().setBorderWidth_(3)
-        self.stage_tint = Quartz.CAGradientLayer.layer()
-        self.stage_tint.setFrame_(frame.bounds())
-        self.stage_tint.setStartPoint_(Quartz.CGPointMake(0, 0))
-        self.stage_tint.setEndPoint_(Quartz.CGPointMake(1, 1))
-        frame.layer().addSublayer_(self.stage_tint)
         page.addSubview_(frame)
-        self.stage = _OnbFlipped.alloc().initWithFrame_(frame.bounds())
-        self.stage.setWantsLayer_(True)
-        frame.addSubview_(self.stage)
+        self.poster = AppKit.NSImageView.alloc().initWithFrame_(frame.bounds())
+        self.poster.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
+        frame.addSubview_(self.poster)
+        video = AppKit.NSView.alloc().initWithFrame_(frame.bounds())
+        video.setWantsLayer_(True)
+        frame.addSubview_(video)
+        import AVFoundation
+        self.player = AVFoundation.AVPlayer.alloc().init()
+        self.player.setMuted_(True)
+        self.player_layer = AVFoundation.AVPlayerLayer.playerLayerWithPlayer_(self.player)
+        self.player_layer.setFrame_(video.bounds())
+        self.player_layer.setVideoGravity_(AVFoundation.AVLayerVideoGravityResizeAspect)
+        video.layer().addSublayer_(self.player_layer)
+        self.player_end = None
         self.video_frame = frame
-        self.counter = self._pill(frame, "", 624 - 78, 16, 62, 26, lambda: None, primary=False, size=11)
+        self.counter = self._pill(frame, "", 624 - 78, 14, 64, 26, lambda: None, primary=False, size=11)
         self.counter.glass.removeFromSuperview()
         self.counter.glass = None
-        self.counter.layer().setBackgroundColor_(_cg(INK, 0.55))
+        self.counter.layer().setBackgroundColor_(_cg(INK, 0.62))
         self.counter.label.setTextColor_(_ns(WHITE))
         self.counter.on_click, self.counter.on_hover = None, None
         items.append((frame, 0.08, 0.97))
@@ -1747,12 +1751,13 @@ class Onboarding:
         return items
 
     def _show_feature(self, index: int, by_hand: bool = False) -> None:
+        import AVFoundation
         if by_hand:
             self.tour_auto = False
         index %= len(TOUR)
         self.tour_index = index
         self.tour_token = getattr(self, "tour_token", 0) + 1
-        symbol, rgb, title, text, say, demo = TOUR[index]
+        symbol, rgb, title, text, say, clip = TOUR[index]
         for i, row in enumerate(self.tour_items):
             on = i == index
             row.chosen = on
@@ -1760,12 +1765,34 @@ class Onboarding:
             row.text.setTextColor_(_ns(INK if on else DIM))
             row.text.setFont_(_font(13, AppKit.NSFontWeightSemibold if on else AppKit.NSFontWeightMedium))
             row.icon.setContentTintColor_(_ns(rgb if on else DIM))
+        current = self.tour_items[index]
+        current.scrollRectToVisible_(AppKit.NSInsetRect(current.bounds(), 0, -40))
         fade = Quartz.CATransition.animation()
         fade.setType_(Quartz.kCATransitionFade)
         fade.setDuration_(0.3)
         self.video_frame.layer().addAnimation_forKey_(fade, "swap")
-        self.stage_tint.setColors_([_cg(_mix(rgb, WHITE, 0.82)), _cg(_mix(rgb, WHITE, 0.93)), _cg((0.98, 0.98, 1.0))])
-        ends = self._demo(symbol, rgb, title, demo)
+        poster = _media(clip, "jpg")
+        self.poster.setImage_(None)
+        if poster.isFileURL():
+            self.poster.setImage_(AppKit.NSImage.alloc().initWithContentsOfURL_(poster))
+        else:
+            def fetch(url=poster, want=self.tour_token):
+                image = AppKit.NSImage.alloc().initWithContentsOfURL_(url)
+                if image is not None:
+                    AppHelper.callAfter(lambda: self.tour_token == want and self.poster.setImage_(image))
+            threading.Thread(target=fetch, daemon=True, name="tour-poster").start()
+        item = AVFoundation.AVPlayerItem.playerItemWithURL_(_media(clip, "mp4"))
+        center = AppKit.NSNotificationCenter.defaultCenter()
+        if self.player_end is not None:
+            center.removeObserver_(self.player_end)
+        token = self.tour_token
+        self.player_end = center.addObserverForName_object_queue_usingBlock_(
+            AVFoundation.AVPlayerItemDidPlayToEndTimeNotification, item, AppKit.NSOperationQueue.mainQueue(),
+            lambda note: self._clip_ended(token))
+        self.player.replaceCurrentItemWithPlayerItem_(item)
+        self.player.play()
+        # Long clips: the tour moves on after 18 s even if the clip runs longer.
+        AppHelper.callLater(18.0, lambda: self._clip_ended(token, cut=True))
         self.counter.label.setStringValue_(f"{index + 1} of {len(TOUR)}")
         self._center(self.counter)
         self.feature_title.setStringValue_(title)
@@ -1786,98 +1813,16 @@ class Onboarding:
             x += width + 8
         for view in (self.feature_title, self.feature_text):
             _enter(view, 0.0, rise=8)
-        token = self.tour_token
-        AppHelper.callLater(ends + 2.8, lambda: self._demo_ended(token))
 
-    def _demo(self, symbol, rgb, title, demo) -> float:
-        """Draw one feature's scene on the stage: what you say (typed in, on the right), Mint's answer (on the left,
-        by its face), then its steps ticking off one by one. Returns when the last step lands (seconds)."""
-        you, answer, steps = demo
-        stage = self.stage
-        for view in list(stage.subviews()):
-            view.removeFromSuperview()
-        sw = stage.frame().size.width
-        quick = _reduce_motion()
-        # Header: the feature's tile and name.
-        tile = self._tile(stage, symbol, rgb, 22, 18, size=34)
-        name = self._label(stage, title, 66, 24, 380, size=14, weight=AppKit.NSFontWeightSemibold, rgb=INK)
-        _enter(tile, 0.0, rise=0, scale=0.7)
-        _enter(name, 0.05, rise=6)
-        # You: a blue bubble on the right.
-        font = _font(14, AppKit.NSFontWeightMedium)
-        text_w = min(380.0, AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            you, {AppKit.NSFontAttributeName: font}).size().width + 4)
-        lines = 1 if text_w < 380 else 2
-        bw, bh = text_w + 32, 22 * lines + 18
-        bubble = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(sw - bw - 24, 72, bw, bh))
-        bubble.setWantsLayer_(True)
-        bubble.layer().setBackgroundColor_(_cg(SKY))
-        bubble.layer().setCornerRadius_(min(18, bh / 2))
-        bubble.layer().setShadowColor_(_cg(SKY))
-        bubble.layer().setShadowOpacity_(0.25)
-        bubble.layer().setShadowRadius_(10)
-        bubble.layer().setShadowOffset_(Quartz.CGSizeMake(0, -3))
-        self._label(bubble, you, 16, 9, text_w, size=14, weight=AppKit.NSFontWeightMedium, rgb=WHITE, lines=lines)
-        stage.addSubview_(bubble)
-        t = 0.25
-        _enter(bubble, t, rise=12, scale=0.92)
-        # Mint: its face and a glass bubble on the left.
-        y = 72 + bh + 18
-        face = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(24, y + 2, 34, 34))
-        face.setWantsLayer_(True)
-        ball = Quartz.CAGradientLayer.layer()
-        ball.setFrame_(Quartz.CGRectMake(0, 0, 34, 34))
-        ball.setCornerRadius_(17)
-        ball.setColors_([_cg(_mix(_mint(), WHITE, 0.25)), _cg(_mint())])
-        face.layer().addSublayer_(ball)
-        for ex in (12, 22):
-            eye = Quartz.CALayer.layer()
-            eye.setFrame_(Quartz.CGRectMake(ex - 2, 12, 4, 8))
-            eye.setCornerRadius_(2)
-            eye.setBackgroundColor_(_cg(INK))
-            face.layer().addSublayer_(eye)
-        stage.addSubview_(face)
-        a_w = min(420.0, AppKit.NSAttributedString.alloc().initWithString_attributes_(
-            answer, {AppKit.NSFontAttributeName: font}).size().width + 4)
-        a_lines = 1 if a_w < 420 else 2
-        reply = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(68, y, a_w + 32, 22 * a_lines + 18))
-        reply.setWantsLayer_(True)
-        reply.layer().setBackgroundColor_(_cg(WHITE, 0.92))
-        reply.layer().setCornerRadius_(min(18, (22 * a_lines + 18) / 2))
-        reply.layer().setBorderColor_(_cg(rgb, 0.18))
-        reply.layer().setBorderWidth_(1)
-        self._label(reply, answer, 16, 9, a_w, size=14, weight=AppKit.NSFontWeightMedium, rgb=INK, lines=a_lines)
-        stage.addSubview_(reply)
-        t = 0.25 if quick else 1.05
-        _enter(face, t, rise=0, scale=0.6)
-        _enter(reply, t + 0.08, rise=10, scale=0.94)
-        # The steps, ticking off.
-        y += 22 * a_lines + 18 + 18
-        last = t
-        for n, step in enumerate(steps):
-            row = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(68, y + n * 34, sw - 68 - 24, 28))
-            row.setWantsLayer_(True)
-            row.layer().setBackgroundColor_(_cg(WHITE, 0.55))
-            row.layer().setCornerRadius_(14)
-            final = n == len(steps) - 1
-            mark = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(8, 6, 16, 16))
-            mark.setImage_(gfx.symbol("checkmark.circle.fill", 14))
-            mark.setContentTintColor_(_ns(OK if final else rgb))
-            row.addSubview_(mark)
-            self._label(row, step, 32, 5, sw - 68 - 24 - 44, size=13,
-                        weight=AppKit.NSFontWeightSemibold if final else AppKit.NSFontWeightRegular,
-                        rgb=INK if final else DIM)
-            stage.addSubview_(row)
-            last = t + 0.75 + n * (0.12 if quick else 0.6)
-            _enter(row, last, rise=8)
-        return last + 0.45
-
-    def _demo_ended(self, token: int) -> None:
-        """The scene has played: on to the next feature while the tour runs by itself."""
+    def _clip_ended(self, token: int, cut: bool = False) -> None:
+        """The clip has played: on to the next feature while the tour runs by itself, else play it again."""
         if self.view is None or PAGES[self.page] != "tour" or token != getattr(self, "tour_token", None):
             return
         if self.tour_auto and self.tour_index < len(TOUR) - 1:
             self._show_feature(self.tour_index + 1)
+        elif not cut:
+            self.player.seekToTime_(_zero())
+            self.player.play()
 
     # done
 

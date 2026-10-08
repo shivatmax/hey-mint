@@ -1,6 +1,6 @@
 """Email remote control: email Mint a request from anywhere, get the answer back by email.
 
-For when Telegram isn't at hand. Two ways in (Settings ▸ Accounts & keys ▸ Email control ▸ "Read mail with";
+For when Telegram isn't at hand. Two ways in (Settings ▸ Accounts & connections ▸ Email control ▸ "Read mail with";
 "auto", the default, takes IMAP whenever the address has an app password in the Keychain):
   - IMAP + SMTP with an app password (in the macOS Keychain, never shown again - the user pastes it, Mint never
     types one). The fast way: a second connection sits in IMAP IDLE (re-issued every IDLE_RENEW, before Gmail's
@@ -2001,7 +2001,7 @@ class Channel:
         self.audit("blocked", f"{name}: {why}", "read-only")
         return (f"NOT DONE (read-only by email): {why}. This request came by email and email control is read-only, "
                 "so nothing is sent, deleted or bought. Tell the user in one sentence; they can do it at the Mac, or "
-                "turn read-only off in Settings ▸ Accounts & keys ▸ Email control.")
+                "turn read-only off in Settings ▸ Accounts & connections ▸ Email control.")
 
     # guard questions by email ---------------------------------------------------------------------
 

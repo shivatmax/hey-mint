@@ -104,6 +104,7 @@ find "$PYHOME" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 # --- Mint's code ----------------------------------------------------------------------------
 rsync -a --exclude '__pycache__' mint "$RES/app/"
+[[ -d media/tour ]] && rsync -a media "$RES/app/"          # the welcome tour's clips (media/tour)
 cp custom.example.json .env.example "$RES/app/"
 echo "$VERSION-$(git rev-parse --short HEAD 2>/dev/null || date +%s)" > "$RES/app/BUILD_ID"
 

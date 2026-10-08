@@ -51,14 +51,14 @@ def test_the_key_is_checked_with_google(monkeypatch, answer, verdict):
 
 def test_connect_is_a_page_and_the_tour_fits():
     assert onboarding.PAGES.index("connect") == onboarding.PAGES.index("about") + 1
-    # The list of features has to fit the page between its heading and Back (rows at least 26 pt tall).
-    assert 10 <= len(onboarding.TOUR) <= (onboarding.H - 96 - 78) // 26
+    # The feature list scrolls (8 Oct: 25 features), so it no longer has to fit the page; it must not be thin.
+    assert len(onboarding.TOUR) >= 10
     titles = {t[2] for t in onboarding.TOUR}
     assert {"Telegram, from your phone", "Google Meet with me", "Email, handled", "Downloads from YouTube",
-            "A team of agents", "Nothing deleted without your yes"} <= titles
-    for symbol, rgb, title, text, say, (you, answer, steps) in onboarding.TOUR:
-        assert symbol and len(rgb) == 3 and title and text and say and you and answer and steps
-        assert "Priya" not in repr((title, text, say, you, answer, steps))
+            "A team of agents", "Asks before deleting"} <= titles
+    for symbol, rgb, title, text, say, clip in onboarding.TOUR:      # 8 Oct: each feature plays its own clip
+        assert symbol and len(rgb) == 3 and title and text and say and clip
+        assert "Priya" not in repr((title, text, say, clip))
 
 
 def test_a_refused_key_is_not_saved_when_leaving(monkeypatch):

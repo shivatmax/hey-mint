@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.6 (2026-10-08)
+
+- **Simpler Settings:** 11 pages instead of 14, and only the everyday settings until you turn on "Show advanced
+  settings" (General) or press "Show more" at the bottom of a page.
+  - **Microphone & voice** (was Voice & wake word + Audio): one Test microphone button (microphone, wake word and
+    voice lock in one check), one Train my voice (it trains both the wake word and the voice lock), the voice lock,
+    sensitivity, microphone and speaker, and one "During calls" choice (keep listening for the wake word / stop
+    listening until the call ends / do nothing special). A different wake phrase, strictness, echo cancellation and
+    the call apps list are under Show more.
+  - **Shortcuts** now holds Apple Shortcuts too; **Accounts & connections** holds keys, accounts and connectors.
+    Links to the old pages still land on the right place.
+
+- **What Mint can do, with real clips:** the tour plays a clip of Mint actually doing each thing (25 features,
+  up from 17: files, drop, translate, video editing, watching a video, teaching, trackers and pointing added), from
+  `media/tour` shipped in the app. New guide clips: Telegram from the phone, and the inbox checked in the notch.
+- **Codex's model:** Settings ▸ Models & agents ▸ Codex has a model menu: **Auto** (whatever model you picked in
+  Codex itself - shown, e.g. "Auto (GPT-6.1-Sol)") or any model Codex offers your account, read from Codex's own
+  list. New installs start on Auto.
+
 ## 0.6.5 (2026-10-08)
 
 - **"Sleep" just sleeps:** "sleep", "for now sleep", "go sleep", "so jao" are caught on the Mac and Mint goes to

@@ -42,6 +42,31 @@ MIN_VERSION = (0, 155)       # older CLIs answer "gpt-6-luna is not supported wh
 _versions: dict[str, tuple] = {}
 TIME_LIMIT = 25 * 60
 EFFORT = {"none": "low", "low": "low", "medium": "medium"}   # Codex has no "none"
+AUTO = "auto"                # the agent's model "auto": whatever model Codex itself is set to (its config.toml)
+CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
+def models() -> list[tuple[str, str]]:
+    """[(slug, name)] Codex offers this account, best first - from the list Codex itself keeps
+    (~/.codex/models_cache.json, refreshed by Codex). [] when Codex hasn't run here yet."""
+    try:
+        data = json.loads((CODEX_HOME / "models_cache.json").read_text())
+        rows = data.get("models") if isinstance(data, dict) else data
+        rows = [m for m in rows or [] if isinstance(m, dict) and m.get("slug") and m.get("visibility") != "hide"]
+    except (OSError, ValueError, AttributeError):
+        return []
+    rows.sort(key=lambda m: (m.get("priority") if isinstance(m.get("priority"), (int, float)) else 99))
+    return [(str(m["slug"]), str(m.get("display_name") or m["slug"])) for m in rows]
+
+
+def selected() -> str:
+    """The model Codex is set to use (config.toml "model"), or '' (Codex's own default)."""
+    try:
+        import tomllib
+        with open(CODEX_HOME / "config.toml", "rb") as fh:
+            return str(tomllib.load(fh).get("model") or "")
+    except (OSError, ValueError, ImportError):
+        return ""
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".next", "dist-cache"}
 
 
@@ -135,6 +160,9 @@ async def run(hub, run, folder: Path) -> tuple[str, str]:
     folder.mkdir(parents=True, exist_ok=True)
     before = _snapshot(folder)
     model = (run.agent.get("models") or ["gpt-6-luna"])[0]
+    auto = model == AUTO                       # Codex's own choice: no -m, so it runs what the user picked there
+    if auto:
+        model = selected() or "Codex's default"
     prompt = build_prompt(run.task, run.context, folder)
     if getattr(run, "thread_id", None) and run.inbox:
         # A follow-up to a finished run: continue the same Codex session.
@@ -149,8 +177,8 @@ async def run(hub, run, folder: Path) -> tuple[str, str]:
     while True:
         out_file.unlink(missing_ok=True)
         args = [exe, "exec", "--json", "--skip-git-repo-check", "-s", "workspace-write", "-C", str(folder),
-                "-m", model, "-c", f'model_reasoning_effort="{EFFORT.get(run.effort, "low")}"',
-                "-o", str(out_file)]
+                *([] if auto else ["-m", model]),
+                "-c", f'model_reasoning_effort="{EFFORT.get(run.effort, "low")}"', "-o", str(out_file)]
         if getattr(run, "thread_id", None):
             args += ["resume", run.thread_id]
         args.append(prompt)

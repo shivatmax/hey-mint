@@ -625,7 +625,7 @@ class Bridge:
                     # Switched on but the token is gone (seen: a reinstall overwrote .env): say so, don't sit silent.
                     self._said_no_token = True
                     self.error = "Remote control is on but there is no bot token - add it again in Settings."
-                    print("  [telegram: switched on, but no bot token - add it in Settings ▸ Accounts & keys]",
+                    print("  [telegram: switched on, but no bot token - add it in Settings ▸ Accounts & connections]",
                           flush=True)
                 if self.bot is not None:
                     self.bot.close()
@@ -678,8 +678,8 @@ class Bridge:
                     log.exception("telegram update failed")
 
     def _trouble(self, error: ApiError) -> None:
-        words = {401: "Telegram rejected the bot token - check it in Settings ▸ Accounts & keys.",
-                 404: "Telegram rejected the bot token - check it in Settings ▸ Accounts & keys.",
+        words = {401: "Telegram rejected the bot token - check it in Settings ▸ Accounts & connections.",
+                 404: "Telegram rejected the bot token - check it in Settings ▸ Accounts & connections.",
                  409: "Another program is reading this bot's messages (a webhook or a second copy of Mint)."}
         message = words.get(error.code, str(error))
         if message != self.error:
@@ -1851,7 +1851,7 @@ class Bridge:
         self.audit("blocked", f"{name}: {why}", "read-only")
         return (f"NOT DONE (read-only from Telegram): {why}. This request came from the user's phone and remote "
                 "control is read-only, so nothing is sent, deleted or bought. Tell the user in one sentence; they "
-                "can do it at the Mac, or turn read-only off in Settings ▸ Accounts & keys ▸ Telegram.")
+                "can do it at the Mac, or turn read-only off in Settings ▸ Accounts & connections ▸ Telegram.")
 
     # events from the session -----------------------------------------------------------------
 

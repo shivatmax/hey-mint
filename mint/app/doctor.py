@@ -110,7 +110,7 @@ def check_key():
     have = gemini_keys.keys()
     if not have:
         return (BAD, "not set",
-                "paste it in the welcome window or Settings ▸ Accounts & keys (free at aistudio.google.com/apikey)")
+                "paste it in the welcome window or Settings ▸ Accounts & connections (free at aistudio.google.com/apikey)")
     env, key = have[0]
     where = ".env" if _in_env_file(env) else "the environment"
     more = f", key 2 {_mask(have[1][1])}" if len(have) > 1 else ""
@@ -119,7 +119,7 @@ def check_key():
     if verdict == "offline":
         return WARN, f"{shown}; couldn't reach Google to check it", "check the internet connection, then run this again"
     if verdict != "ok":
-        return BAD, f"{shown}; {words}", "paste a new key in Settings ▸ Accounts & keys"
+        return BAD, f"{shown}; {words}", "paste a new key in Settings ▸ Accounts & connections"
     try:
         loose = _env_file().exists() and _env_file().stat().st_mode & 0o077
     except OSError:
@@ -347,7 +347,7 @@ def check_telegram():
     if not prefs.get("telegram_enabled"):
         return OK, "off", ""
     if not os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():          # telegram.TOKEN_ENV
-        return BAD, "on, but there is no bot token", "Settings ▸ Accounts & keys ▸ Telegram remote control"
+        return BAD, "on, but there is no bot token", "Settings ▸ Accounts & connections ▸ Telegram remote control"
     return OK, "on" + (" (read-only)" if prefs.get("telegram_read_only") else ""), ""
 
 
@@ -356,7 +356,7 @@ def check_email():
     if not prefs.get("email_enabled"):
         return OK, "off", ""
     if not str(prefs.get("email_address") or "").strip():
-        return WARN, "on, but no address is set", "Settings ▸ Accounts & keys ▸ Email control"
+        return WARN, "on, but no address is set", "Settings ▸ Accounts & connections ▸ Email control"
     return OK, "on" + (" (read-only)" if prefs.get("email_read_only") else ""), ""
 
 

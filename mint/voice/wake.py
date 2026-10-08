@@ -135,7 +135,7 @@ class MintWake:
                     break
         if not models:
             raise RuntimeError("no usable wake word model (models/hey_mint.json is missing or broken)")
-        # Settings ▸ Voice & wake word ▸ Sensitivity: "high" lowers every bar - for a voice or accent the
+        # Settings ▸ Microphone & voice ▸ Sensitivity: "high" lowers every bar - for a voice or accent the
         # models (built from the Mac's own voices, or the user's few takes) catch only now and then.
         from mint.core import prefs
         shift = {"high": -0.15, "low": 0.05}.get(str(prefs.get("wake_sensitivity") or "normal"), 0.0)
