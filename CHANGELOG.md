@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 (2026-10-08)
+
+- **"Hey Mint" works during calls:** in Google Meet, Zoom, FaceTime and other call apps Mint used to let go of the
+  microphone and could not hear the wake word. Now it keeps listening for "Hey Mint" on the plain microphone (no
+  second echo canceller beside the call's own) and goes back to its usual microphone when the call ends. If the call
+  app takes the microphone for itself, Mint says so. Settings ▸ Voice & wake word ▸ Listen during calls (on).
+- **Microphone test:** Settings ▸ Voice & wake word ▸ Test, then say "Hey Mint" - a live level, whether the wake word
+  was caught, whether the voice lock recognised you, and in plain words what is in the way: Mint's mic switched off
+  (with a Turn mic on button), macOS permission, a call app, a muted or silent microphone, or too quiet.
+- **Onboarding: "Say Hey Mint":** a new step after Permissions runs the microphone test. No voice training is needed;
+  "Teach it my voice" (four takes, about 15 s, learned in the background) is optional. The last page no longer
+  suggests voice training.
+- **The voice lock lets you in again:** it now listens through the echo-cancelled microphone it was trained with
+  (the plain microphone used while waiting heard the same voice so differently that the owner was turned away as
+  "another voice"). A second "Hey Mint" within 15 s after a refusal is let in. Voice training is refused during a
+  call, with the reason, and records through the right microphone. Call apps show by name ("Google Chrome", not
+  "helper").
 
 - **A quieter Mint:** Claude Code and Codex no longer show while they work. Mint pops up only when one asks you
   something or finishes (Settings ▸ Appearance & Sound ▸ Claude Code and Codex: two switches); the old live view is
