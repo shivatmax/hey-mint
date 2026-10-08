@@ -47,7 +47,6 @@ HOW_WORDS = {
     "connector": "Built into Mint",
     "scripting": "Mint talks to the app directly",
     "links": "Mint opens the right page in the app",
-    "screen": "Mint uses the app's window, like you would",
     "browser": "Works in your browser",
     "account": "Through your Mac's Internet Accounts",
 }
@@ -74,7 +73,7 @@ class App:
     category: str
     what: str                      # one line: what Mint can do with it
     bundles: tuple = ()            # its Mac app (any of these); empty = a web app or an account
-    how: str = "screen"            # connector | scripting | links | screen | browser | account
+    how: str = "connector"         # connector | scripting | links | browser | account
     connector: str = ""            # its connectors.LIBRARY id, when Mint has one built in
     slug: str = ""                 # brands.py / Simple Icons name for its logo
     get: str = ""                  # where to get the Mac app
@@ -141,8 +140,8 @@ CATALOG: tuple[App, ...] = (
     A("discord", "Discord", "Chat & calls", "Opens your servers, chats and DMs in Discord on the web.",
       ("com.hnc.Discord",), "browser", "", "discord", "https://discord.com/download", "https://discord.com/app", 9,
       (0.35, 0.4, 0.95)),
-    A("telegram_app", "Telegram", "Chat & calls", "Opens your chats and reads what's new.",
-      ("ru.keepcoder.Telegram", "org.telegram.desktop"), "links", "", "telegram", "https://macos.telegram.org/",
+    A("telegram_app", "Telegram", "Chat & calls", "Opens your chats in Telegram on the web.",
+      ("ru.keepcoder.Telegram", "org.telegram.desktop"), "browser", "", "telegram", "https://macos.telegram.org/",
       "https://web.telegram.org/", 10, (0.15, 0.65, 0.89)),
     # --- notes and documents ---
     A("notion", "Notion", "Notes & docs", "Opens your pages, searches your workspace and starts new pages, on the web.", ("notion.id",), "browser",
@@ -173,8 +172,6 @@ CATALOG: tuple[App, ...] = (
       "https://trello.com/", 0, (0.0, 0.47, 0.75)),
     A("asana", "Asana", "Tasks", "Opens your tasks and projects.", (), "browser", "", "asana", "",
       "https://app.asana.com/", 0, (0.94, 0.42, 0.45)),
-    A("jira", "Jira", "Tasks", "Opens your issues and boards.", (), "browser", "", "jira", "",
-      "https://home.atlassian.com/", 0, (0.0, 0.32, 0.8)),
     # --- office ---
     A("word", "Microsoft Word", "Office", "Starts and finds documents in Word on the web.", ("com.microsoft.Word",), "browser",
       "", "microsoftword", _mas(462054704), "https://www.office.com/launch/word", 6, (0.17, 0.34, 0.6), ("word",)),
@@ -210,8 +207,8 @@ CATALOG: tuple[App, ...] = (
     A("youtube", "YouTube", "Music & video", "Finds and plays videos, and downloads them when you ask.", (),
       "browser", "", "youtube", "", "https://www.youtube.com/", 0, (1.0, 0.0, 0.0)),
     # --- design ---
-    A("figma", "Figma", "Design", "Opens your design files and reads what's on screen.", ("com.figma.Desktop",),
-      "links", "", "figma", "https://www.figma.com/downloads/", "https://www.figma.com/", 11, (0.95, 0.31, 0.12)),
+    A("figma", "Figma", "Design", "Opens your design files and recent work in Figma on the web.", ("com.figma.Desktop",),
+      "browser", "", "figma", "https://www.figma.com/downloads/", "https://www.figma.com/", 11, (0.95, 0.31, 0.12)),
     A("canva", "Canva", "Design", "Opens your designs and starts new ones in Canva on the web.", ("com.canva.CanvaDesktop",), "browser",
       "", "canva", "https://www.canva.com/download/mac/", "https://www.canva.com/", 0, (0.0, 0.77, 0.8)),
     # --- browsers ---
@@ -327,8 +324,8 @@ def build(installed: dict[str, str], states: dict[str, dict], mine: dict[str, di
         if bundle:
             if custom:
                 state, detail = "connected", f"Your connector · {len(custom.get('actions') or [])} actions"
-            elif app.id in mine:
-                state, detail = "connected", "Ready"
+            elif mine.get(app.id, {}).get("how") == "browser":
+                state, detail = "connected", "In your browser"
             elif status and status.get("state") == "connected":
                 state, detail = "connected", _friendly(status.get("detail"))
             elif status:
@@ -340,7 +337,7 @@ def build(installed: dict[str, str], states: dict[str, dict], mine: dict[str, di
             if detail.lower() == app.name.lower():          # Finder's status is its own name
                 detail = "Ready"
             rows.append(_row(app, state, detail, path, bundle))
-        elif custom or app.id in mine:
+        elif custom or mine.get(app.id, {}).get("how") == "browser":
             rows.append(_row(app, "connected", "In your browser"))
         elif app.bundles and app.how != "browser":
             rows.append(_row(app, "get", "Not on this Mac"))
@@ -359,8 +356,6 @@ def build(installed: dict[str, str], states: dict[str, dict], mine: dict[str, di
         custom = _custom_for(app, customs)
         if custom:
             state, detail = "connected", f"Your connector · {len(custom.get('actions') or [])} actions"
-        elif app.id in mine:
-            state, detail = "connected", "Ready"
         else:
             state, detail = "ready", "On your Mac"
         rows.append(_row(app, state, detail, str(item.get("path") or ""), bundle, extra=True))
@@ -469,13 +464,9 @@ def prompt_text() -> str:
     """For the session instructions: the apps the user connected here (through the window or the browser), so
     Mint knows to use them that way. '' when there are none. Cheap: one small file."""
     apps = load_mine()
-    window = [a["name"] for a in apps.values() if a.get("how") == "screen"]
     web = [f"{a['name']} ({a['web']})" if a.get("web") else a["name"] for a in apps.values()
            if a.get("how") == "browser"]
     lines = []
-    if window:
-        lines.append("Apps the user connected that Mint works through their window (open_app, then menu / ui_act; "
-                     "look for what's inside): " + ", ".join(window) + ".")
     if web:
         lines.append("Apps the user uses in the browser, signed in there (open_url, then the browser tool): "
                      + ", ".join(web) + ".")
@@ -569,76 +560,9 @@ def plan_summary(plan: dict) -> tuple[str, str]:
     return f"Connect {name}?", "\n".join(lines).strip()
 
 
-def _menus(bundle: str, launch: bool = True, wait: float = 12.0) -> list[str] | None:
-    """The titles of the app's menus, read through Accessibility (None: it isn't running / didn't start).
-    Starts the app hidden in the background when it isn't running."""
-    import subprocess
-
-    import AppKit
-
-    from mint.screen import axkit
-
-    def running():
-        return AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(bundle)
-    if not running() and launch:
-        subprocess.run(["open", "-g", "-j", "-b", bundle], capture_output=True, timeout=15)
-    end = time.monotonic() + wait
-    while time.monotonic() < end:
-        apps = running()
-        if apps:
-            element = axkit.bound(axkit.AX.AXUIElementCreateApplication(apps[0].processIdentifier()))
-            bar = axkit.attr(element, "AXMenuBar")
-            titles = [str(axkit.attr(c, "AXTitle") or "") for c in axkit.children(bar)] if bar is not None else []
-            titles = [t for t in titles if t and t != "Apple"]
-            if titles:
-                return titles
-        time.sleep(0.5)
-    return [] if running() else None
-
-
-def check_window(row: dict, menus: Callable = _menus, allowed: Callable | None = None) -> tuple[bool, str]:
-    """The real check for an app Mint works through its window: macOS lets Mint use other apps' controls
-    (Accessibility), and Mint can read this app's menus. -> (ok, what was found / what is in the way)."""
-    from mint.core import permissions
-    allowed = allowed or permissions.status
-    name = row["name"]
-    if allowed("accessibility") != "allowed":
-        return False, "accessibility"
-    if not row.get("bundle_id"):
-        return False, f"{name} isn't on this Mac."
-    titles = menus(row["bundle_id"])
-    if titles is None:
-        return False, f"{name} didn't start, so Mint couldn't check it. Open it once yourself, then press Connect."
-    if not titles:
-        return False, f"{name} started, but it doesn't show Mint its menus or buttons - Mint can only look at it."
-    shown = ", ".join(titles[:4]) + ("…" if len(titles) > 4 else "")
-    words = f"Mint can read and use its menus ({shown})"
-    if allowed("screen") != "allowed":
-        words += "; allow Screen Recording too, so Mint can also see what's inside its window"
-    return True, words
-
-
-def _connect_window(row: dict, say: Callable) -> str:
-    name = row["name"]
-    say(f"Checking that Mint can use {name} (it opens in the background)…")
-    ok, words = check_window(row)
-    if words == "accessibility":
-        from mint.core import permissions
-        try:
-            permissions.open_pane("accessibility")
-        except Exception:
-            log.debug("accessibility pane", exc_info=True)
-        return (f"Not connected yet: Mint needs Accessibility to use {name}'s window. Turn Mint on in the "
-                "System Settings window that opened, then press Connect again.")
-    if not ok:
-        return f"Not connected: {words}"
-    _remember(row, "screen", checked=words)
-    return f"Connected {name}: {words}. Ask, e.g. “in {name}, …”."
-
-
 def _make(row: dict, confirm: Callable | None, say: Callable) -> str:
-    """Plan a connector for an installed app, show it, save it (connector_maker). An app with nothing Mint
-    can script or link to falls back to its window - checked for real (check_window) before it counts."""
+    """Plan a connector for an installed app, show it, save it and test it (connector_maker). An app with nothing
+    Mint can script or link to is not connected - no half-working connection."""
     from mint.tools import connector_maker
     say(f"Reading what {row['name']} can do…")
     try:
@@ -656,13 +580,14 @@ def _make(row: dict, confirm: Callable | None, say: Callable) -> str:
         if not said.startswith("DONE"):
             return said.removeprefix("FAILED: ")
         test = re.search(r"(Test “[^”]*”: |Checked: )(.*?)(?= Changing actions|$)", said)
-        return (f"Connected {row['name']}: {len(plan['actions'])} things Mint can do with it."
+        n = len(plan["actions"])
+        return (f"Connected {row['name']}: {n} thing{'s' if n != 1 else ''} Mint can do with it."
                 + (f" {test.group(1)}{test.group(2).strip()}" if test else ""))
     if plan.get("error") and "Could not plan it right now" in plan["error"]:
         return f"Couldn't connect {row['name']} right now: {plan['error']}"
-    if row["how"] == "scripting" and row["extra"]:
-        return f"Couldn't connect {row['name']}: {plan.get('error') or plan.get('refuse') or 'no plan'}"
-    return _connect_window(row, say)
+    why = plan.get("error") or plan.get("refuse") or "no plan"
+    return (f"Couldn't connect {row['name']}: Mint found nothing it can reliably do with it ({why}). "
+            "It isn't marked connected.")
 
 
 def connect(app_id: str, confirm: Callable[[dict], bool] | None = None,
@@ -700,7 +625,7 @@ def connect(app_id: str, confirm: Callable[[dict], bool] | None = None,
             return lib.connect()
         if row["how"] in ("scripting", "links") or lib is not None:
             return _make(row, confirm, say)
-        return _connect_window(row, say)
+        return f"Couldn't connect {name}: Mint has no reliable way to work with it."
     except Exception as error:
         log.exception("connect %s", app_id)
         return f"Couldn't connect {name}: {error}"
@@ -734,10 +659,6 @@ def check(app_id: str) -> str:
             ok, code = connector_maker._site_answers(url)
             host = url.split("/")[2] if url.count("/") >= 2 else url
             words = f"{host} answers - Mint uses {name} in your browser" if ok else f"{host} didn't answer ({code})"
-        elif mine:
-            ok, words = check_window(row)
-            if words == "accessibility":
-                words = f"Mint needs Accessibility (Settings ▸ Permissions & Privacy) to use {name}'s window"
         else:
             return f"✗ {name} isn't connected yet."
     except Exception as error:
@@ -779,7 +700,9 @@ def use_in_browser(app_id: str, confirm: Callable[[dict], bool] | None = None,
         return said.removeprefix("FAILED: ")
     connectors.open_url(row["web_url"])
     checked = re.search(r"Checked: (.*?)(?= Changing actions|$)", said)
-    return (f"Connected {name} in your browser: {len(plan['actions'])} things Mint can open there"
+    n = len(plan["actions"])
+    return (f"Connected {name} in your browser: " + (f"{n} pages Mint can open there" if n != 1 else
+                                                      "Mint opens it and works inside it")
             + (f" ({checked.group(1).strip().rstrip('.')})" if checked else "") + ". Sign in there once if asked.")
 
 

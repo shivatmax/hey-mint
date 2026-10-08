@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.9 (2026-10-08)
+
+- **Only connections that fully work:** an app Mint can't plan and test a connection for is no longer marked
+  connected through "its window" - it says it couldn't connect. On a web app that loads any address (Trello,
+  Linear, Notion, Asana, Office…), deep links can't be checked, so its connection keeps only the home page and Mint
+  works inside it with the browser - no link that lands on a missing page. Sites whose pages can be checked (GitHub,
+  YouTube, Google Drive, Dropbox, Canva, Todoist…) keep every page that is really there.
+- **Fewer, surer apps:** Jira is gone (every Jira site has its own address), and Figma and the Telegram app connect
+  through their web apps, where every page is checked, instead of in-app links whose formats can't be.
+
 ## 0.6.8 (2026-10-08)
 
 - **No app in the library without real support:** every app listed now works through something Mint really has -

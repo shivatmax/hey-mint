@@ -64,6 +64,7 @@ WEB = {"notion": ("notion.so", "https://www.notion.so/"), "todoist": ("todoist.c
        "microsoft excel": ("office.com", "https://www.office.com/launch/excel"),
        "powerpoint": ("office.com", "https://www.office.com/launch/powerpoint"),
        "microsoft powerpoint": ("office.com", "https://www.office.com/launch/powerpoint"),
+       "telegram": ("web.telegram.org", "https://web.telegram.org/"),
        "google sheets": ("docs.google.com", "https://docs.google.com/spreadsheets/"),
        "google calendar": ("calendar.google.com", "https://calendar.google.com/")}
 
@@ -505,6 +506,7 @@ def plan(words: str, bundle_id: str = "", web: bool = False) -> dict:
         result["actions"].append(action)
     if result["kind"] == "web" and result["actions"]:
         result["actions"] = _reachable(result["actions"], result["dropped"])
+        result["actions"] = _only_what_can_be_checked(result, target)
     if not result["actions"]:
         result["error"] = "None of the planned actions passed the checks" + (
             f": {'; '.join(result['dropped'][:3])}" if result["dropped"] else ".")
@@ -642,6 +644,36 @@ def _reachable(actions: list[dict], dropped: list[str], answers=None) -> list[di
     return kept
 
 
+def _loads_anything(host: str, answers=None) -> bool:
+    """True for a web app that answers any address (it routes after sign-in): a made-up page loads too."""
+    return bool((answers or _site_answers)(f"https://{host}/mint-check-{uuid.uuid4().hex[:10]}")[0])
+
+
+def _only_what_can_be_checked(result: dict, target: dict, answers=None) -> list[dict]:
+    """On a site that loads any address, a deep link can't be checked - a wrong one would open a "not found" page
+    after sign-in. Only its home page stays (Mint works inside it with the browser tool)."""
+    actions = result["actions"]
+    pages = [a for a in actions if a["kind"] == "web"]
+    if not pages:
+        return actions
+    host = urllib.parse.urlparse(_page_of(pages[0])).netloc
+    if not _loads_anything(host, answers):
+        return actions
+    home = result.get("site") or f"https://{host}/"
+    kept = [a for a in actions if a["kind"] != "web"]
+    try:
+        kept.insert(0, check_action({"id": "open_home", "title": f"Open {result.get('name') or target.get('name')}",
+                                     "kind": "web", "template": home, "changes": False}, target))
+    except PlanError as error:
+        result["dropped"].append(str(error))
+    left = [a["title"] for a in pages if a["template"].rstrip("/") != home.rstrip("/")]
+    if left:
+        result["dropped"].append(f"{host} loads any address, so these links can't be checked: " + ", ".join(left[:5]))
+        result["note"] = (f"{host} opens any address, so Mint keeps only its home page and works inside it with the "
+                          "browser (search, open, read) - no link that could land on a missing page.")
+    return kept
+
+
 def check_links(item: dict, owner=_scheme_owner, answers=_site_answers) -> tuple[bool, str]:
     """The check for a connector whose actions open links, pages or hand files over (nothing to run read-only):
     the app is still installed, each of its link schemes opens that app, its website answers."""
@@ -676,10 +708,12 @@ def check_links(item: dict, owner=_scheme_owner, answers=_site_answers) -> tuple
         if missing:
             ok = False
             found.append(f"{len(missing)} of {len(pages)} pages on {host} aren't there: " + "; ".join(missing[:2]))
-        elif answers(f"https://{host}/mint-check-{uuid.uuid4().hex[:10]}")[0]:
-            # the site answers any address (a web app that routes after sign-in): the check can't tell a real
-            # page from a made-up one - say so instead of claiming every page is there
-            found.append(f"{host} answers; it loads any address, so each page shows once you're signed in")
+        elif _loads_anything(host, answers):
+            # a web app that routes after sign-in: its home page answers; a deep link couldn't be told apart from a
+            # made-up one (plan keeps none for such a site - an older connector might still have some)
+            homes = all(a["id"] == "open_home" or urllib.parse.urlparse(_page_of(a)).path in ("", "/") for a in pages)
+            found.append(f"{host} opens" if homes else
+                         f"{host} opens; its other links can't be checked (it loads any address)")
         else:
             found.append(f"all {len(pages)} pages on {host} are there")
     if not found:

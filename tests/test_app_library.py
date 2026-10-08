@@ -94,7 +94,8 @@ def test_no_app_without_real_support():
         if app.how == "browser":
             assert app.web.startswith("https://"), app.id
     gone = {"signal", "bear", "things", "omnifocus", "fantastical", "libreoffice", "photoshop", "firefox", "cursor",
-            "gemini"}
+            "gemini", "jira"}
+    assert not [a.id for a in app_library.CATALOG if a.how == "links"]     # app link formats can't be checked
     assert not gone & {a.id for a in app_library.CATALOG}
 
 
@@ -136,7 +137,7 @@ def test_not_installed_is_never_connected_even_if_the_connector_says_so():
 
 
 def test_connected_through_mine_or_a_custom_connector():
-    g = app_library.groups(installed={"com.hnc.Discord", "com.linear"}, mine={"discord": {"how": "screen"},
+    g = app_library.groups(installed={"com.hnc.Discord", "com.linear"}, mine={"discord": {"how": "browser"},
                                                                                  "trello": {"how": "browser"}},
                            customs=[{"id": "linear", "bundle_id": "com.linear", "actions": [{}, {}, {}]}])
     connected = {r["id"]: r for r in g["connected"]}
@@ -215,7 +216,7 @@ def test_use_in_browser_makes_a_checked_web_connector(_private, monkeypatch):
     assert _private == []                                 # nothing opens before the user says yes
     words = app_library.use_in_browser("trello", confirm=lambda plan: True)
     assert asked == [("integrate Trello", True)] * 2
-    assert words.startswith("Connected Trello in your browser: 1 things") and "trello.com are there" in words
+    assert words.startswith("Connected Trello in your browser: Mint opens it") and "trello.com are there" in words
     assert _private == ["https://trello.com/"]
 
 
@@ -246,91 +247,36 @@ def _refuse(monkeypatch):
     monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False: {"refuse": "no links"})
 
 
-def test_connect_an_app_mint_uses_through_its_window(_private, monkeypatch):
-    """An app with nothing to script or link to: connected only after the real check - Mint read the app's menus
-    through Accessibility."""
-    _fake(installed={"com.figma.Desktop"})
+def test_an_app_mint_cant_work_reliably_is_not_connected(_private, monkeypatch):
+    """No half-working connection: when nothing can be planned and tested, the app isn't marked connected."""
+    _fake(installed={"org.videolan.vlc"})
     _refuse(monkeypatch)
-    checked = []
-    monkeypatch.setattr(app_library, "check_window",
-                        lambda row: checked.append(row["bundle_id"]) or (True, "Mint can read and use its menus (File)"))
-    words = app_library.connect("figma")
-    assert checked == ["com.figma.Desktop"]
-    assert words.startswith("Connected Figma: Mint can read and use its menus (File)")
-    mine = app_library.load_mine()["figma"]
-    assert mine["how"] == "screen" and "File" in mine["checked"]
-
-
-def test_window_app_is_not_connected_without_accessibility(_private, monkeypatch):
-    try:
-        from mint.core import permissions
-    except ImportError:
-        from mint import permissions
-    _fake(installed={"com.figma.Desktop"})
-    _refuse(monkeypatch)
-    panes = []
-    monkeypatch.setattr(permissions, "open_pane", panes.append)
-    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "accessibility"))
-    words = app_library.connect("figma")
-    assert words.startswith("Not connected yet") and "Accessibility" in words
-    assert panes == ["accessibility"] and app_library.load_mine() == {}
-
-
-def test_window_app_that_hides_its_controls_is_not_connected(_private, monkeypatch):
-    _fake(installed={"com.figma.Desktop"})
-    _refuse(monkeypatch)
-    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "Figma doesn't show Mint its menus"))
-    assert app_library.connect("figma").startswith("Not connected: Figma doesn't show")
+    words = app_library.connect("vlc")
+    assert words.startswith("Couldn't connect VLC") and "isn't marked connected" in words
     assert app_library.load_mine() == {}
-
-
-def test_check_window_reads_the_menus():
-    row = {"name": "Figma", "bundle_id": "com.figma.Desktop"}
-    yes = {"accessibility": "allowed", "screen": "allowed"}.get
-    ok, words = app_library.check_window(row, menus=lambda b: ["Figma", "File", "Edit", "View", "Help"], allowed=yes)
-    assert ok and words == "Mint can read and use its menus (Figma, File, Edit, View…)"
-    ok, words = app_library.check_window(row, menus=lambda b: ["File"], allowed={"accessibility": "allowed"}.get)
-    assert ok and "Screen Recording" in words
-    assert app_library.check_window(row, menus=lambda b: [], allowed=yes)[0] is False
-    ok, words = app_library.check_window(row, menus=lambda b: None, allowed=yes)
-    assert not ok and "didn't start" in words
-    assert app_library.check_window(row, menus=lambda b: ["File"], allowed=lambda k: "ask") == (False, "accessibility")
-
-
-def test_an_app_with_no_links_falls_back_to_its_window(_private, monkeypatch):
-    """The Telegram app when the planner finds no links it can use: not connected unless the window check passes."""
-    _fake(installed={"ru.keepcoder.Telegram"})
-    _refuse(monkeypatch)
-    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "Telegram didn't start"))
-    assert app_library.connect("telegram_app") == "Not connected: Telegram didn't start"
-    assert app_library.load_mine() == {}
-    monkeypatch.setattr(app_library, "check_window", lambda row: (True, "Mint can read and use its menus (File)"))
-    assert app_library.connect("telegram_app").startswith("Connected Telegram")
+    rows = _fake(installed={"org.videolan.vlc"}, mine={"vlc": {"how": "screen"}})
+    assert next(r for r in rows if r["id"] == "vlc")["state"] == "ready"      # an old window-only flag
 
 
 def test_connect_plans_for_exactly_that_app(_private, monkeypatch):
-    """The Telegram app is planned as the app (its bundle id), never as the Telegram bot remote control."""
+    """Connect plans for exactly the app on the row (its bundle id) - never a built-in of the same name."""
     try:
         from mint.tools import connector_maker
     except ImportError:
         from mint import connector_maker
-    _fake(installed={"ru.keepcoder.Telegram"})
+    _fake(installed={"com.apple.TV"})
     seen = []
     monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False:
                         seen.append((words, bundle_id)) or {"refuse": "x"})
-    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "x"))
-    app_library.connect("telegram_app")
-    assert seen == [("integrate Telegram", "ru.keepcoder.Telegram")]
+    app_library.connect("tv")
+    assert seen == [("integrate TV", "com.apple.TV")]
 
 
 def test_prompt_names_connected_apps(_private):
     assert app_library.prompt_text() == ""
-    _fake(installed={"com.figma.Desktop"})
-    app_library._remember(app_library.get("figma"), "screen", checked="menus")
+    _fake()
     app_library._remember(app_library.get("trello"), "browser")
-    words = app_library.prompt_text()
-    assert "through their window" in words and "Figma" in words
-    assert "Trello (https://trello.com/)" in words
+    assert "Trello (https://trello.com/)" in app_library.prompt_text()
 
 
 def test_connect_plans_a_connector_and_asks_first(monkeypatch):

@@ -67,9 +67,27 @@ def test_web_connector_checks_the_site():
     assert ok and words == "all 1 pages on www.notion.so are there"
     assert asked[0] == "https://www.notion.so/search" and "mint-check-" in asked[1]
     ok, words = connector_maker.check_links(item, answers=lambda url: (True, "200"))
-    assert ok and "loads any address" in words          # a web app that answers everything: said, not claimed
+    assert ok and "can't be checked (it loads any address)" in words   # said, not claimed
     ok, words = connector_maker.check_links(item, answers=lambda url: (False, "404"))
     assert not ok and "1 of 1 pages on www.notion.so aren't there" in words
+    home = dict(item, actions=[dict(_url("home", "https://www.notion.so/"), kind="web")])
+    assert connector_maker.check_links(home, answers=lambda url: (True, "200")) == (True, "www.notion.so opens")
+
+
+def test_a_site_that_loads_any_address_keeps_only_its_home_page():
+    """Deep links on such a site can't be checked (a made-up page loads too): the plan keeps its home page only."""
+    target = {"name": "Trello", "domain": "trello.com"}
+    result = {"name": "Trello", "site": "https://trello.com/", "dropped": [], "note": "",
+              "actions": [dict(_url("cards", "https://trello.com/your/cards"), kind="web"),
+                          dict(_url("home", "https://trello.com/"), kind="web")]}
+    kept = connector_maker._only_what_can_be_checked(result, target, answers=lambda url: (True, "200"))
+    assert [a["template"] for a in kept] == ["https://trello.com/"] and kept[0]["title"] == "Open Trello"
+    assert "can't be checked: cards" in result["dropped"][0] and "home page" in result["note"]
+    github = {"name": "GitHub", "site": "https://github.com/", "dropped": [], "note": "",
+              "actions": [dict(_url("notifications", "https://github.com/notifications"), kind="web")]}
+    kept = connector_maker._only_what_can_be_checked(github, {"name": "GitHub", "domain": "github.com"},
+                                                     answers=lambda url: ("mint-check-" not in url, "404"))
+    assert [a["id"] for a in kept] == ["notifications"]            # real pages are told apart: all kept
 
 
 def test_pages_that_are_not_there_are_left_out_of_a_plan():
