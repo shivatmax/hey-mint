@@ -51,6 +51,8 @@ CORE = frozenset({
     # parallel work and agents
     "background_task", "agent_status", "answer_agent", "message_agent", "stop_agent", "delegate_task", "agent_app",
     "pause_everything",
+    # what is set up, and setting things up (setup_guide.py): "what can you do?", "connect Telegram"
+    "setup_status", "open_setup",
 })
 BRIDGE = ("find_tools", "use_tool")
 
@@ -163,6 +165,14 @@ FAMILIES: dict[str, dict] = {
     "hearing fixes": {
         "tools": ("fix_hearing",),
         "words": "mishear misheard hearing word wrong pronounce",
+        "prompts": ()},
+    "your own setup: what is set up, connecting accounts, keys and permissions": {
+        "tools": ("setup_status", "open_setup"),        # both in CORE: find_tools names them as already there
+        "words": "setup set connect connected telegram gmail google account meet openai gemini typesafe key keys "
+                 "permission permissions access accessibility microphone calendar shortcuts claude hooks voice "
+                 "train trained capabilities features what can you do settings",
+        "core_when": "setup connect connected configure permission access key keys capabilities features telegram "
+                     "gmail openai typesafe",
         "prompts": ()},
     "Mac and Mint odds and ends": {
         "tools": ("frontmost_app", "list_windows", "open_slack", "list_accounts", "chat_action", "show_chat",
@@ -457,6 +467,10 @@ def find(query: str, budget: int = BUDGET) -> str:
     best = rank(query)
     core_hits = [n for n in CORE if n in _all() and (n == query.lower() or set(_words(n)) & set(_words(query))
                                                     and n.replace("_", " ") in query.lower())]
+    asked = set(_words(query))         # declared tools of a family the query is about ("connect telegram": setup)
+    core_hits += sorted(n for n in CORE if n in _all() and n not in core_hits and family_of(n)
+                        and asked & set(_words(FAMILIES[family_of(n)].get("core_when")
+                                               or FAMILIES[family_of(n)]["words"])))
     if not best:
         return (f"No hidden tool matches '{query}'. "
                 + (f"You already have: {', '.join(core_hits)}. " if core_hits else "")

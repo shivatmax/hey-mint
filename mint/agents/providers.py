@@ -258,8 +258,10 @@ def _mark(provider, model, error) -> bool:
     if kind == "busy" or any(code in text for code in ("503", "529", "UNAVAILABLE", "500", "502", "INTERNAL",
                                                        "timed out", "Timeout", "overloaded", "unreachable")):
         # Overloaded - "high demand" blips pass quickly. Benching for five
-        # minutes left a whole chain empty in testing and failed two agents.
-        _dead[(provider, model)] = time.monotonic() + 30
+        # minutes left a whole chain empty in testing and failed two agents. 30 s was too short the other way
+        # (8 Oct): each 503 costs ~10 s, and every step of a run asked gemini-3.8-flash again. Now 90 s, and the
+        # Flash chain has five models; a bench never empties a chain (later rounds try benched ones too).
+        _dead[(provider, model)] = time.monotonic() + 90
         return True
     if kind == "refusal":
         return False                  # the next model in the chain may answer; retrying this one won't
@@ -328,7 +330,7 @@ def _call(provider: str, model: str, system: str, messages: list[dict], tools: l
     if kind == "responses":
         return _responses(model, system, messages, tools, effort=effort)
     if kind == "gemini":
-        return _gemini(model, system, messages, tools)
+        return _gemini(model, system, messages, tools, effort)
     if kind == "anthropic":
         from mint.agents import anthropic_provider
         try:
@@ -346,7 +348,11 @@ def _call(provider: str, model: str, system: str, messages: list[dict], tools: l
 
 # --- Gemini ------------------------------------------------------------------------
 
-def _gemini(model: str, system: str, messages: list[dict], tools: list[dict]) -> dict:
+GEMINI_THINKING = {"none": "low", "low": "low", "medium": "medium"}   # agent effort -> Gemini 3 thinking_level
+_no_thinking_level: set[str] = set()                                     # models that refused a thinking level
+
+
+def _gemini(model: str, system: str, messages: list[dict], tools: list[dict], effort: str | None = None) -> dict:
     from google import genai
     from google.genai import types
 
@@ -385,12 +391,26 @@ def _gemini(model: str, system: str, messages: list[dict], tools: list[dict]) ->
                 contents.append(types.Content(role="user", parts=[part]))
     declarations = [types.FunctionDeclaration(name=t["name"], description=t["description"],
                                               parameters_json_schema=t["parameters"]) for t in tools]
-    reply = client.models.generate_content(
-        model=model, contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system, temperature=0.4,
-            tools=[types.Tool(function_declarations=declarations)] if declarations else None,
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
+    # Gemini 3 thinks as long as it likes unless told: an agent's low effort answered in ~3 s instead of 6-12 s
+    # (8 Oct, gemini-3.6-flash). A model that refuses the setting is asked again without it, and remembered.
+    level = GEMINI_THINKING.get(effort or "") if model.startswith("gemini-3") and model not in _no_thinking_level \
+        else None
+
+    def ask(thinking):
+        return client.models.generate_content(
+            model=model, contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system, temperature=0.4,
+                thinking_config=types.ThinkingConfig(thinking_level=thinking) if thinking else None,
+                tools=[types.Tool(function_declarations=declarations)] if declarations else None,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
+    try:
+        reply = ask(level)
+    except Exception as error:
+        if not level or "thinking" not in str(error).lower():
+            raise
+        _no_thinking_level.add(model)
+        reply = ask(None)
     text, calls = [], []
     candidate = (reply.candidates or [None])[0]
     for part in (candidate.content.parts if candidate and candidate.content and candidate.content.parts else []):

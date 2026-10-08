@@ -463,15 +463,15 @@ class Connector:
             return f"Set it up in Settings ▸ {_PAGE_TITLES.get(self.settings_page, self.settings_page)}."
         return f"{self.name}: nothing to set up - Mint can use it now."
 
-    def test(self) -> str | None:
-        """A read-only check that it really works (None: this one has no test)."""
+    def test(self) -> str:
+        """A read-only check that it really works: its own test, else check_basics."""
         if self.do_test:
             return self.do_test(self)
-        return None
+        return check_basics(self)
 
     @property
     def testable(self) -> bool:
-        return self.do_test is not None
+        return True
 
     def tools(self) -> list[str]:
         have = optional_tools()
@@ -500,6 +500,53 @@ def _app_status(c: Connector, deep: bool) -> tuple[str, str]:
     if custom:
         return "connected", f"Your connector: {len(custom.get('actions') or [])} actions"
     return "connected", app["name"] if app["name"] != c.name else "Ready"
+
+
+def _scheme_owner(scheme: str) -> str:
+    try:
+        import AppKit
+        url = AppKit.NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(
+            AppKit.NSURL.URLWithString_(f"{scheme}://"))
+        return str(url.path()) if url is not None else ""
+    except Exception:
+        return ""
+
+
+def check_basics(c: "Connector", owner: Callable[[str], str] = _scheme_owner,
+                 control: Callable[[str], int] | None = None, app: dict | None = None) -> str:
+    """The test for a connector without one of its own - nothing is run in the app, nothing opens: the app is
+    installed, macOS lets Mint control it (for scripting), its links open it, and its live status."""
+    control = control or automation
+    live = c.status(deep=True)
+    status = f"{STATES[live['state']]} - {live['detail']}"
+    waiting = live["state"] != "connected"
+    if not c.bundles:
+        return f"Not ready yet: {live['detail']}." if waiting else f"Checked: {status}."
+    app = app or c.app()
+    if app is None:
+        return f"Didn't work: {c.name} isn't installed on this Mac."
+    found = [f"{app['name'].strip(chr(0x200e))} is installed"]
+    problem = ""
+    if "scripting" in c.how:
+        code = control(app["bundle_id"])
+        if code == AE_DENIED:
+            problem = "macOS has Automation off for Mint and this app (Privacy & Security ▸ Automation)"
+        elif code == AE_WOULD_ASK:
+            problem = "macOS will ask once whether Mint may control it - press Connect"
+        else:
+            found.append("macOS lets Mint control it" if code == AE_OK else "Mint can control it while it's open")
+    schemes = [x for x in app.get("schemes") or [] if x.lower() not in ("http", "https", "file")]
+    if "url" in c.how and schemes:
+        path = owner(schemes[0])
+        if path and Path(path).resolve() == Path(app["path"]).resolve():
+            found.append(f"its {schemes[0]}: links open it")
+        else:
+            problem = problem or f"its {schemes[0]}: links don't open {app['name']}"
+    if problem:
+        return f"Didn't work: {problem}."
+    if waiting:
+        return "Not ready yet: " + ", ".join(found) + f", but: {live['detail']}."
+    return "Checked: " + ", ".join(found) + f" ({status})."
 
 
 def _custom_for(bundle_id: str) -> dict | None:
@@ -990,7 +1037,8 @@ def custom_status(item: dict) -> dict:
     tested = item.get("tested") or {}
     if tested and not tested.get("ok"):
         return {"state": "setup", "detail": "Last test failed"}
-    return {"state": "connected", "detail": f"{len(item['actions'])} actions" + (" · tested" if tested else "")}
+    return {"state": "connected", "detail": f"{len(item['actions'])} actions" + (
+        f" · tested ✓ {str(tested.get('at') or '')[:10]}".rstrip() if tested else " · not tested yet")}
 
 
 # --- All my apps --------------------------------------------------------------------------------------

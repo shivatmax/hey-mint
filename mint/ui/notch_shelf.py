@@ -805,6 +805,10 @@ class ShelfView:
         text.setStringValue_("Drop files here")
         text.setFrame_(AppKit.NSMakeRect(8, h / 2 - 26, tray_w - 16, 20))
         self.empty.addSubview_(text)
+        more = _label(AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightMedium), GREY, 0.75)
+        more.setStringValue_("Keep files handy here, then drag them out, AirDrop or share them.")
+        more.setFrame_(AppKit.NSMakeRect(8, h / 2 - 44, tray_w - 16, 15))
+        self.empty.addSubview_(more)
         tray.addSubview_(self.empty)
 
         inset = 8.0

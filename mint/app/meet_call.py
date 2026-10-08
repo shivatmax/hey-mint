@@ -1332,6 +1332,11 @@ def google_meet(args: dict) -> str:
     if action == "end":
         return end()
     if action == "setup":
+        # Already signed in: say so, don't open the sign-in window again (the setup guide's rule:
+        # never open a setup that is already done unless the user insists).
+        if signed_in() and not args.get("again"):
+            return ("ALREADY SET UP - nothing opened: Mint's Google Meet window is signed in. Say so in one short "
+                    "sentence; open the sign-in again only if the user asks for a different account (again=true).")
         return setup()
     call = _call
     if action in ("share", "unshare"):
@@ -1655,7 +1660,10 @@ def declarations():
             "action": types.Schema(type=types.Type.STRING,
                                    enum=["start", "end", "status", "share", "unshare", "setup"],
                                    description="start / end the call, share / unshare the screen, status, setup "
-                                               "(sign in to Google once)")},
+                                               "(sign in to Google once)"),
+            "again": types.Schema(type=types.Type.BOOLEAN,
+                                  description="setup only: sign in again even though already signed in (another "
+                                              "account) - only when the user asks")},
             required=["action"]))]
 
 

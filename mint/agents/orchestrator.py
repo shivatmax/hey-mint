@@ -124,10 +124,10 @@ def _create(args: dict) -> str:
         if unknown:
             return (f"NOT SAVED: no model matches {', '.join(repr(u) for u in unknown)}. Models look like "
                     "'openai/gpt-6-luna', 'anthropic/claude-sonnet-5-5', 'groq/llama-3.3-70b-versatile', "
-                    "'xai/grok-4.7', 'gemini/gemini-3.5-flash' or 'ollama/<name>'. Ask the user which.")
+                    "'xai/grok-4.7', 'gemini/gemini-3.8-flash' or 'ollama/<name>'. Ask the user which.")
         missing = [r for r in chosen if not catalog.configured(r.split("/", 1)[0])]
         agent["models"] = chosen
-        agent["models_v2"] = True
+        agent["models_v2"] = agent["chose_models"] = True
     else:
         missing = []
     tools = ["write_file", "read_file", "list_files", "ask_user", "report_progress"]

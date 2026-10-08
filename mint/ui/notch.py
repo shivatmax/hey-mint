@@ -1328,13 +1328,16 @@ class Notch:
         h["title"] = self._label(15, _white(0.95), AppKit.NSFontWeightSemibold)
         h["hint"] = self._label(11.5, _white(0.55), AppKit.NSFontWeightMedium, lines=2)
         # The right pane: the week calendar if Mint may read calendars, else the battery.
-        h["side"] = None
+        h["side"] = h["side_kind"] = None
+        h["tips"] = None                    # "Set up" chips under the hint, built when there is one (notch_tips)
         calendar = self._mod("notch_calendar") if prefs.get("notch_calendar") is not False else None
         try:
             if calendar is not None and calendar.available():
                 h["side"], h["side_update"] = calendar.view(SIDE_W, BODY_H - 16)
+                h["side_kind"] = "calendar"
             elif battery is not None and battery.available():
                 h["side"], h["side_update"] = battery.view(SIDE_W, BODY_H - 16)
+                h["side_kind"] = "battery"
         except Exception:
             log.debug("side pane failed", exc_info=True)
         if h["side"] is not None:
@@ -1659,7 +1662,8 @@ class Notch:
     def _shelf_ok(self) -> bool:
         shelf = self._mod("notch_shelf") if prefs.get("notch_shelf") is not False else None
         try:
-            return shelf is not None and (shelf.available() or time.monotonic() < self.drag_until)
+            return shelf is not None and (shelf.available() or time.monotonic() < max(
+                self.drag_until, getattr(self, "_tips_shelf_until", 0.0)))   # (the "AirDrop" tip: an empty shelf)
         except Exception:
             return False
 
@@ -1763,6 +1767,9 @@ class Notch:
         else:
             for key in ("title", "hint"):
                 self._fade(h[key], False)
+        idle = mint_pane and not words and getattr(self.hud, "_activity", None) is None and \
+            getattr(self.hud, "_state", "") not in ("thinking", "working", "speaking")
+        self._tips(idle, left, body_top)
         side = h["side"]
         if side is not None:
             if home:
@@ -1784,6 +1791,102 @@ class Notch:
                              delay=0.06)
             elif not shelf.isHidden():
                 self._conceal(shelf)
+
+    # --- "Set up" chips on the home tab: what isn't set up yet (notch_tips) ------------------------------
+
+    def _tips(self, on: bool, left: float, body_top: float) -> None:
+        """Between the hint and the controls, while Mint is idle on the home tab: a chip per thing not set up
+        (Calendars, Claude Code, the shelf...). Statuses are read off the main thread every few seconds."""
+        h = self.home
+        tips = self._mod("notch_tips") if on else None
+        keys = []
+        if tips is not None:
+            self._tips_check(time.monotonic())
+            keys = tips.pick(getattr(self, "_tips_facts", None) or {}, tips.dismissed())
+        strip = h.get("tips")
+        if keys and strip is None:
+            try:
+                strip = h["tips"] = tips.Strip(PLAYER_W + 4)      # (the calendar pane starts 12 pt further)
+                strip.view.setHidden_(True)
+                self.box.addSubview_(strip.view)
+            except Exception:
+                log.debug("notch tips failed", exc_info=True)
+                return
+        if strip is None:
+            return
+        if keys:
+            strip.set(keys, lambda key: AppHelper.callAfter(self._tip_clicked, key),
+                      lambda key: AppHelper.callAfter(self._tip_closed, key))
+            self._reveal(strip.view, AppKit.NSMakeRect(left, body_top - 94, PLAYER_W + 4, strip.view.frame().size.height),
+                         delay=0.24, style="fade")
+        elif not strip.view.isHidden():
+            self._conceal(strip.view)
+
+    def _tips_check(self, now: float, force: bool = False) -> None:
+        """Read what is set up on a thread (permissions, Claude Code's hooks, the shelf), at most every 4 s."""
+        if getattr(self, "_tips_busy", False) or (not force and now - getattr(self, "_tips_at", -99.0) < 4.0):
+            return
+        self._tips_busy, self._tips_at = True, now
+        tips = self._mod("notch_tips")
+
+        def read():
+            try:
+                facts = tips.facts()
+            except Exception:
+                log.debug("notch tips: statuses", exc_info=True)
+                facts = None
+
+            def done():
+                self._tips_busy = False
+                if facts is not None:
+                    self._tips_facts = facts
+                    if facts.get("calendar") == "allowed":
+                        self._side_to_calendar()
+            AppHelper.callAfter(done)
+        import threading
+        threading.Thread(target=read, daemon=True, name="notch-tips").start()
+
+    def _tip_clicked(self, key: str) -> None:
+        tips = self._mod("notch_tips")
+        if tips is None:
+            return
+        if key in tips.PERMISSION_TIPS:
+            tips.ask(key)                       # macOS's prompt, or its pane in System Settings
+        elif key == "claude":
+            from mint.ui import notch_agents
+            notch_agents._connect_hooks()       # asks first, then writes Claude Code's hooks
+        elif key == "shelf":
+            self._tips_shelf_until = time.monotonic() + 90.0
+            tips.dismiss("shelf")               # (seen: the shelf is its own explanation)
+            self._set_tab("shelf")
+        elif key == "phone":
+            self.hud._fire("open_settings", "accounts")
+        for delay in (1.0, 3.0, 8.0, 20.0):     # an answer to macOS's prompt shows up soon after
+            AppHelper.callLater(delay, lambda: self._tips_check(time.monotonic(), force=True))
+
+    def _tip_closed(self, key: str) -> None:
+        tips = self._mod("notch_tips")
+        if tips is not None:
+            tips.dismiss(key)
+
+    def _side_to_calendar(self) -> None:
+        """Calendars were just allowed: the right-hand pane becomes the week calendar (it was the battery)."""
+        h = self.home
+        if h is None or h.get("side_kind") == "calendar" or prefs.get("notch_calendar") is False:
+            return
+        calendar = self._mod("notch_calendar")
+        try:
+            if calendar is None or not calendar.available():
+                return
+            view, update = calendar.view(SIDE_W, BODY_H - 16)
+        except Exception:
+            log.debug("calendar pane failed", exc_info=True)
+            return
+        if h["side"] is not None:
+            h["side"].removeFromSuperview()
+        view.setHidden_(True)
+        self.box.addSubview_(view)
+        h["side"], h["side_update"], h["side_kind"] = view, update, "calendar"
 
     # --- files dragged to the notch go on the shelf ---------------------------------------------
 

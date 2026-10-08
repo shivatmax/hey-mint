@@ -509,7 +509,8 @@ def main() -> int:
 
     settings_window = [None]
 
-    def open_settings():
+    def open_settings(page=None, anchor=""):    # page: a Settings page key ("accounts"...), else the last one;
+                                                # anchor: a part of that page to scroll to ("telegram")
         from PyObjCTools import AppHelper
         from mint.ui.settings import SettingsWindow
 
@@ -527,10 +528,14 @@ def main() -> int:
                         mint, on_level, on_done),
                     "mic_on": lambda: prefs.set("mic", True),
                 })
-            settings_window[0].show()
+            settings_window[0].show(page)
+            if anchor:
+                settings_window[0].select(page or settings_window[0].page_key, anchor=anchor)
         AppHelper.callAfter(show)
 
     presence.on("open_settings", open_settings)
+    from mint.tools import setup_guide               # "connect Telegram": Settings at Telegram (setup_guide.open_setup)
+    setup_guide.set_opener(lambda page, anchor="": presence.fire("open_settings", page, anchor))
 
     # Meeting notes from the menu bar: one click starts a silent recording of the call and your mic.
     def meeting(action: str):

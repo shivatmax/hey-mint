@@ -39,10 +39,14 @@ log = logging.getLogger("mint.agents")
 PATH = config.PROJECT_ROOT / "agents.json"
 WORK_ROOT = Path.home() / "Documents" / "Mint" / "agents"      # default; new agents use config.storage("Agents")
 
-# The default for the built-in agents: OpenAI's GPT-6 Luna, straight from the OpenAI API. The user can
+# The default for the built-in agents and new ones: Gemini Flash, newest first, on the Gemini key(s) every Mint
+# user already has (8 Oct: GPT-6 Luna needed an OpenAI API key most people don't have - they only ran on the
+# last-resort backup). Each model falls back to the next; both Gemini keys are tried (gemini_keys). The user can
 # give any agent other models, and backups, in Settings ▸ Models & agents (or by asking Mint).
-ONLY_PROVIDER, ONLY_MODEL = "openai", "gpt-6-luna"
-DEFAULT_MODEL = "openai/gpt-6-luna"
+GEMINI_FLASH = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash", "gemini/gemini-3.6-flash"]
+ONLY_PROVIDER, ONLY_MODEL = "gemini", "gemini-3.8-flash"
+DEFAULT_MODEL = GEMINI_FLASH[0]
+OLD_DEFAULT = "openai/gpt-6-luna"     # the built-ins' default before 8 Oct
 CODEX_MODEL = "gpt-6-luna"
 
 GEMINI_FAST = ["gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
@@ -54,7 +58,7 @@ DEFAULTS = [
         "color": "#8B7CFF",
         "role": "Research: searches the web, reads sources, and writes a sourced brief.",
         "provider": ONLY_PROVIDER,
-        "models": [DEFAULT_MODEL],
+        "models": list(GEMINI_FLASH),
         "thinking": "medium",
         "tools": ["web_search", "fetch_url", "write_file", "read_file", "list_files", "ask_user",
                   "report_progress"],
@@ -71,7 +75,7 @@ DEFAULTS = [
         "color": "#2EC4B6",
         "role": "Builder: RL environments and code - plans, writes files, and revises on request.",
         "provider": ONLY_PROVIDER,
-        "models": [DEFAULT_MODEL],
+        "models": list(GEMINI_FLASH),
         "thinking": "medium",
         "tools": ["write_file", "read_file", "list_files", "web_search", "fetch_url", "ask_user",
                   "report_progress"],
@@ -103,7 +107,7 @@ DEFAULTS = [
         "color": "#FFB547",
         "role": "Writer: long documents, reports and PDFs from notes or research.",
         "provider": ONLY_PROVIDER,
-        "models": [DEFAULT_MODEL],
+        "models": list(GEMINI_FLASH),
         "thinking": "low",
         "tools": ["write_file", "read_file", "list_files", "create_pdf", "ask_user", "report_progress"],
         "instructions": (
@@ -150,8 +154,9 @@ def _normal(agent: dict) -> dict:
 
 def normal_models(agent: dict) -> list[str]:
     """The agent's models as "provider/model", in order. Older agents.json files had "provider" + bare model
-    ids (and, before that, only GPT-6 Luna was allowed: agents made then said OpenRouter "openai/gpt-6-luna",
-    which is now the same model straight from OpenAI), plus an optional "fallback" block."""
+    ids (and, before that, only GPT-6 Luna was allowed: agents made then said OpenRouter "openai/gpt-6-luna"),
+    plus an optional "fallback" block. An agent the user never set models for (legacy, or still on the old
+    GPT-6 Luna default) runs on the Gemini Flash chain."""
     from mint.agents import catalog
     provider = str(agent.get("provider") or "")
     legacy = not agent.get("models_v2")
@@ -161,7 +166,7 @@ def normal_models(agent: dict) -> list[str]:
         if not raw:
             continue
         if legacy and not agent.get("allow_other_models"):
-            refs.append(DEFAULT_MODEL)       # the old rule: every agent on GPT-6 Luna from OpenAI
+            refs += GEMINI_FLASH             # never chosen by the user: today's default, not the old GPT-6 Luna
             continue
         head = raw.split("/", 1)[0]
         if head in catalog.all_providers() and "/" in raw and not (legacy and provider == "openrouter"):
@@ -171,7 +176,9 @@ def normal_models(agent: dict) -> list[str]:
     fb = agent.get("fallback")
     if isinstance(fb, dict) and agent.get("allow_other_models"):
         refs += [catalog.join(fb.get("provider", "gemini"), m) for m in fb.get("models") or []]
-    out = list(dict.fromkeys(refs)) or [DEFAULT_MODEL]
+    out = list(dict.fromkeys(refs)) or list(GEMINI_FLASH)
+    if out == [OLD_DEFAULT] and not agent.get("chose_models"):
+        out = list(GEMINI_FLASH)             # the old stock default, never changed by the user
     return out
 
 

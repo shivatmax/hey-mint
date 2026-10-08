@@ -155,7 +155,8 @@ Optional extras, each unlocking one thing:
 
 | Extra | Unlocks |
 |---|---|
-| OpenAI API key (Settings ▸ Accounts & keys) | Background agents: research, documents, code |
+| A second Gemini key (Settings ▸ Models & agents) | More room: when one key hits its limit, the other takes over - for the voice and everything else |
+| OpenAI, Anthropic or OpenRouter key | Other models for the background agents (they run on Gemini Flash without one) |
 | The [ChatGPT app](https://openai.com/chatgpt/desktop/) (it brings Codex) | The agent that builds websites and code projects |
 | TypeSafe key (Settings ▸ Accounts & keys) | Jev: the `desktop` tool (multi-step clicking and typing in any app, by the engine built into Mint) and surer picks of which button, skill or memory is meant |
 
@@ -242,7 +243,8 @@ Optional keys in `.env`:
 | Key | For |
 |---|---|
 | `TYPESAFE_API_KEY` | Jev, the fast chooser (which button, which skill, which memory), and the `desktop` tool |
-| `OPENAI_API_KEY` or `OPENROUTER_API_KEY` | Background agents (GPT-6 Luna) |
+| `GEMINI_API_KEY_2` | A second Gemini key: when one hits its limit, the other takes over |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | Other models for the background agents (Gemini Flash without one) |
 | `EXA_API_KEY` or `TAVILY_API_KEY` | Better web search (DuckDuckGo is used without one) |
 
 Then say **“Hey Mint”**, or press <kbd>⌘J</kbd> and type. For hands-free use only by you,
@@ -261,7 +263,7 @@ Personal settings live in files that are ignored by git: copy `custom.example.js
                              │
           ┌──────────────────┼───────────────────────────┐
           ▼                  ▼                           ▼
-  104 tools on the Mac   Jev (fast choices from     Agents (GPT-6 Luna, Codex)
+  104 tools on the Mac   Jev (fast choices from     Agents (Gemini Flash, Codex)
    Accessibility, menus,  real lists: controls,      research, code, documents,
    AppleScript, files,    skills, memories, apps)    websites; work as a team
    browser, Vision OCR

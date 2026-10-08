@@ -195,7 +195,7 @@ def expand(text):
 HEAD = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{full_title}</title><meta name="description" content="{desc}">
-<link rel="canonical" href="{url}"><meta name="theme-color" content="#F3F6FB">
+<link rel="canonical" href="{url}"><meta name="theme-color" content="#F3F6FB" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0D1219" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="{root}assets/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="{root}assets/og.png">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Hey Mint">
 <meta property="og:title" content="{full_title}"><meta property="og:description" content="{desc}">

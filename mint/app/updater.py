@@ -1,13 +1,18 @@
 """Updates: a downloaded Hey Mint.app installs new releases itself, in place, and keeps its permissions.
 
     "check for updates"             check    GitHub's latest release against this version
-    "update yourself"               install  download, check, swap the app, restart in a few seconds
+    "update yourself"               install  download now; install by itself the moment Mint is idle
     "which version are you?"        status   this version, the newest one, and what is happening
 
 At launch (unless it looked within the last hour) and every 12 hours Mint asks GitHub for the latest
 release (Settings: auto_update, on by default; update_channel "stable", or "beta" for pre-releases).
-A newer one is downloaded in the background and installed once the Mac has been left alone for a while
-(or right away when asked):
+A newer one is downloaded in the background and installed once the Mac has been left alone for a while.
+
+Asked for (by voice, or Settings' Install button), it downloads at once - retrying with backoff if that
+fails - and installs at the first moment Mint itself is idle: asleep (or paused), no tool, task, timer,
+sub-agent, voice training, Meet call, meeting or screen recording, or dictation going, not speaking.
+It never forces a restart: busy for hours, it waits for hours. The request is kept in update.json, so a
+reload picks it up again. Installing:
 
 1. the DMG is checked against its sha256 (latest.json, the .sha256 file and GitHub's own digest must
    agree), mounted read-only, and the app copied out;
@@ -57,12 +62,22 @@ DATA = Path.home() / "Library" / "Application Support" / "Hey Mint"
 STATE_FILE = DATA / "update.json"
 CACHE = Path.home() / "Library" / "Caches" / IDENTIFIER / "updates"
 RENAME_SWAP = 0x2
+POLL = 5.0                      # an update the user asked for: how often to look whether Mint is idle
+RETRY = (30, 60, 120, 300, 600, 1800)   # after a failed download / check / install, wait this long (s)
+REQUEST_FOR = 7 * 86400         # a request older than this (Mint never idle, never updated) is dropped
 
 _lock = threading.RLock()
+_prep_lock = threading.Lock()   # one download/unpack at a time (the auto check and a request may overlap)
 _state: dict = {"status": "idle", "detail": "", "progress": 0.0}
 _offer: dict | None = None      # the newer release found by the last check
 _staged: Path | None = None     # its app, downloaded and verified, ready to swap in
 _worker: threading.Thread | None = None
+_waiter: threading.Thread | None = None     # an update the user asked for: download, wait for idle, install
+_requested: float = 0.0         # when the user asked for the update (0: not asked)
+_waiting = ""                   # why the asked-for update is not installing yet ("" when it isn't waiting)
+_failures = 0                   # failed tries in a row (the backoff)
+_next_try = 0.0                 # no new try before this time
+_installing = False
 _started = False
 
 
@@ -256,9 +271,9 @@ def _set(status: str, detail: str = "", progress: float = 0.0) -> None:
 
 # --- checking --------------------------------------------------------------------------------------
 
-def check(now: bool = False) -> str:
+def check(now: bool = False, background: bool = True) -> str:
     """Ask GitHub for a newer version. Without `now`, at most every 12 hours (the saved last check).
-    With automatic updates on, a newer one starts downloading in the background."""
+    With automatic updates on (and `background`), a newer one starts downloading in the background."""
     global _offer
     last = float(_load().get("checked") or 0)
     if not now and time.time() - last < INTERVAL:
@@ -290,7 +305,7 @@ def check(now: bool = False) -> str:
                           "into Applications to replace this one - your settings and permissions stay.")
         return _state["detail"]
     _set("available", f"Hey Mint {offer['version']} is available (this is {current}).")
-    if auto():
+    if auto() and background:
         _prepare_async()
         return f"Hey Mint {offer['version']} is available; downloading it in the background."
     return _state["detail"] + " Say \"install the update\" to get it."
@@ -321,7 +336,7 @@ def info() -> dict:
                 "page": (_offer or {}).get("page") or saved.get("latest_page") or f"https://github.com/{REPO}/releases/latest",
                 "status": _state["status"], "detail": _state["detail"], "progress": _state["progress"],
                 "checked": _load().get("checked"), "ready": _staged is not None, "can_update": ok, "why": why,
-                "auto": auto(), "channel": _channel()}
+                "auto": auto(), "channel": _channel(), "requested": requested(), "waiting": _waiting}
 
 
 # --- downloading and checking the new app ----------------------------------------------------------
@@ -431,6 +446,11 @@ def verify(new: Path, current: Path, version: str = "") -> dict:
 
 def prepare(offer: dict, app: Path) -> Path:
     """Download, check and unpack a release; returns the verified app, ready to swap in."""
+    with _prep_lock:          # a second caller waits, then finds the app ready (and checks it again)
+        return _prepare(offer, app)
+
+
+def _prepare(offer: dict, app: Path) -> Path:
     global _staged
     folder = CACHE / offer["version"]
     ready = folder / APP_NAME
@@ -464,20 +484,19 @@ def prepare(offer: dict, app: Path) -> Path:
     return new
 
 
-def _prepare_async(then_install: bool = False) -> None:
+def _prepare_async() -> None:
+    """The automatic check's download, in the background (installing is the idle loop's business)."""
     global _worker
     with _lock:
         offer = _offer
         if offer is None or (_worker is not None and _worker.is_alive()):
             return
-        if _staged is not None and _staged.parent.name == offer["version"] and not then_install:
+        if _staged is not None and _staged.parent.name == offer["version"]:
             return
 
         def work():
             try:
                 prepare(offer, running_app())
-                if then_install:
-                    install_now()
             except Exception as error:
                 _set("error", f"The update to {offer['version']} failed: {error}")
 
@@ -574,8 +593,24 @@ def _pids() -> list[int]:
 
 
 def install_now(relaunch: bool = True, quit_after: float = 6.0) -> str:
-    """Swap the verified new app in, then quit; the detached script opens it."""
-    global _staged, _offer
+    """Swap the verified new app in, then quit; the detached script opens it. Once at a time: the idle
+    loop and a request's waiter may both find the moment."""
+    global _installing
+    with _lock:
+        if _installing:
+            return "Already installing the update."
+        _installing = True
+    try:
+        return _install_now(relaunch, quit_after)
+    finally:
+        # Released however it ends: a failure can be tried again; after a success nothing is staged any
+        # more, so a second call has nothing to install while Mint quits.
+        with _lock:
+            _installing = False
+
+
+def _install_now(relaunch: bool, quit_after: float) -> str:
+    global _staged, _offer, _requested
     app = running_app()
     with _lock:
         staged, offer = _staged, _offer
@@ -598,9 +633,10 @@ def install_now(relaunch: bool = True, quit_after: float = 6.0) -> str:
         _trash(old, f"Hey Mint {before}.app")
     except Exception as error:                    # the new one is in place; the old stays hidden beside it
         log.warning("update: old app not trashed (%s); it is at %s", error, old)
-    _save(updated={"from": before, "to": offer["version"], "at": time.time(), "notes": offer["notes"][:600]})
+    _save(updated={"from": before, "to": offer["version"], "at": time.time(), "notes": offer["notes"][:600]},
+          requested=None)
     with _lock:
-        _staged, _offer = None, None
+        _staged, _offer, _requested = None, None, 0.0
     shutil.rmtree(CACHE / offer["version"], ignore_errors=True)
     _set("installed", f"Hey Mint {offer['version']} is installed; restarting.")
     log.info("update: %s -> %s installed at %s", before, offer["version"], app)
@@ -611,35 +647,274 @@ def install_now(relaunch: bool = True, quit_after: float = 6.0) -> str:
 
 
 def install(wait: bool = False) -> str:
-    """Install the newest version now: straight away if it is downloaded, else once it is."""
+    """The user asked for the update (Settings' Install button, "update yourself"): download it now and
+    install it by itself at the first moment Mint is idle - at once when it already is. `wait`: download
+    and install right here, idle or not (no caller uses it any more; kept for scripts)."""
+    app = running_app()
+    ok, why = packaged(app)
+    if not ok:
+        return why
+    if not wait:
+        return request()
+    with _lock:
+        offer = _offer
+    if offer is None:
+        text = check(now=True, background=False)
+        with _lock:
+            offer = _offer
+        if offer is None:
+            return text
+    try:
+        prepare(offer, app)
+        return install_now()
+    except Exception as error:
+        _set("error", f"The update to {offer['version']} failed: {error}")
+        return _state["detail"]
+
+
+# --- asked for: install at the first idle moment ---------------------------------------------------
+
+def requested() -> bool:
+    """The user asked for an update that isn't installed yet."""
+    with _lock:
+        return bool(_requested)
+
+
+def request() -> str:
+    """Remember that the user asked, start the waiter (download, then install once Mint is idle) and say
+    what happens. Never restarts mid-conversation or mid-task; the waiter waits as long as it takes."""
+    global _requested, _failures, _next_try
     app = running_app()
     ok, why = packaged(app)
     if not ok:
         return why
     with _lock:
-        ready, offer = _staged is not None, _offer
+        offer = _offer
     if offer is None:
-        text = check(now=True)
+        text = check(now=True, background=False)
         with _lock:
             offer = _offer
         if offer is None:
-            return text
+            if _state["status"] in ("current", "blocked"):
+                return text                     # the newest already, or not for this macOS: nothing to wait for
+            with _lock:                         # the check failed (offline?): the waiter tries again
+                _requested = _requested or time.time()
+                _next_try = time.time() + RETRY[0]
+            _ensure_waiter()
+            return text + " I'll keep trying; it installs itself once it's downloaded and Mint is idle."
+    with _lock:
+        _requested = _requested or time.time()
+        _failures, _next_try = 0, 0.0           # asked again: try at once
+        ready = _staged is not None and _staged.parent.name == offer["version"]
+    _save(requested={"version": offer["version"], "at": _requested})
+    log.info("update: %s asked for; installs when Mint is idle", offer["version"])
+    reason = busy_reason() if ready else "downloading"
+    _ensure_waiter()
+    if ready and not reason:
+        return f"Installing Hey Mint {offer['version']} - Mint restarts in a few seconds."
     if ready:
-        try:
-            return install_now()
-        except Exception as error:
-            _set("error", f"The update to {offer['version']} failed: {error}")
-            return _state["detail"]
-    if wait:
-        try:
-            prepare(offer, app)
-            return install_now()
-        except Exception as error:
-            _set("error", f"The update to {offer['version']} failed: {error}")
-            return _state["detail"]
-    _prepare_async(then_install=True)
+        return f"Hey Mint {offer['version']} is downloaded; it installs itself as soon as Mint is idle."
     size = f" ({offer['size'] / 1e6:.0f} MB)" if offer["size"] else ""
-    return f"Downloading Hey Mint {offer['version']}{size}; Mint restarts by itself when it's ready."
+    return f"Downloading Hey Mint {offer['version']}{size}; it installs itself as soon as Mint is idle."
+
+
+def _live_session():
+    """The running session, if it is loaded (looked up, not imported: the updater must not start one)."""
+    module = sys.modules.get(f"{__package__}.session")
+    return getattr(getattr(module, "Mint", None), "live", None)
+
+
+def session_busy(mint) -> str:
+    """Why this session isn't idle enough to restart ("" when it is): awake and talking, running a tool,
+    speaking, a plan under way, a timer, a sub-agent, voice training, a Mint Meet call."""
+    if mint is None:
+        return ""
+    quiet = time.monotonic() - max(float(getattr(mint, "_last_active", 0) or 0),
+                                   float(getattr(mint, "_last_voice", 0) or 0))
+    # Asleep, or paused; without the wake word (never asleep): quiet for two minutes.
+    resting = (getattr(mint, "asleep", False) or getattr(mint, "paused", False)
+               or (not getattr(mint, "hands_free", True) and quiet >= 120))
+    if not resting:
+        return "talking"
+    tool = getattr(mint, "_tool_task", None)
+    if getattr(mint, "_busy", False) or (tool is not None and not tool.done()):
+        return "running a tool"
+    audio = getattr(mint, "audio", None)
+    if getattr(mint, "_turn_open", False) or getattr(audio, "playing", False):
+        return "speaking"
+    if getattr(mint, "_pending_text", None) or getattr(mint, "_pending_wake", None):
+        return "about to answer"
+    task = getattr(mint, "task", None)
+    if task:
+        try:
+            from mint.app import tasks
+            fresh = time.time() - float(task.get("updated") or task.get("started") or 0) < 600
+            if fresh and tasks.remaining(task):
+                return "working on a task"
+        except Exception:
+            pass
+    if getattr(mint, "_timers", None):
+        return "a timer is running"
+    if getattr(mint, "enroller", None) is not None or getattr(mint, "_recalibrating", False):
+        return "training the voice"
+    if getattr(mint, "meet", None) is not None:
+        return "in a Meet call"
+    try:
+        from mint.agents.runtime import hub
+        if any(run.active for run in hub.runs.values()):
+            return "a sub-agent is working"
+        if hub._outbox or hub._finished:
+            return "a sub-agent's report is waiting"
+    except Exception:
+        pass
+    return ""
+
+
+def _others_busy() -> str:
+    """Recording a meeting or the screen, learning a task, dictating, watching the screen for the user.
+    (Trackers and automations are not here: they pick up again after the restart.)"""
+    def ask(load, call: str) -> bool:
+        try:
+            return bool(getattr(load(), call)())
+        except Exception:
+            return False
+
+    def meetings():
+        from mint.tools import meetings
+        return meetings
+
+    def dictation():
+        from mint.voice import dictation
+        return dictation
+
+    def screenrec():
+        from mint.tools import screenrec
+        return screenrec
+
+    def teach():
+        from mint.knowledge import teach
+        return teach
+
+    def work_tools():
+        from mint.tools import work as work_tools
+        return work_tools
+
+    for load, call, reason in ((meetings, "busy", "recording a meeting"), (dictation, "capturing", "dictating"),
+                               (screenrec, "busy", "recording the screen"), (teach, "recording", "learning a task"),
+                               (work_tools, "busy", "watching the screen")):
+        if ask(load, call):
+            return reason
+    return ""
+
+
+def busy_reason() -> str:
+    """Why Mint can't restart for an update right now ("" when it can)."""
+    return session_busy(_live_session()) or _others_busy()
+
+
+def _fail(version: str, error) -> None:
+    global _failures, _next_try
+    with _lock:
+        _failures += 1
+        delay = RETRY[min(_failures, len(RETRY)) - 1]
+        _next_try = time.time() + delay
+    when = f"{delay // 60} min" if delay >= 60 else f"{delay} s"
+    _set("error", f"The update to {version or 'the new version'} failed: {error}. Trying again in {when}.")
+
+
+def _tick() -> str:
+    """One look by the waiter. "done": nothing (more) to do; "retry": a failure, backing off; "wait":
+    downloaded, Mint busy; "installed": swapped in, Mint quits and the new one opens."""
+    global _requested, _waiting, _failures
+    if not requested():
+        return "done"
+    app = running_app()
+    if not packaged(app)[0]:
+        with _lock:
+            _requested = 0.0
+        _save(requested=None)
+        return "done"
+    with _lock:
+        offer, staged, installing = _offer, _staged, _installing
+    if installing:
+        return "wait"                               # (the idle loop got there first; quitting, or it failed)
+    if time.time() < _next_try:
+        return "retry"
+    if offer is None or staged is None or staged.parent.name != offer["version"]:
+        version = (offer or {}).get("version", "")
+        try:
+            if offer is None:                       # (picked up after a reload, or the last check failed)
+                text = check(now=True, background=False)
+                with _lock:
+                    offer = _offer
+                if offer is None:
+                    if _state["status"] in ("current", "blocked"):
+                        with _lock:
+                            _requested = 0.0
+                        _save(requested=None)
+                        return "done"
+                    raise UpdateError(text)
+                version = offer["version"]
+            prepare(offer, app)
+        except Exception as error:
+            _fail(version, error)
+            return "retry"
+        with _lock:
+            _failures, _waiting = 0, ""
+        _save(requested={"version": offer["version"], "at": _requested})
+    reason = busy_reason()
+    if reason:
+        if reason != _waiting:
+            log.info("update: %s downloaded; waiting (%s)", offer["version"], reason)
+            _set("ready", f"Hey Mint {offer['version']} is downloaded; it installs itself as soon as Mint is "
+                          f"idle (now: {reason}).", 1.0)
+        _waiting = reason
+        return "wait"
+    _waiting = ""
+    try:
+        install_now(quit_after=2.0)
+    except Exception as error:
+        _fail(offer["version"], error)
+        return "retry"
+    return "installed"
+
+
+def _wait_loop() -> None:
+    while True:
+        try:
+            outcome = _tick()
+        except Exception as error:                  # never let the waiter die quietly
+            log.warning("update waiter: %s", error)
+            outcome = "retry"
+        if outcome in ("done", "installed"):
+            return
+        time.sleep(POLL)
+
+
+def _ensure_waiter() -> None:
+    global _waiter
+    with _lock:
+        if _waiter is not None and _waiter.is_alive():
+            return
+        _waiter = threading.Thread(target=_wait_loop, name="mint-update-waiter", daemon=True)
+        _waiter.start()
+
+
+def _resume_request() -> None:
+    """At launch: an update asked for before a reload (Mint Ear, a crash) carries on; one that is now
+    installed, or too old, is forgotten."""
+    global _requested
+    saved = _load().get("requested")
+    if not isinstance(saved, dict):
+        return
+    at = float(saved.get("at") or 0)
+    if time.time() - at > REQUEST_FOR or not newer(str(saved.get("version") or ""), current_version()):
+        _save(requested=None)
+        return
+    with _lock:
+        _requested = at
+    log.info("update: %s was asked for; carrying on", saved.get("version"))
+    _ensure_waiter()
 
 
 # --- in the background -----------------------------------------------------------------------------
@@ -678,6 +953,8 @@ def _welcome_back() -> None:
     _save(updated=None)
     if done.get("to") != current_version() or time.time() - float(done.get("at") or 0) > 86400:
         return
+    log.info("update: now %s (from %s)", done["to"], done.get("from"))
+    print(f"  {time.strftime('%H:%M:%S')} [updated to {done['to']}]", flush=True)
     notes = [line.strip("-* ").replace("**", "") for line in str(done.get("notes") or "").splitlines()
              if line.strip().startswith(("-", "*"))]
     from mint.tools import cards
@@ -689,7 +966,8 @@ def _welcome_back() -> None:
 def start(can_install=None) -> None:
     """Once, when Mint starts: the "Updated" card, then checks at launch and every 12 hours.
     A downloaded update installs itself once nobody has touched the Mac for 10 minutes, nothing is
-    being recorded or tracked, and `can_install()` (the session: not mid-conversation) agrees."""
+    being recorded or tracked, and `can_install()` (the session: not mid-conversation) agrees.
+    One the user asked for doesn't wait for the Mac: it installs as soon as Mint is idle (request())."""
     global _started
     if _started:
         return
@@ -706,6 +984,10 @@ def start(can_install=None) -> None:
         except Exception as error:
             log.info("update card: %s", error)
         shutil.rmtree(CACHE / current_version(), ignore_errors=True)   # what we just installed
+        try:
+            _resume_request()                        # asked for before a reload: carry on now
+        except Exception as error:
+            log.info("update request: %s", error)
         time.sleep(52)
         if not packaged(running_app())[0]:
             return
@@ -739,10 +1021,11 @@ def declarations():
     S = types.Type.STRING
     return [types.FunctionDeclaration(
         name="update",
-        description=("Hey Mint's own updates. check: ask GitHub whether a newer version is out. install: download "
-                     "it and install it now (Mint restarts itself a few seconds later, keeping its permissions; "
-                     "say so first). status: which version this is, the newest one, and whether an update is "
-                     "downloading or ready. Actions: check, install, status."),
+        description=("Hey Mint's own updates. check: ask GitHub whether a newer version is out. install (\"update "
+                     "yourself\", \"install the update\"): start downloading it now; Mint installs it by itself the "
+                     "moment it is idle (asleep, nothing running) and is back a few seconds later, keeping its "
+                     "permissions - say one short line and carry on. status: which version this is, the newest "
+                     "one, and whether an update is downloading, waiting or ready. Actions: check, install, status."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
             "action": types.Schema(type=S, enum=["check", "install", "status"])},
             required=["action"]))]
@@ -753,7 +1036,11 @@ def tool(args: dict) -> str:
     if action == "check":
         return check(now=True)
     if action == "install":
-        return install()
+        text = install()
+        if requested():                 # asked mid-conversation: it waits for Mint to be idle
+            return (text + " Tell the user in one short line - e.g. \"Downloading the update - I'll install it "
+                    "when I'm idle.\" - and carry on; nothing to wait for.")
+        return text
     return status()
 
 

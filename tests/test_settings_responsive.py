@@ -9,11 +9,11 @@ import pytest
 
 try:
     from mint.app import ear, power
-    from mint.core import prefs
+    from mint.core import permissions, prefs
+    from mint.ui import brands, settings_connectors, settings_models
     from mint.ui import settings as settings_window
-    from mint.ui import settings_connectors, settings_models
 except ImportError:
-    from mint import ear, power, prefs, settings_connectors, settings_models, settings_window
+    from mint import brands, ear, permissions, power, prefs, settings_connectors, settings_models, settings_window
 
 AppKit = pytest.importorskip("AppKit")
 
@@ -169,8 +169,10 @@ def test_merged_pages_keep_their_old_keys():
     assert not {"audio", "apple_shortcuts", "connectors"} & set(keys)
     assert dict((k, t) for k, t, _ in settings_window.PAGES)["voice"] == "Microphone & voice"
     assert dict((k, t) for k, t, _ in settings_window.PAGES)["accounts"] == "Accounts & connections"
+    assert dict((k, t) for k, t, _ in settings_window.PAGES)["storage"] == "Permissions & Privacy"
     for old, new in {"audio": "voice", "apple_shortcuts": "shortcuts", "connectors": "accounts", "voice": "voice",
-                     "models": "models", "": "general", "gone": "general"}.items():
+                     "models": "models", "": "general", "gone": "general", "permissions": "storage",
+                     "privacy": "storage"}.items():
         assert settings_window.page_for(old) == new, old
     assert prefs.DEFAULTS["settings_advanced"] is False
 
@@ -196,7 +198,8 @@ def test_advanced_rows_show_only_when_asked(fresh_prefs, monkeypatch):
         win.page_key = key
         words = _texts(win._build_page(_column(), 480).doc)
         assert technical not in words, key
-        assert "Show advanced settings" in words if key == "general" else "More settings" in words
+        assert ("Show advanced settings" in words if key == "general"
+                else any(w.startswith("More settings: ") for w in words))
     win.page_key = "voice"
     buttons = [str(v.title()) for v in _views(win._build_page(_column(), 480).doc) if isinstance(v, AppKit.NSButton)]
     assert "Test microphone" in buttons and "Train my voice…" in buttons and "Test" not in buttons
@@ -219,6 +222,144 @@ def test_one_calls_choice_sets_both_prefs(fresh_prefs, monkeypatch):
         popup.selectItemAtIndex_(index)
         win._changed(popup)
         assert (prefs.get("share_mic"), prefs.get("listen_in_calls")) == expected, index
+
+
+# --- permissions, the All settings switch, More providers --------------------------------------------
+
+def _buttons(view):
+    return [v for v in _views(view) if isinstance(v, AppKit.NSButton)]
+
+
+def test_needs_your_ok_shows_only_missing_important_permissions(fresh_prefs, monkeypatch):
+    allowed = {kind: "allowed" for kind in permissions.IMPORTANT}
+    facts = {"login": False, "can_restart": False, "perms": allowed}
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_general", lambda self: dict(facts))
+    win = _window()
+    win.page_key = "general"
+    words = _texts(win._build_page(_column(), 480).doc)
+    assert "Needs your OK" not in words and "Microphone" not in words
+    assert win._perm_seen == ("important", allowed)          # the watch compares against what is shown
+
+    facts["perms"] = dict(allowed, microphone="ask", screen="denied")
+    doc = win._build_page(_column(), 480).doc
+    words = _texts(doc)
+    assert words[:1] == ["Needs your OK"]                     # at the top of General
+    assert "Microphone" in words and "Screen Recording" in words and "Accessibility" not in words
+    titles = [str(b.title()) for b in _buttons(doc)]
+    assert "Allow…" in titles and "Open Settings…" in titles
+
+
+def test_permissions_page_lists_every_permission(fresh_prefs, monkeypatch):
+    statuses = {kind: "allowed" for kind, *_ in permissions.ALL}
+    statuses["calendar"] = "ask"
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_storage",
+                        lambda self: {"folder": "/tmp", "perms": dict(statuses)})
+    win = _window()
+    win.page_key = "storage"
+    doc = win._build_page(_column(), 480).doc
+    words = _texts(doc)
+    assert words[0] == "Permissions"                          # first on the page
+    for _, _, _, title, _, _ in permissions.ALL:
+        assert title in words, title
+    assert words.count("Allowed ✓") == len(permissions.ALL) - 1 and words.count("Not allowed") == 1
+    asked = []
+    monkeypatch.setattr(permissions, "ask", lambda kind, already: asked.append(kind))
+    allow = next(b for b in _buttons(doc) if str(b.title()) == "Allow…")
+    win._changed(allow)
+    assert asked == ["calendar"]
+
+
+def test_permission_snapshot_reads_each_kind(monkeypatch):
+    monkeypatch.setattr(permissions, "status", lambda kind, asked=(): "denied" if kind == "screen" else "allowed")
+    snap = permissions.snapshot((), permissions.IMPORTANT)
+    assert set(snap) == set(permissions.IMPORTANT)
+    assert permissions.missing_important(snap) == ["screen"]
+    assert permissions.missing_important({k: "allowed" for k in permissions.IMPORTANT}) == []
+
+
+def test_the_switch_at_the_top_flips_all_settings(fresh_prefs):
+    win = _window()
+    win.page_key = "voice"
+    switch = win._advanced_switch(AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 300, 40)), 0, 0, 200)
+    assert switch.selectedSegment() == 0 and not prefs.get("settings_advanced")
+    switch.setSelectedSegment_(1)
+    win._changed(switch)
+    assert prefs.get("settings_advanced") is True
+    switch.setSelectedSegment_(0)
+    win._changed(switch)
+    assert prefs.get("settings_advanced") is False
+    assert "general" in settings_window.ADVANCED_PAGES and "usage" not in settings_window.ADVANCED_PAGES
+
+
+MODELS = {"gemini_status": {}, "gemini_keys": 1, "keys": {p: "" for p in settings_models.KEYED}, "settings": {},
+          "custom": {}, "agents": [], "codex_problem": "", "codex_models": {}}
+
+
+def test_more_providers_open_in_place(fresh_prefs, monkeypatch):
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_models",
+                        lambda self: {**MODELS, "keys": dict(MODELS["keys"], groq="gsk_abcdefgh1234")})
+    monkeypatch.setattr(settings_window.AppHelper, "callAfter", lambda fn, *a: fn(*a))
+    win = _window()
+    win.page_key = "models"
+    win.refresh = lambda keep_scroll=False: None
+    doc = win._build_page(_column(), 480).doc
+    words = _texts(doc)
+    assert "OpenAI" in words and "Groq" in words              # the common one, and one with a key
+    assert "Anthropic (Claude)" not in words and "More providers…" in words
+    assert "Set ••••1234 ✓" in words and "Not set" in words
+    assert "Add key…" in [str(b.title()) for b in _buttons(doc)]
+    more = next(b for b in _buttons(doc) if str(b.title()).startswith("Show ") and str(b.title()).endswith(" more"))
+    win._changed(more)
+    words = _texts(win._build_page(_column(), 480).doc)
+    assert "Anthropic (Claude)" in words and "xAI Grok" in words and "Ollama (on this Mac)" in words
+    assert "More providers…" not in words
+    assert not prefs.get("settings_advanced")                 # opened without All settings
+
+
+def test_icon_tiles_know_every_brand():
+    for kind in ("google", "gmail", "calendar_app", "meet", "telegram", "email", "shortcuts", "gemini", "typesafe",
+                 *settings_models.KEYED, "ollama"):
+        assert kind in settings_window.BRANDS, kind
+    for kind, *_ in permissions.ALL:
+        background, glyph = settings_window._brand(f"perm:{kind}")
+        assert glyph[0] == "symbol"
+    tile = settings_window._icon_tile(AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 40, 40)), 0, 0,
+                                      "google")
+    assert tile.kind == "google" and tile.frame().size.width == settings_window.ICON
+
+
+def test_every_drawn_brand_tile_draws(monkeypatch):
+    """A drawing error is swallowed (a blank tile beats a broken window): make sure there are none."""
+    failed = []
+    monkeypatch.setattr(brands.log, "debug", lambda *a, **k: failed.append(a[1:]) if k.get("exc_info") else None)
+    image = AppKit.NSImage.alloc().initWithSize_(AppKit.NSMakeSize(28, 28))
+    image.lockFocus()
+    try:
+        for kind in [*brands.BRANDS, *(f"perm:{k}" for k, *_ in permissions.ALL)]:
+            brands.draw_tile(kind, 28.0)
+    finally:
+        image.unlockFocus()
+    assert not failed
+
+
+def test_setup_guide_anchors_exist(fresh_prefs, monkeypatch):
+    """The setup guide opens Settings at page#anchor: every anchor it uses is where it should be."""
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_voice", lambda self: dict(VOICE))
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_looks", lambda self: {
+        "hooks": "Connect Claude Code", "limits": "Show Claude's usage limits", "mcp": {}, "usage": "",
+        "agents_here": True})
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_storage", lambda self: {
+        "folder": "/tmp", "perms": {kind: "allowed" for kind, *_ in permissions.ALL}})
+    win = _window()
+    for page_key, anchor in (("voice", "voice"), ("looks", "claude_code"), ("storage", "permissions")):
+        win.page_key = page_key
+        doc = win._build_page(_column(), 480).doc
+        assert anchor in win._anchors, (page_key, anchor)
+        if page_key == "looks":                   # connecting Claude Code is in the basic view
+            assert "Connect Claude Code" in [str(b.title()) for b in _buttons(doc)]
+    source = inspect.getsource(settings_window.SettingsWindow._page_accounts)
+    for anchor in ("keys", "google", "meet", "connectors", "telegram", "email"):
+        assert f'self._anchor(page, "{anchor}")' in source, anchor
 
 
 # --- settings listeners run off the main thread -----------------------------------------------------

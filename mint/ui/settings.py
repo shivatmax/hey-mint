@@ -6,8 +6,8 @@ click or a hand edit: listeners in main.py react (audio devices rebuild the engi
 trains its wake word, a new voice or language reconnects, and so on).
 
 Pages
-  General                 assistant name, personality, your name, about you, start at login, Quit,
-                          Show advanced settings
+  General                 "Needs your OK" (important macOS permissions still missing, with Allow…), assistant
+                          name, personality, your name, about you, start at login, Quit, Show advanced settings
   Microphone & voice      the microphone test, Train my voice and the voice lock, the wake word and its
                           sensitivity, microphone and speaker, what to do during calls
   Speaking                which of the 30 Gemini voices, speaking style, language, captions
@@ -16,16 +16,28 @@ Pages
   Accounts & connections  API keys, Google, Telegram, Email control; then the apps Mint works with
   Models & agents         Gemini keys, the agents (providers and backups when advanced)
   Skills & Memory         counts, and the window to edit them
-  Storage & Privacy       the Mint folder, meetings, clipboard, the activity timeline
+  Permissions & Privacy   every macOS permission (Allowed / Not allowed, Allow…), the Mint folder, meetings,
+                          clipboard, the activity timeline
   Usage                   tokens per model: today, 7 days, 30 days
   Updates & Help          version, updates, the guide, reporting a problem, restarting Mint
 
 Old page keys still work (ALIASES): "audio" opens Microphone & voice, "apple_shortcuts" Shortcuts,
-"connectors" Accounts & connections.
+"connectors" Accounts & connections, "permissions" and "privacy" Permissions & Privacy (key "storage").
 
 Basic and advanced: each page shows what most people change; the technical rows (a custom wake phrase,
 echo cancellation, model providers, guard levels…) are built only when the "settings_advanced" pref is on
-(`self._advanced()`): General ▸ Show advanced settings, or Show more at the bottom of a page.
+(`self._advanced()`): the Essentials | All settings switch at the top right of a page, General ▸ Show
+advanced settings, or the small Show all settings line at the bottom of a page.
+
+Permissions (permissions.py, shared with the welcome window) are read with the page's facts; while General or
+Permissions & Privacy is on screen they are read again every few seconds (and when the window comes back to the
+front), off the main thread, and the page is rebuilt only when one changed - so allowing Mint in System
+Settings shows here at once.
+
+Looks: brand marks (brands.icon_tile - an official logo file, the installed app's icon, or a drawn tile:
+Google's four-colour G, Gemini's sparkle…, the same mark everywhere),
+prominent tinted buttons for the main action of a row (Add key…, Connect…, Allow…), and small coloured status
+badges (_badge: Set / Not set / Allowed).
 
 Nothing that can wait runs on the main thread: what a page shows from elsewhere (files, CoreAudio,
 `shortcuts list`, other modules and their locks, the network) is read by its _facts_<page> on a
@@ -54,6 +66,7 @@ from mint.voice import devices as audio_devices
 from mint.core import prefs
 from mint.voice import voicelock
 from mint.voice import voices
+from mint.ui.brands import BRANDS, ICON, brand as _brand, icon_tile as _icon_tile, rgb as _rgb  # noqa: F401 - used here and by tests
 
 log = logging.getLogger("mint.settings")
 
@@ -118,10 +131,41 @@ PAGES = [("general", "General", "gearshape"), ("voice", "Microphone & voice", "m
          ("accounts", "Accounts & connections", "person.crop.circle"),
          ("models", "Models & agents", "cpu"),
          ("brain", "Skills & Memory", "brain"),
-         ("storage", "Storage & Privacy", "lock.shield"), ("usage", "Usage", "chart.bar"),
+         ("storage", "Permissions & Privacy", "hand.raised"), ("usage", "Usage", "chart.bar"),
          ("help", "Updates & Help", "questionmark.circle")]
 # Pages that were merged into another: show("audio") opens Microphone & voice, and so on.
-ALIASES = {"audio": "voice", "apple_shortcuts": "shortcuts", "connectors": "accounts"}
+ALIASES = {"audio": "voice", "apple_shortcuts": "shortcuts", "connectors": "accounts", "permissions": "storage",
+           "privacy": "storage"}
+# Pages with rows that only "All settings" shows: they get the Essentials | All settings switch at the top.
+ADVANCED_PAGES = {"general", "voice", "looks", "shortcuts", "accounts", "models", "help"}
+# Pages that show permissions: read again every PERM_EVERY seconds while one is on screen.
+PERM_PAGES = {"general": "important", "storage": "all"}
+PERM_EVERY = 3.0
+# A small coloured symbol before a section's title.
+SECTION_ICONS = {
+    "Needs your OK": ("exclamationmark.triangle.fill", (1.0, 0.62, 0.04)),
+    "Permissions": ("hand.raised.fill", (0.2, 0.47, 1.0)),
+    "Assistant": ("person.crop.circle.fill", (0.2, 0.75, 0.55)), "Behaviour": ("slider.horizontal.3", (0.55, 0.45, 0.95)),
+    "Microphone test": ("waveform", (1.0, 0.36, 0.55)), "Your voice": ("person.wave.2.fill", (0.2, 0.6, 1.0)),
+    "Wake word": ("ear.fill", (1.0, 0.6, 0.1)), "Microphone and speaker": ("speaker.wave.2.fill", (0.45, 0.5, 0.62)),
+    "Calls and meetings": ("phone.fill", (0.2, 0.75, 0.4)), "Voice": ("person.wave.2.fill", (0.2, 0.6, 1.0)),
+    "Language": ("globe", (0.2, 0.6, 1.0)), "Replies": ("text.bubble.fill", (0.55, 0.45, 0.95)),
+    "View": ("macwindow", (0.2, 0.6, 1.0)), "Sounds": ("speaker.wave.2.fill", (1.0, 0.45, 0.3)),
+    "Keyboard shortcuts": ("command", (0.45, 0.5, 0.62)), "Dictation": ("mic.fill", (1.0, 0.42, 0.62)),
+    "API keys": ("key.fill", (0.95, 0.68, 0.0)), "Google: Gmail, Calendar and Meet": ("g.circle.fill", (0.26, 0.52, 0.96)),
+    "Telegram remote control": ("paperplane.fill", (0.16, 0.62, 0.93)), "Email control": ("at", (1.0, 0.55, 0.1)),
+    "Gemini": ("sparkles", (0.4, 0.45, 0.98)), "AI models for your agents": ("cpu.fill", (0.55, 0.45, 0.95)),
+    "Agents": ("person.3.fill", (0.24, 0.72, 0.62)), "Mint folder": ("folder.fill", (0.2, 0.6, 1.0)),
+    "Meetings": ("video.fill", (0.2, 0.75, 0.4)), "Clipboard": ("doc.on.clipboard.fill", (0.55, 0.45, 0.95)),
+    "Privacy": ("lock.fill", (0.45, 0.5, 0.62)), "Settings window": ("gearshape.fill", (0.45, 0.5, 0.62)),
+    "Tokens by model": ("chart.bar.fill", (0.2, 0.6, 1.0)), "Last 14 days": ("calendar", (1.0, 0.36, 0.33)),
+    "Hey Mint": ("arrow.down.circle.fill", (0.2, 0.75, 0.4)), "Your Apple Shortcuts": ("square.stack.3d.up.fill",
+                                                                                       (0.93, 0.27, 0.55)),
+    "Claude mode (coding agents)": ("chevron.left.forwardslash.chevron.right", (0.85, 0.47, 0.34)),
+    "Backups for every agent": ("arrow.triangle.2.circlepath", (0.2, 0.6, 1.0)), "Connected apps": ("checkmark.circle.fill", (0.2, 0.75, 0.4)),
+    "Available on this Mac": ("plus.circle.fill", (1.0, 0.6, 0.1)), "Skills": ("graduationcap.fill", (0.2, 0.6, 1.0)),
+    "Memory": ("brain.head.profile", (1.0, 0.42, 0.62)), "Help": ("questionmark.circle.fill", (0.2, 0.6, 1.0)),
+}
 
 
 def page_for(key: str | None) -> str:
@@ -154,6 +198,9 @@ class _SettingsTarget(AppKit.NSObject):
 
     def windowWillClose_(self, note):
         self.owner._closed()
+
+    def windowDidBecomeKey_(self, note):
+        self.owner._perm_check()            # back from System Settings: show a permission just allowed
 
 
 class _SettingsFlipped(AppKit.NSView):
@@ -190,6 +237,50 @@ def _text_height(text: str, size: float, width: float) -> float:
     return float(rect.size.height) + 2
 
 
+# --- colour: brand tiles, badges, prominent buttons ----------------------------------------------------
+
+TONES = {"ok": "systemGreenColor", "warn": "systemOrangeColor", "bad": "systemRedColor", "info": "systemBlueColor",
+         "off": "secondaryLabelColor"}
+
+
+def _text_width(text: str, size: float, bold: bool = False) -> float:
+    font = (AppKit.NSFont.systemFontOfSize_weight_(size, AppKit.NSFontWeightSemibold) if bold
+            else AppKit.NSFont.systemFontOfSize_(size))
+    return float(AppKit.NSString.stringWithString_(text).sizeWithAttributes_({AppKit.NSFontAttributeName: font}).width)
+
+
+def _badge(view, text: str, right: float, mid_y: float, tone: str = "ok", max_w: float = 0.0):
+    """A small coloured pill (Set ✓, Not set, Allowed…), right-aligned at `right`, centred on `mid_y`."""
+    color = getattr(AppKit.NSColor, TONES.get(tone, "secondaryLabelColor"))()
+    h = 20.0
+    w = _text_width(text, 11, bold=True) + 20
+    if max_w:
+        w = min(w, max_w)
+    pill = _SettingsFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(right - w, mid_y - h / 2, w, h))
+    pill.setWantsLayer_(True)
+    pill.layer().setCornerRadius_(h / 2)
+    pill.layer().setBackgroundColor_(_cgc(color, 0.16))
+    label = AppKit.NSTextField.labelWithString_(text)
+    label.setFrame_(AppKit.NSMakeRect(6, 2, w - 12, 16))
+    label.setFont_(AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightSemibold))
+    label.setTextColor_(color)
+    label.setAlignment_(AppKit.NSTextAlignmentCenter)
+    label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
+    pill.addSubview_(label)
+    pill.label = label
+    view.addSubview_(pill)
+    return pill
+
+
+def _prominent(button, color=None) -> None:
+    """The main action of a row: a filled button in the accent colour (or `color`, an NSColor or rgb)."""
+    if isinstance(color, tuple):
+        color = _rgb(color)
+    button.setBezelColor_(color or AppKit.NSColor.controlAccentColor())
+    if hasattr(button, "setTintProminence_"):
+        button.setTintProminence_(getattr(AppKit, "NSTintProminencePrimary", 2))
+
+
 class _Page:
     """Builds one page top-down: section() opens a card, rows go in it, end() closes it."""
 
@@ -198,11 +289,28 @@ class _Page:
         self.y = 0.0
         self.card = None
         self.card_y = 0.0
+        self.hint = None                  # the last row's hint label
+        self.title_y = 0.0                # where the last section's title is
 
-    def section(self, title: str = "") -> None:
+    def section(self, title: str = "", icon=None) -> None:
+        """A card, with `title` above it - and a small coloured symbol before the title (`icon`: (symbol, rgb),
+        or SECTION_ICONS by title; "" for none)."""
         if title:
-            label = self.owner._label(self.doc, title, 4, self.y, self.width, h=18, size=13, bold=True)
+            symbol = SECTION_ICONS.get(title) if icon is None else icon
+            x = 4
+            if symbol:
+                image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(symbol[0], None)
+                if image is not None:
+                    config = AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_(
+                        12, AppKit.NSFontWeightSemibold)
+                    glyph = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(4, self.y + 1, 16, 16))
+                    glyph.setImage_(image.imageWithSymbolConfiguration_(config))
+                    glyph.setContentTintColor_(_rgb(symbol[1]))
+                    self.doc.addSubview_(glyph)
+                    x = 25
+            label = self.owner._label(self.doc, title, x, self.y, self.width - x, h=18, size=13, bold=True)
             label.setTextColor_(AppKit.NSColor.labelColor())
+            self.title_y = self.y
             self.y += 26
         card = _SettingsFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, self.y, self.width, 10))
         card.setWantsLayer_(True)
@@ -213,23 +321,28 @@ class _Page:
         self.doc.addSubview_(card)
         self.card, self.card_y = card, 0.0
 
-    def row(self, title: str, hint: str = "", height: float = 0, control_w: float = 0) -> tuple:
-        """A row with `title` (and a grey `hint` under it) on the left. -> (card, top of the row,
-        x where the control goes, right edge). Rows grow to fit a long hint."""
-        label_w = self.width - 32 - (control_w + 16 if control_w else 0)
+    def row(self, title: str, hint: str = "", height: float = 0, control_w: float = 0, icon: str = "") -> tuple:
+        """A row with `title` (and a grey `hint` under it) on the left - after a brand tile when `icon` is a
+        BRANDS kind. -> (card, top of the row, x where the control goes, row height). Rows grow to fit a long
+        hint; self.hint is the hint's label (a Test result can be written there)."""
+        left = 16 + (ICON + 12 if icon else 0)
+        label_w = self.width - left - 16 - (control_w + 16 if control_w else 0)
         hint_h = _text_height(hint, 11, label_w) if hint else 0
-        height = max(height or ROW, 26 + hint_h + (14 if hint else 0))
+        height = max(height or (ROW + 8 if icon else ROW), 26 + hint_h + (14 if hint else 0))
         if self.card_y:
             line = AppKit.NSBox.alloc().initWithFrame_(AppKit.NSMakeRect(16, self.card_y, self.width - 32, 1))
             line.setBoxType_(AppKit.NSBoxSeparator)
             self.card.addSubview_(line)
         top = self.card_y
+        self.hint = None
+        if icon:
+            _icon_tile(self.card, 16, top + (height - ICON) / 2, icon)
         if title:
             title_y = top + (height - (18 + (hint_h + 2 if hint else 0))) / 2
-            self.owner._label(self.card, title, 16, title_y, label_w, h=18, size=13)
+            self.owner._label(self.card, title, left, title_y, label_w, h=18, size=13)
             if hint:
-                self.owner._label(self.card, hint, 16, title_y + 19, label_w, h=hint_h, size=11, alpha=0.55,
-                                  lines=0)
+                self.hint = self.owner._label(self.card, hint, left, title_y + 19, label_w, h=hint_h, size=11,
+                                              alpha=0.55, lines=0)
         self.card_y += height
         return self.card, top, self.width - 16 - control_w, height
 
@@ -271,6 +384,11 @@ class SettingsWindow:
         self._anchors: dict[str, float] = {}                # name -> y of a part of the page (_anchor)
         self._reveal = ""                                   # scroll to this anchor once it is built (select)
         self._opened: set[str] = set()                      # cards opened with Set up… (Telegram, Email)
+        self._perm_asked: set[str] = set()                  # permissions asked for here (permissions.ask)
+        self._perm_seen = None                              # (kinds, statuses) the page on screen shows
+        self._perm_busy = False                             # a permissions read is under way
+        self._perm_fast_until = 0.0                         # after an Allow… click: look every second for a while
+        self._perm_gen = 0                                  # one watch loop per window
 
     # --- building blocks -------------------------------------------------------------
 
@@ -352,10 +470,13 @@ class SettingsWindow:
         view.addSubview_(switch)
         return switch
 
-    def _button(self, view, title, x, y, w, handler):
+    def _button(self, view, title, x, y, w, handler, primary=False):
+        """A push button; `primary` (True, or a colour): the row's main action, filled in the accent colour."""
         button = AppKit.NSButton.buttonWithTitle_target_action_(title, None, None)
         button.setBezelStyle_(AppKit.NSBezelStyleRounded)
         button.setFrame_(AppKit.NSMakeRect(x, y, w, 28))
+        if primary:
+            _prominent(button, None if primary is True else primary)
         self._on(button, lambda c: handler())
         view.addSubview_(button)
         return button
@@ -398,15 +519,42 @@ class SettingsWindow:
         card, top, x, h = page.row(title, hint, control_w=w)
         return self._text(card, key, x, top + (h - 24) / 2, w, placeholder, settle)
 
-    def _row_buttons(self, page, title, buttons, hint=""):
-        """buttons: [(title, width, handler)], right-aligned in order."""
-        total = sum(w for _, w, _ in buttons) + 8 * (len(buttons) - 1)
-        card, top, x, h = page.row(title, hint, control_w=total)
+    def _row_buttons(self, page, title, buttons, hint="", icon=""):
+        """buttons: [(title, width, handler)] or [(title, width, handler, primary)], right-aligned in order."""
+        total = sum(b[1] for b in buttons) + 8 * (len(buttons) - 1)
+        card, top, x, h = page.row(title, hint, control_w=total, icon=icon)
         made = []
-        for words, w, handler in buttons:
-            made.append(self._button(card, words, x, top + (h - 28) / 2, w, handler))
+        for words, w, handler, *style in buttons:
+            made.append(self._button(card, words, x, top + (h - 28) / 2, w, handler, primary=bool(style and style[0])))
             x += w + 8
         return made
+
+    def _row_badge(self, page, title, words, tone="ok", hint="", icon="", w=150):
+        """A row whose right side is a status badge (Added ✓, Allowed…)."""
+        card, top, x, h = page.row(title, hint, control_w=w, icon=icon)
+        return _badge(card, words, x + w, top + h / 2, tone, max_w=w)
+
+    def _key_row(self, page, title, hint, value, on_add, icon="", test=None, words=None):
+        """A key or a secret: a badge (Set ••••1234 ✓ / Not set), Add key… (the prominent main action) or
+        Change…, and optionally Test. `value`: the key (only its last four characters are shown) or a bool.
+        -> the Test button (or None)."""
+        badge_w, add_w, test_w = 132, 100, 64
+        control_w = badge_w + 10 + add_w + (8 + test_w if test else 0)
+        card, top, x, h = page.row(title, hint, control_w=control_w, icon=icon)
+        is_set = bool(value)
+        if words is None:
+            words = (f"Set ••••{value[-4:]}" if isinstance(value, str) and len(value) > 8 else "Set") if is_set \
+                else "Not set"
+        _badge(card, words + (" ✓" if is_set else ""), x + badge_w, top + h / 2, "ok" if is_set else "warn",
+               max_w=badge_w)
+        bx = x + badge_w + 10
+        self._button(card, "Change…" if is_set else "Add key…", bx, top + (h - 28) / 2, add_w, on_add,
+                     primary=not is_set)
+        if not test:
+            return None
+        button = self._button(card, "Test", bx + add_w + 8, top + (h - 28) / 2, test_w, test)
+        button.setEnabled_(is_set)
+        return button
 
     def _row_value(self, page, title, value, hint="", w=280):
         card, top, x, h = page.row(title, hint, control_w=w)
@@ -427,17 +575,40 @@ class SettingsWindow:
         AppHelper.callAfter(lambda: self.refresh(keep_scroll=True))
 
     def _more_section(self, page, what: str) -> None:
-        """The last card of a page that has advanced rows: Show more / Show less, and what "more" is."""
+        """The last line of a page that has advanced rows: what "All settings" adds, and a link that shows it
+        (the Essentials | All settings switch at the top of the page does the same)."""
         on = self._advanced()
-        page.section()
-        self._row_buttons(page, "Advanced settings" if on else "More settings",
-                          [("Show less" if on else "Show more", 110, lambda: self._set_advanced(not on))],
-                          hint=("Shown on every page. Show less goes back to the essentials." if on else what))
-        page.end()
+        self._note_link(page, "Showing all settings on every page." if on else f"More settings: {what}",
+                        "Show essentials only" if on else "Show all settings", lambda: self._set_advanced(not on))
+
+    def _note_link(self, page, words: str, title: str, handler) -> None:
+        """A small grey line between cards, with a link at its right."""
+        link = self._link(page.doc, title, page.width - 16, page.y - 1, handler, max_w=page.width / 2)
+        text_w = link.frame().origin.x - 4 - 12
+        h = _text_height(words, 11, text_w)
+        self._label(page.doc, words, 4, page.y, text_w, h=h, size=11, alpha=0.5, lines=0)
+        page.y += max(h, 18) + 18
+
+    def _link(self, view, title, right, y, handler, max_w: float = 240):
+        """A borderless button in the accent colour, like a link: as wide as its words (at most `max_w`, the title
+        cut with "…" beyond that), its right edge at `right`."""
+        button = AppKit.NSButton.buttonWithTitle_target_action_(title, None, None)
+        button.setBordered_(False)
+        button.setAttributedTitle_(AppKit.NSAttributedString.alloc().initWithString_attributes_(title, {
+            AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(12, AppKit.NSFontWeightSemibold),
+            AppKit.NSForegroundColorAttributeName: AppKit.NSColor.controlAccentColor()}))
+        button.cell().setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
+        button.sizeToFit()
+        w = min(float(button.frame().size.width) + 2, max_w)
+        button.setFrame_(AppKit.NSMakeRect(right - w, y, w, 18))
+        self._on(button, lambda c: handler())
+        view.addSubview_(button)
+        return button
 
     def _anchor(self, page, name: str) -> None:
-        """Remember where `name` starts on this page, for select(page, anchor=name) (a connector's Settings…)."""
-        self._anchors[name] = page.y
+        """Remember where `name` starts on this page, for select(page, anchor=name) (a connector's Settings…, the
+        setup guide) - a section, or a row inside the card being built."""
+        self._anchors[name] = page.y + (page.card_y if page.card is not None else 0.0)
 
     def _open_card(self, name: str) -> None:
         self._opened.add(name)
@@ -462,15 +633,106 @@ class SettingsWindow:
             return
         build(page, value)
 
+    # Permissions (permissions.py): read with the page's facts, and again every few seconds while shown.
+
+    def _needs_ok_section(self, page, statuses: dict) -> None:
+        """General, at the top: the important permissions still missing - what stops working without each, and
+        Allow…. Nothing at all when they are allowed."""
+        from mint.core import permissions
+        self._perm_seen = ("important", dict(statuses))
+        missing = permissions.missing_important(statuses)
+        if not missing:
+            return
+        name = prefs.name()
+        page.section("Needs your OK")
+        self._link(page.doc, "All permissions…", page.width - 16, page.title_y, lambda: self.select("storage",
+                   anchor="permissions"), max_w=page.width / 3)
+        page.card.layer().setBorderColor_(_cgc(AppKit.NSColor.systemOrangeColor(), 0.6))
+        page.card.layer().setBorderWidth_(1.0)
+        for kind in missing:
+            self._perm_row(page, kind, statuses.get(kind, "ask"), permissions.LOSES[kind].format(name=name),
+                           badge=False)
+        page.end()
+
+    def _permissions_section(self, page, statuses: dict) -> None:
+        """Permissions & Privacy: every permission, Allowed or Not allowed, with Allow… for the missing ones."""
+        from mint.core import permissions
+        self._perm_seen = ("all", dict(statuses))
+        name = prefs.name()
+        allowed = sum(1 for kind, *_ in permissions.ALL if statuses.get(kind) == "allowed")
+        self._anchor(page, "permissions")
+        page.section("Permissions")
+        page.text(f"What macOS lets {name} do - {allowed} of {len(permissions.ALL)} allowed. Allow… asks macOS, or "
+                  f"opens the place in System Settings where you switch {name} on.", size=12, alpha=0.7)
+        for kind, *_ in permissions.ALL:
+            status = statuses.get(kind, "ask")
+            hint = (permissions.FOR if status == "allowed" else permissions.LOSES)[kind].format(name=name)
+            self._perm_row(page, kind, status, hint)
+        page.end(f"macOS keeps these in System Settings ▸ Privacy & Security. After allowing Screen Recording or "
+                 f"Input Monitoring, {name} may need a restart (General ▸ Restart).")
+
+    def _perm_row(self, page, kind: str, status: str, hint: str, badge: bool = True) -> None:
+        """One permission: its tile, what it is for (or what stops working), a badge, and Allow… / Open
+        Settings… while it is missing."""
+        from mint.core import permissions
+        badge_w, button_w = (112 if badge else 0), 132
+        card, top, x, h = page.row(permissions.title(kind), hint, control_w=badge_w + (10 if badge else 0) + button_w,
+                                   icon=f"perm:{kind}")
+        if badge:
+            words, tone = (("Allowed ✓", "ok") if status == "allowed" else
+                           ("Not allowed", "bad" if kind == "microphone" else "warn"))
+            _badge(card, words, x + badge_w, top + h / 2, tone, max_w=badge_w)
+        if status != "allowed":
+            title = "Allow…" if status == "ask" else "Open Settings…"
+            w = 92 if status == "ask" else button_w
+            self._button(card, title, x + badge_w + (10 if badge else 0) + button_w - w, top + (h - 28) / 2, w,
+                         lambda: self._allow_permission(kind), primary=True)
+
+    def _allow_permission(self, kind: str) -> None:
+        """Allow…: macOS's prompt (or the right pane of System Settings); then look again every second for a
+        minute, so the row turns to Allowed as soon as it is."""
+        from mint.core import permissions
+        permissions.ask(kind, self._perm_asked)
+        self._perm_fast_until = time.monotonic() + 60
+        AppHelper.callLater(1.0, self._perm_check)
+
+    def _perm_check(self) -> None:
+        """Read the permissions again, off the main thread, while a page that shows them is on screen; rebuild the
+        page only when one changed."""
+        seen = self._perm_seen
+        if (self.window is None or self._perm_busy or seen is None or PERM_PAGES.get(self.page_key) != seen[0]
+                or not self.window.isVisible()):
+            return
+        from mint.core import permissions
+        kinds = permissions.IMPORTANT if seen[0] == "important" else None
+        asked = set(self._perm_asked)
+        self._perm_busy = True
+
+        def done(now) -> None:
+            self._perm_busy = False
+            if isinstance(now, dict) and self._perm_seen is seen and now != seen[1]:
+                self.refresh(keep_scroll=True)
+        self._background("permissions-watch", lambda: permissions.snapshot(asked, kinds), done)
+
+    def _perm_watch(self, gen: int) -> None:
+        if gen != self._perm_gen or self.window is None:
+            return
+        self._perm_check()
+        AppHelper.callLater(1.0 if time.monotonic() < self._perm_fast_until else PERM_EVERY, self._perm_watch, gen)
+
     # --- pages -----------------------------------------------------------------------
 
     def _facts_general(self) -> dict:
+        from mint.core import permissions
         from mint.app import power
-        return {"login": power.starts_at_login(), "can_restart": power.can_restart()}
+        return {"login": power.starts_at_login(), "can_restart": power.can_restart(),
+                "perms": permissions.snapshot(set(self._perm_asked), permissions.IMPORTANT)}
 
     def _page_general(self, page, facts: dict) -> None:
         from mint.app import power
         name = prefs.name()
+        if facts.get("perms") is not None:
+            self._needs_ok_section(page, facts["perms"])
         page.section("Assistant")
         self._row_text(page, "assistant_name", "Name", "Mint",
                        hint=f"You wake it with “Hey {name}”. A new name gets its own wake word (about a minute).")
@@ -491,9 +753,9 @@ class SettingsWindow:
         card.addSubview_(scroll)
         page.end()
 
-        page.section(f"Getting to know {name}")
+        page.section(f"Getting to know {name}", icon=("sparkles", (1.0, 0.62, 0.04)))
         self._row_buttons(page, f"What {name} can do",
-                          [("Show me", 110, self._show_tour)],
+                          [("Show me", 110, self._show_tour, True)],
                           "Each thing it can do, with what to say.")
         self._row_buttons(page, "The whole setup again", [("Welcome tour…", 130, self._show_setup)],
                           "Name, voice, permissions, shortcuts and the clips - your answers are kept.")
@@ -561,10 +823,11 @@ class SettingsWindow:
             status = f"Trained {facts['enrolled_at']}".rstrip()
         else:
             status = "Not trained yet"
+        self._anchor(page, "voice")                  # the setup guide's "train my voice"
         page.section("Your voice")
         trained = facts["enrolled"] or facts["stale"]
         self._row_buttons(page, status, [("Retrain my voice…" if trained else "Train my voice…", 150,
-                                          lambda: self._act("train_voice"))],
+                                          lambda: self._act("train_voice"), not trained)],
                           hint=f"About two minutes in a quiet room: say “{active[0]}” eight times, then read eight "
                                f"short sentences. {name} then wakes more surely for you, and the voice lock knows "
                                "you.")
@@ -644,7 +907,7 @@ class SettingsWindow:
             button.setEnabled_(False)
             results.setStringValue_(f"Listening… say “{phrase}”")
             run(level, done)
-        button = self._button(card, "Test microphone", x + 168, top + (h - 28) / 2, 150, test)
+        button = self._button(card, "Test microphone", x + 168, top + (h - 28) / 2, 150, test, primary=True)
         page.end()
 
     def _wake_section(self, page, active: list[str]) -> None:
@@ -1016,6 +1279,7 @@ class SettingsWindow:
                                                   ("Poke", 80, lambda: self._sample_sound("poke"))])
         page.end()
 
+        self._anchor(page, "claude_code")            # the setup guide's "connect Claude Code"
         page.section("Claude mode (coding agents)")
         if not facts.get("agents_here", True):
             self._row_value(page, "Not on this Mac", "",
@@ -1040,6 +1304,12 @@ class SettingsWindow:
         self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet",
                         "Claude's from the Claude app (it notes them while it's open), Codex's from its logs. "
                         "Ask: \"how much Claude do I have left?\"", w=250)
+        # Connecting Claude Code is a setup step: in the basic view too.
+        self._agent_hooks_row = self._row_buttons(
+            page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks,
+                                              facts["hooks"] != "Disconnect")],
+            "Allow, Always or Deny Claude Code's permission requests, and answer its questions, from the notch (adds "
+            "a hook to ~/.claude/settings.json; a backup is kept). The terminal still asks too.", icon="anthropic")
 
     def _show_tour(self) -> None:
         from mint.ui import onboarding
@@ -1095,10 +1365,6 @@ class SettingsWindow:
                          "Reads their test runs, risky steps and changed files; the verdict shows in alerts and answers.")
         self._row_switch(page, "agent_fix_loop", "Send Claude back to fix failing tests",
                          "Needs Mint's Claude Code hooks. At most twice per request.")
-        self._agent_hooks_row = self._row_buttons(
-            page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks)],
-            "Allow, Always or Deny Claude Code's permission requests, and answer its questions, from the notch (adds "
-            "a hook to ~/.claude/settings.json; a backup is kept). The terminal still asks too.")
         mcp = facts.get("mcp") or {}
         self._mcp_buttons = dict(zip(("claude", "codex"), self._row_buttons(
             page, "Let agents ask Mint", [(self._mcp_title(app, mcp.get(app)), {"claude": 178, "codex": 132}[app],
@@ -1197,15 +1463,15 @@ class SettingsWindow:
 
         def status_row(words: str, buttons: list, title: str = ""):
             """A row with a grey status line on the left (and `title` above it) and buttons on the right."""
-            total = sum(w for _, w, _ in buttons) + 8 * max(0, len(buttons) - 1)
+            total = sum(b[1] for b in buttons) + 8 * max(0, len(buttons) - 1)
             card, top, x, h = page.row("", height=54 if title else ROW, control_w=total)
             if title:
                 self._label(card, title, 16, top + 8, x - 24, h=18, size=13)
             label = self._label(card, words, 16, top + (28 if title else (h - 16) / 2), x - 24, h=16, size=11,
                                 alpha=0.6)
             label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
-            for text, w, handler in buttons:
-                self._button(card, text, x, top + (h - 28) / 2, w, handler)
+            for text, w, handler, *style in buttons:
+                self._button(card, text, x, top + (h - 28) / 2, w, handler, primary=bool(style and style[0]))
                 x += w + 8
             return label
 
@@ -1228,18 +1494,18 @@ class SettingsWindow:
 
         # --- Mint's own shortcuts ---
         have = facts["have"]
-        page.section(f"Apple Shortcuts that {name} uses")
+        page.section(f"Apple Shortcuts that {name} uses", icon=("square.2.layers.3d.fill", (0.93, 0.27, 0.55)))
         page.text(f"A few things only the Shortcuts app can do (Image Playground pictures, Do Not Disturb), so {name} "
                   "uses small shortcuts of its own. Add opens one in Shortcuts, where you click “Add Shortcut” once.",
                   size=12, alpha=0.7)
         missing = []
         for item in facts["registry"]:
             if item["name"] in have:
-                self._row_value(page, item["name"], "Added ✓", hint=item["purpose"], w=110)
+                self._row_badge(page, item["name"], "Added ✓", "ok", hint=item["purpose"], icon="shortcuts", w=100)
             else:
                 missing.append(item["name"])
-                self._row_buttons(page, item["name"], [("Add", 80, lambda n=item["name"]: add([n]))],
-                                  hint=item["purpose"])
+                self._row_buttons(page, item["name"], [("Add…", 100, lambda n=item["name"]: add([n]), True)],
+                                  hint=item["purpose"], icon="shortcuts")
 
         def add(names: list[str]) -> None:
             lib_status.setStringValue_("Preparing…")
@@ -1260,7 +1526,7 @@ class SettingsWindow:
             self.refresh()
         buttons = [("Refresh", 90, reload)]
         if missing:
-            buttons.append(("Add all missing", 140, lambda: add(list(missing))))
+            buttons.append(("Add all missing", 140, lambda: add(list(missing)), True))
         lib_status = status_row(state["lib"], buttons)
         page.end()
 
@@ -1364,8 +1630,10 @@ class SettingsWindow:
 
     def _facts_accounts(self) -> dict:
         from mint.tools import accounts
+        from mint.ui import brands
         from mint.app import email_remote
         from mint.app import telegram  # noqa: F401 - imported here, off the main thread
+        brands.warm()                     # which brands' apps are installed (LaunchServices), for the icon tiles
         facts = {"telegram": telegram.status(), "email": email_remote.status()}
         # Mail's account names for Email control's popup (None: Mail isn't open - asking would open it).
         facts["email"]["mail_accounts"] = (accounts.mail_accounts() if facts["email"].get("backend") == "mail"
@@ -1378,30 +1646,30 @@ class SettingsWindow:
         from mint.ui import settings_connectors
         advanced = self._advanced()
         name = prefs.name()
+        self._anchor(page, "keys")                   # the setup guide's keys (TypeSafe…)
         page.section("API keys")
+        icons = {"GEMINI_API_KEY": "gemini", "TYPESAFE_API_KEY": "typesafe", "OPENAI_API_KEY": "openai"}
         for env, title, hint, more in KEYS:
             if more and not advanced:
                 continue
-            value = os.environ.get(env, "")
-            shown = f"Set  ••••{value[-4:]}" if len(value) > 8 else ("Not set" if not value else "Set")
-            card, top, x, h = page.row(title, hint, control_w=250)
-            label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-            label.setAlignment_(AppKit.NSTextAlignmentRight)
-            self._button(card, "Change…" if value else "Add…", x + 158, top + (h - 28) / 2, 92,
-                         lambda e=env, t=title: self._change_key(e, t))
+            self._key_row(page, title, hint, os.environ.get(env, ""), lambda e=env, t=title: self._change_key(e, t),
+                          icon=icons.get(env, "key"))
         page.end("Keys stay on this Mac, in a file only you can read. Nothing goes through any Hey Mint server - "
                  "there isn't one.")
 
+        self._anchor(page, "google")
         page.section("Google: Gmail, Calendar and Meet")
         page.text("Add your Google account in System Settings ▸ Internet Accounts (turn on Mail and Calendars). "
                   f"macOS keeps it in sync, and {name} reads, triages and drafts email in Mail and plans "
                   "in Calendar, all on this Mac. No sign-in with Mint and no extra permissions.", size=12, alpha=0.75)
         status = page.text("Checking…\n ", size=11, alpha=0.6)
-        self._row_buttons(page, "Mail and Calendar", [("Check again", 110, lambda: check()),
-                                                      ("Connect Google…", 150, accounts.open_internet_accounts)])
-        self._row_buttons(page, "Google Meet (sign in once)", [("Open sign-in…", 150, self._meet_setup)],
+        self._row_buttons(page, "Gmail and Calendar", [("Check again", 110, lambda: check()),
+                                                       ("Connect Google…", 150, accounts.open_internet_accounts, True)],
+                          hint="Through macOS's Internet Accounts.", icon="google")
+        self._anchor(page, "meet")
+        self._row_buttons(page, "Google Meet (sign in once)", [("Open sign-in…", 150, self._meet_setup, True)],
                           f"For “start a Google Meet”: {name}'s Meet window has its own Chrome profile. You sign in "
-                          "there; Mint never types passwords.")
+                          "there; Mint never types passwords.", icon="meet")
         if advanced:
             self._row_popup(page, "meet_share", "Share in the call", MEET_SHARE,
                             "\"Start a Google Meet\" (or /meet on Telegram): Mint joins, shares this, and sends you "
@@ -1426,15 +1694,17 @@ class SettingsWindow:
                    or bool(tg.get("enabled") or tg.get("paired")))
         em_full = advanced or "email" in self._opened or bool(em.get("enabled") or em.get("address"))
         if not (tg_full and em_full):
-            page.section(f"Control {name} from anywhere")
+            page.section(f"Control {name} from anywhere", icon=("antenna.radiowaves.left.and.right",
+                                                                (0.16, 0.62, 0.93)))
             if not tg_full:
                 self._anchor(page, "telegram")
-                self._row_buttons(page, "Telegram", [("Set up…", 100, lambda: self._open_card("telegram"))],
-                                  hint="Text or send voice notes to your own Telegram bot from your phone.")
+                self._row_buttons(page, "Telegram", [("Set up…", 100, lambda: self._open_card("telegram"), True)],
+                                  hint="Text or send voice notes to your own Telegram bot from your phone.",
+                                  icon="telegram")
             if not em_full:
                 self._anchor(page, "email")
-                self._row_buttons(page, "Email", [("Set up…", 100, lambda: self._open_card("email"))],
-                                  hint="Email a request from anywhere and get the answer by email.")
+                self._row_buttons(page, "Email", [("Set up…", 100, lambda: self._open_card("email"), True)],
+                                  hint="Email a request from anywhere and get the answer by email.", icon="email")
             page.end()
         if tg_full:
             self._anchor(page, "telegram")
@@ -1443,7 +1713,11 @@ class SettingsWindow:
             self._anchor(page, "email")
             self._email_card(page, em)
 
+        self._note_link(page, f"What macOS lets {name} do (Microphone, Accessibility, Calendars…) is on its own page.",
+                        "Permissions ▸", lambda: self.select("storage", anchor="permissions"))
+
         # The apps and services (settings_connectors): their own read, so the accounts above never wait for it.
+        self._anchor(page, "connectors")             # the setup guide's "apps"
         self._part(page, "connectors", lambda p, f: settings_connectors.page(self, p, f), "Apps and services")
         self._more_section(page, "The OpenAI key, Meet screen sharing, email rules, making connectors for any app, "
                                  "and apps not on this Mac yet.")
@@ -1457,13 +1731,8 @@ class SettingsWindow:
                   "Mac and shows each step in the chat. Make a bot with @BotFather in Telegram, then add its token "
                   "here.", size=12, alpha=0.75)
         token = os.environ.get(telegram.TOKEN_ENV, "")
-        shown = f"Set  ••••{token[-4:]}" if len(token) > 8 else ("Not set" if not token else "Set")
-        card, top, x, h = page.row("Bot token", "From @BotFather. Kept on this Mac, in a file only you can read.",
-                                   control_w=250)
-        label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-        label.setAlignment_(AppKit.NSTextAlignmentRight)
-        self._button(card, "Change…" if token else "Add…", x + 158, top + (h - 28) / 2, 92,
-                     lambda: self._change_key(telegram.TOKEN_ENV, "Telegram bot"))
+        self._key_row(page, "Bot token", "From @BotFather. Kept on this Mac, in a file only you can read.", token,
+                      lambda: self._change_key(telegram.TOKEN_ENV, "Telegram bot"), icon="telegram")
         doing = ("Add the bot token first." if not token else "Off." if not state["enabled"]
                  else state["error"] or (f"Connected as {state['bot']}." if state["running"] else "Connecting…"))
         card, top, x, h = page.row("Remote control", doing, control_w=38)
@@ -1571,13 +1840,8 @@ class SettingsWindow:
                      else state["error"] or (f"Watching {state.get('where', 'Mail')}." if state["running"]
                                              else "Starting…"))
         else:
-            shown = "Set" if state["password_set"] else "Not set"
-            card, top, x, h = page.row("App password", "You paste it; it goes into the macOS Keychain and is never "
-                                       "shown again.", control_w=250)
-            label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-            label.setAlignment_(AppKit.NSTextAlignmentRight)
-            self._button(card, "Change…" if state["password_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
-                         lambda: self._email_secret("password"))
+            self._key_row(page, "App password", "You paste it; it goes into the macOS Keychain and is never shown "
+                          "again.", bool(state["password_set"]), lambda: self._email_secret("password"), icon="key")
             doing = ("Add the address and its app password first." if not (state["address"] and state["password_set"])
                      else "Off." if not state["enabled"]
                      else state["error"] or (f"Watching {state['address']}." + (" New mail is seen at once (IDLE)."
@@ -1601,13 +1865,9 @@ class SettingsWindow:
             self._row_text(page, "email_prefix", "Subject starts with", "Mint:",
                            hint="Only these messages are read; newsletters and ads never are. \"Mint: /help\" lists "
                                 "the commands.", w=160, settle=1.0)
-        secret = "Set" if state["secret_set"] else ("Needed for \"Anyone\"" if state["allow"] == "all" else "Not set")
-        card, top, x, h = page.row("Secret word", "Must also be in the subject. Recommended; required when anyone "
-                                   "may send requests.", control_w=250)
-        label = self._label(card, secret, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-        label.setAlignment_(AppKit.NSTextAlignmentRight)
-        self._button(card, "Change…" if state["secret_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
-                     lambda: self._email_secret("secret"))
+        self._key_row(page, "Secret word", "Must also be in the subject. Recommended; required when anyone may send "
+                      "requests.", bool(state["secret_set"]), lambda: self._email_secret("secret"),
+                      words=None if state["secret_set"] or state["allow"] != "all" else "Needed")
         self._row_switch(page, "email_read_only", "Read-only by email",
                          hint="Emailed requests never send, delete or buy anything.")
         page.end("A message counts only when the mail server verified its sender (DKIM, or SPF with DMARC): a forged "
@@ -1619,12 +1879,8 @@ class SettingsWindow:
 
     def _email_password_row(self, page, state: dict, hint: str) -> None:
         """The app-password row (Set / Not set, Add… or Change…), for "Automatic" while Mail is the way in."""
-        shown = "Set" if state["password_set"] else "Not set"
-        card, top, x, h = page.row("App password", hint, control_w=250)
-        label = self._label(card, shown, x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-        label.setAlignment_(AppKit.NSTextAlignmentRight)
-        self._button(card, "Change…" if state["password_set"] else "Add…", x + 158, top + (h - 28) / 2, 92,
-                     lambda: self._email_secret("password"))
+        self._key_row(page, "App password", hint, bool(state["password_set"]), lambda: self._email_secret("password"),
+                      icon="key")
 
     def _email_secret(self, which: str) -> None:
         """The app password (pasted by the user) or the secret word: straight into the Keychain, never shown."""
@@ -1694,7 +1950,9 @@ class SettingsWindow:
         return settings_connectors.facts(self)
 
     def _facts_models(self) -> dict:
+        from mint.ui import brands
         from mint.ui import settings_models
+        brands.warm()
         return settings_models.facts()
 
     def _page_models(self, page, facts: dict) -> None:
@@ -1729,12 +1987,15 @@ class SettingsWindow:
     def _facts_storage(self) -> dict:
         from mint.tools import clipboard as clip_tools
         from mint.core import config
+        from mint.core import permissions
         from mint.knowledge import timeline  # noqa: F401 - imported here, off the main thread
-        return {"folder": str(config.storage())}
+        return {"folder": str(config.storage()), "perms": permissions.snapshot(set(self._perm_asked))}
 
     def _page_storage(self, page, facts: dict) -> None:
-        """Where Mint keeps what it makes, and the switches for what it records."""
+        """Every macOS permission, where Mint keeps what it makes, and the switches for what it records."""
         from mint.core import config
+        if facts.get("perms") is not None:
+            self._permissions_section(page, facts["perms"])
         page.section("Mint folder")
         path = self._row_value(page, "Saved in", facts["folder"].replace(os.path.expanduser("~"), "~"),
                                hint="Meetings, videos, documents and agent work, one folder per kind.", w=300)
@@ -1889,11 +2150,11 @@ class SettingsWindow:
         status = page.text(words or " ", size=11, alpha=0.6)
         buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
         if newer and info.get("can_update"):
-            buttons.append((f"Install {latest}", 130, lambda: self._install_update(status)))
+            buttons.append((f"Install {latest}", 130, lambda: self._install_update(status), True))
         elif newer:
             # This copy can't swap itself (not the downloaded app, or no write access): a plain download,
             # never a terminal command.
-            buttons.append((f"Download {latest}", 140, lambda: _open(info.get("download") or info["page"])))
+            buttons.append((f"Download {latest}", 140, lambda: _open(info.get("download") or info["page"]), True))
         self._row_buttons(page, "", buttons)
         if not info.get("can_update"):
             page.text("This copy doesn't update itself. Press Download when a new version is out, open it, and drag "
@@ -2184,6 +2445,7 @@ class SettingsWindow:
         key = self.page_key
         self._shown_parts = {key}
         self._anchors = {}
+        self._perm_seen = None                  # set again by a permissions section the page shows
         page = _Page(self, column, width)
         facts = self._facts(key)
         if facts is None:
@@ -2240,6 +2502,9 @@ class SettingsWindow:
         self.window = window
         self._fill()
         self._front()
+        self._perm_gen += 1                     # watch the permissions while General or Permissions & Privacy shows
+        self._perm_busy = False
+        AppHelper.callLater(PERM_EVERY, self._perm_watch, self._perm_gen)
 
     def _fill(self) -> None:
         content = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))
@@ -2274,7 +2539,9 @@ class SettingsWindow:
         body_w = W - SIDEBAR
         self.page_key = page_for(self.page_key)
         title = dict((k, t) for k, t, _ in PAGES)[self.page_key]
-        self._label(content, title, SIDEBAR + PAD, H - 58, body_w - 2 * PAD, h=28, size=20, bold=True)
+        self._label(content, title, SIDEBAR + PAD, H - 58, body_w - 2 * PAD - 220, h=28, size=20, bold=True)
+        if self.page_key in ADVANCED_PAGES:
+            self._advanced_switch(content, W - PAD - 200, H - 56, 200)
         scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(SIDEBAR, 0, body_w, H - 70))
         scroll.setHasVerticalScroller_(True)
         scroll.setAutohidesScrollers_(True)
@@ -2289,6 +2556,19 @@ class SettingsWindow:
         content.addSubview_(scroll)
         self._scroll = scroll
         self.window.setContentView_(content)
+
+    def _advanced_switch(self, view, x: float, y: float, w: float):
+        """Top right of a page: Essentials | All settings - the "settings_advanced" pref, for every page."""
+        switch = AppKit.NSSegmentedControl.segmentedControlWithLabels_trackingMode_target_action_(
+            ["Essentials", "All settings"], AppKit.NSSegmentSwitchTrackingSelectOne, None, None)
+        switch.setFrame_(AppKit.NSMakeRect(x, y, w, 24))
+        switch.setSegmentDistribution_(AppKit.NSSegmentDistributionFillEqually)
+        switch.setSelectedSegment_(1 if self._advanced() else 0)
+        switch.setToolTip_("All settings: the technical ones too, on every page.")
+        self._on(switch, lambda c: self._set_advanced(c.selectedSegment() == 1))
+        view.addSubview_(switch)
+        self._advanced_control = switch
+        return switch
 
     def select(self, key: str, anchor: str = "") -> None:
         """Open a page (old keys work too); `anchor`: scroll to that part of it - and open it if it is a card that

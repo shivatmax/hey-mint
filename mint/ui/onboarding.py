@@ -41,6 +41,7 @@ from PyObjCTools import AppHelper
 from mint.core import config
 from mint.ui import gfx
 from mint.core import prefs
+from mint.core.permissions import PERMISSIONS
 
 log = logging.getLogger("mint.ui.onboarding")
 
@@ -66,16 +67,7 @@ SITE = "https://hey-mint.pages.dev/media"
 ROLES = ("Developer", "Designer", "Founder", "Student", "Writer", "Marketer", "Researcher", "Manager")
 VOICES = ("Zephyr", "Aoede", "Kore", "Puck", "Charon", "Sulafat")
 
-PERMISSIONS = (
-    ("microphone", "mic.fill", PINK, "Microphone", "So I can hear my wake word and everything you ask.", True),
-    ("accessibility", "hand.point.up.left.fill", BLUE, "Accessibility", "To click, type, scroll and arrange windows for you.", False),
-    ("screen", "rectangle.dashed.badge.record", VIOLET, "Screen Recording", "To see what's on your screen when you ask about it.", False),
-    ("input", "keyboard.fill", ORANGE, "Input Monitoring", "For the dictation key, and when you teach me a task.", False),
-    ("calendar", "calendar", (1.0, 0.36, 0.33), "Calendars", "To tell you what's next and add events.", False),
-    ("reminders", "checklist", GREEN, "Reminders", "To remind you of things at the right time.", False),
-)
-PANES = {"microphone": "Privacy_Microphone", "accessibility": "Privacy_Accessibility", "screen": "Privacy_ScreenCapture",
-         "input": "Privacy_ListenEvent", "calendar": "Privacy_Calendars", "reminders": "Privacy_Reminders"}
+# The permissions page's six (and how each is read and asked for) live in permissions.py, shared with Settings.
 
 SHORTCUTS = (
     ("talk", "waveform", "Talk to Mint", "Start talking without the wake word.", False),
@@ -498,7 +490,6 @@ class Onboarding:
         self.tour_only = False           # just "What I can do" (Settings, the menu): no setup around it
         self.recording = None
         self._ticks = 0
-        self._store = None
 
     # --- building -------------------------------------------------------------------------------
 
@@ -1490,67 +1481,13 @@ class Onboarding:
         return items
 
     def _status(self, kind: str) -> str:
-        """'allowed', 'denied' (only System Settings can change it) or 'ask'."""
-        try:
-            if kind == "microphone":
-                import AVFoundation
-                status = AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(AVFoundation.AVMediaTypeAudio)
-                return {3: "allowed", 0: "ask"}.get(int(status), "denied")
-            if kind == "accessibility":
-                import ApplicationServices
-                if ApplicationServices.AXIsProcessTrusted():
-                    return "allowed"
-            elif kind == "screen":
-                if Quartz.CGPreflightScreenCaptureAccess():
-                    return "allowed"
-            elif kind == "input":
-                if Quartz.CGPreflightListenEventAccess():
-                    return "allowed"
-            elif kind in ("calendar", "reminders"):
-                import EventKit
-                entity = EventKit.EKEntityTypeEvent if kind == "calendar" else EventKit.EKEntityTypeReminder
-                status = int(EventKit.EKEventStore.authorizationStatusForEntityType_(entity))
-                return "allowed" if status in (3, 4) else ("ask" if status == 0 else "denied")
-        except Exception:
-            log.debug("permission status %s", kind, exc_info=True)
-        return "denied" if kind in self.asked else "ask"
+        """'allowed', 'denied' (only System Settings can change it) or 'ask' (permissions.status)."""
+        from mint.core import permissions
+        return permissions.status(kind, self.asked)
 
     def _allow(self, kind: str) -> None:
-        status = self._status(kind)
-        if status == "allowed":
-            return
-        first = kind not in self.asked
-        self.asked.add(kind)
-        try:
-            if status == "ask" and first:
-                if kind == "microphone":
-                    import AVFoundation
-                    AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(
-                        AVFoundation.AVMediaTypeAudio, lambda ok: None)
-                    return
-                if kind == "accessibility":
-                    from mint.tools import fastinput
-                    fastinput.request_accessibility()
-                    return
-                if kind == "screen":
-                    Quartz.CGRequestScreenCaptureAccess()
-                    return
-                if kind == "input":
-                    Quartz.CGRequestListenEventAccess()
-                    return
-                if kind in ("calendar", "reminders"):
-                    import EventKit
-                    if self._store is None:
-                        self._store = EventKit.EKEventStore.alloc().init()
-                    if kind == "calendar":
-                        self._store.requestFullAccessToEventsWithCompletion_(lambda ok, error: None)
-                    else:
-                        self._store.requestFullAccessToRemindersWithCompletion_(lambda ok, error: None)
-                    return
-        except Exception:
-            log.debug("permission request %s", kind, exc_info=True)
-        AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(
-            f"x-apple.systempreferences:com.apple.preference.security?{PANES[kind]}"))
+        from mint.core import permissions
+        permissions.ask(kind, self.asked)
 
     def _check_permissions(self, first: bool = False) -> None:
         allowed = 0

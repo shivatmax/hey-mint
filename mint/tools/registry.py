@@ -994,3 +994,23 @@ def tools() -> list[types.Tool]:  # noqa: F811
 
 
 _SYNC["verify_state"] = lambda a: __import__("mint.screen.verify", fromlist=["tool"]).tool(a)
+
+
+# --- Mint's own setup: what is set up, and Settings at the right place (setup_guide.py) ----------------------
+
+_tools_before_setup = tools
+
+
+def tools() -> list[types.Tool]:  # noqa: F811
+    from mint.tools import setup_guide
+    return _tools_before_setup() + [types.Tool(function_declarations=setup_guide.declarations())]
+
+
+def _setup_handler(name: str):
+    def run(args: dict) -> str:
+        from mint.tools import setup_guide
+        return setup_guide.HANDLERS[name](args)
+    return run
+
+
+_SYNC.update({name: _setup_handler(name) for name in ("setup_status", "open_setup")})

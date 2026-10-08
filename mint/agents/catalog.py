@@ -40,8 +40,8 @@ PROVIDERS: dict[str, dict] = {
                              "claude-sonnet-5", "claude-opus-5"]},
     "gemini": {"label": "Google Gemini", "kind": "gemini", "env": "GEMINI_API_KEY",
                "hint": "The same key as Mint's voice - aistudio.google.com/apikey",
-               "models": ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.1-pro-preview",
-                          "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]},
+               "models": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+                          "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]},
     "openrouter": {"label": "OpenRouter", "kind": "chat", "env": "OPENROUTER_API_KEY",
                    "base": "https://openrouter.ai/api/v1", "base_env": "OPENROUTER_BASE_URL",
                    "hint": "Hundreds of models behind one key - openrouter.ai/keys",
@@ -252,7 +252,7 @@ _ALIASES = [
     (r"\bgrok\b", "xai/grok-4.7"), (r"gpt[\s-]*oss", "groq/openai/gpt-oss-120b"),
     (r"\bgroq\b", "groq/openai/gpt-oss-120b"), (r"\bllama\b", "groq/llama-3.3-70b-versatile"),
     (r"gemini.*pro", "gemini/gemini-3.1-pro-preview"), (r"gemini.*lite", "gemini/gemini-3.5-flash-lite"),
-    (r"\bgemini\b", "gemini/gemini-3.5-flash"),
+    (r"\bgemini\b", "gemini/gemini-3.8-flash"),
 ]
 
 
@@ -396,7 +396,9 @@ def test(provider: str) -> str:
 
 # --- the backup chain every agent uses -------------------------------------------------------------
 
-GEMINI_LAST = ["gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"]
+# Last resort for every agent (Settings: "Gemini as the last resort"): the Flash chain, then older Flash models.
+GEMINI_LAST = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash", "gemini/gemini-3.6-flash",
+               "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"]
 
 
 def fallbacks() -> list[str]:

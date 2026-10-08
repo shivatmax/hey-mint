@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.7 (2026-10-08)
+
+- **Settings, clearer and more colourful:** real brand marks (the installed app's own icon, else a drawn mark),
+  coloured buttons and status badges, and an Essentials | All settings switch at the top right. Models & agents
+  shows OpenAI and any provider you already have a key for; "More providers…" opens the rest in place.
+- **Permissions & Privacy:** General shows a "Needs your OK" card for only the important permissions still missing
+  (what stops working, and Allow…). The full list, with Allowed / Not allowed on each, is its own page. Statuses
+  update by themselves after you allow one.
+- **Connected apps, rethought:** Settings ▸ Accounts & connections lists what is connected, the apps on this Mac
+  Mint can work with (Connect), a few popular ones you don't have (Get it / Use in browser), and "Browse all apps…"
+  opens a library of 76 apps by category, with search and each app's real icon.
+- **Connecting is checked for real:** nothing shows "Connected" until it works. An app Mint works through its window
+  (Figma, LibreOffice…) is connected only after Mint has read its menus through Accessibility; without that
+  permission, Connect opens the right System Settings page instead. An app the planner can't make a connector for
+  (Linear) falls back to that same check instead of being marked connected anyway. Connect plans for exactly the
+  app on the row (the Telegram app, not the Telegram bot remote control).
+- **Every connector is tested:** a connector you make runs one read-only action live; one that only opens links or
+  web pages is checked too - each link scheme must open that app and the website must answer - instead of "no live
+  test". Every built-in connector has a check now (installed, macOS lets Mint control it, its links open it, its
+  status), and each connected app has a Test button in Settings and in the library. Mint is told about the
+  connectors you made and the apps you connected, so it uses them without being asked to look.
+- **Mint as setup guide:** "what can you do?" shows a card of what works and what still needs your OK; "connect
+  Telegram / Gmail / Meet / a shortcut" opens exactly the right Settings spot - only when it isn't set up already.
+- **Setup chips on the notch:** with nothing on it yet, the notch offers to connect your calendar, try the shelf /
+  AirDrop, connect Claude Code and allow missing permissions, each one tap.
+- **Updates install themselves:** after you ask for an update, it downloads and installs once Mint is idle or asleep.
+- **Meet setup:** "set up Meet" no longer reopens sign-in when you are already signed in.
+
+- **Agents run on Gemini out of the box:** Astra, Luna, Sage and new agents default to Gemini Flash - 3.8, then 3.7,
+  then 3.6, then older Flash models - on the Gemini key everyone already has. They were set to GPT-6 Luna from the
+  OpenAI API, which needs a key most people don't have (they quietly fell back to a single Gemini model). Agents
+  still on that old default move over by themselves; a model you picked yourself stays. Both Gemini keys back each
+  other up here as everywhere. Agents also think at their own effort level on Gemini (low answered in ~3 s instead
+  of 6-12 s), and a model that says it's overloaded is skipped for 90 s instead of 30 (each try cost ~10 s).
+
 ## 0.6.6 (2026-10-08)
 
 - **Simpler Settings:** 11 pages instead of 14, and only the everyday settings until you turn on "Show advanced

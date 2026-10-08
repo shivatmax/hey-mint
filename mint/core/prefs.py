@@ -75,6 +75,7 @@ DEFAULTS: dict = {
     "notch_calendar": True,     # notch mode: the week and today's events in the open notch
     "notch_battery": True,      # notch mode: battery badge, and a peek when plugged in or unplugged
     "notch_search": True,       # notch mode: Spotlight in the notch - files and apps, grids, drag out
+    "home_tips_dismissed": [],  # notch mode: "Set up" chips (notch_tips) the user closed with their ×
     # The character system (plans/grokbot-notch-overhaul.md)
     "status_badge": True,       # a little badge on Mint's face: dots while working, red on error, green when done
     "poke_play": True,          # poke Mint: a slap, three quick ones make it dizzy, keep going and it gets annoyed

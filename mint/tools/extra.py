@@ -740,8 +740,15 @@ def prompt_text() -> str:
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
              translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, notch_agents.PROMPT, meet_call.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, video_download.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+    from mint.tools import setup_guide
+    parts.append(setup_guide.PROMPT)          # "what can you do?", "connect Telegram": always, and short
     from mint.tools import diet as tool_diet
     parts = tool_diet.prompt_parts(parts)     # rarely used tools' sections come with find_tools instead
+    try:                                      # the user's own connectors and connected apps: always, and short
+        from mint.tools import app_library
+        parts += [p for p in (connector_maker.prompt_addendum(), app_library.prompt_text()) if p]
+    except Exception:
+        log.exception("connected apps for the prompt")
     unfinished = tasks.prompt_text()
     if unfinished:
         parts.append(unfinished)

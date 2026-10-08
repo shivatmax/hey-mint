@@ -1,7 +1,9 @@
 """Settings ▸ Models & agents: API keys for every model provider, the backup models, and the sub-agents.
 
-Basic view: the Gemini keys and the agents. Advanced (Settings' "Show more"): how two Gemini keys share the work,
-the other model providers, and the backups for every agent.
+Basic view: the Gemini keys, "AI models for your agents" with OpenAI (and every provider that already has a key),
+More providers… to open the rest right there, and the agents. All settings (the switch at the top) also shows
+every provider, how two Gemini keys share the work, your own endpoints, and the backups for every agent.
+Each provider row: its brand tile, what it gives, a Set / Not set badge, Add key… and Test.
 
 - Gemini: key 1 (required, the voice) and an optional key 2; how the two share the work (gemini_keys.py).
 - OpenAI, Anthropic, OpenRouter, Groq, xAI: add / change / remove a key, and Test it (lists its models).
@@ -29,11 +31,15 @@ from mint.agents import catalog
 from mint.agents import registry
 
 KEYED = ("openai", "anthropic", "openrouter", "groq", "xai")
+ESSENTIAL = ("openai",)                  # shown in the basic view even without a key
+# What each provider gives, in plain words (and where its key comes from).
+GIVES = {"openai": "GPT models. Key: platform.openai.com/api-keys",
+         "anthropic": "Claude - great at writing and code. Key: console.anthropic.com",
+         "openrouter": "Hundreds of models, one key. Key: openrouter.ai/keys",
+         "groq": "Very fast open models, free tier. Key: console.groq.com/keys",
+         "xai": "Grok models. Key: console.x.ai",
+         "ollama": "Free models that run on this Mac, no key. Get it at ollama.com"}
 _refreshed = [0.0]
-
-
-def _shown(value: str) -> str:
-    return f"Set  ••••{value[-4:]}" if len(value) > 8 else ("Not set" if not value else "Set")
 
 
 def facts() -> dict:
@@ -73,15 +79,13 @@ def _codex_problem() -> str:
 def page(win, page, facts: dict) -> None:
     advanced = win._advanced()
     _gemini_section(win, page, facts)
+    win._anchor(page, "model_keys")                 # the AI model providers connector's Settings…
+    _providers_section(win, page, facts)
     if advanced:
-        win._anchor(page, "model_keys")             # the AI model providers connector's Settings…
-        _providers_section(win, page, facts)
         _backups_section(win, page, facts)
     _agents_section(win, page, facts)
-    if not advanced:
-        win._anchor(page, "model_keys")             # hidden: Show more is where they are
-    win._more_section(page, "Model providers (OpenAI, Claude, Groq, Ollama…) for your agents, backup models, and "
-                            "how two Gemini keys share the work.")
+    win._more_section(page, "Backup models for every agent, how two Gemini keys share the work, and your own "
+                            "OpenAI-compatible endpoints.")
 
 
 # --- Gemini ----------------------------------------------------------------------------------------
@@ -95,11 +99,9 @@ def _gemini_section(win, page, facts: dict) -> None:
                               "takes over - for the voice and for everything else.")):
         value = os.environ.get(env, "")
         resting = status.get(env, "")
-        card, top, x, h = page.row(title, hint + (f"\nResting now: {resting[:90]}" if resting else ""), control_w=250)
-        label = win._label(card, _shown(value), x, top + (h - 18) / 2, 150, size=12, alpha=0.7)
-        label.setAlignment_(AppKit.NSTextAlignmentRight)
-        win._button(card, "Change…" if value else "Add…", x + 158, top + (h - 28) / 2, 92,
-                    lambda e=env, t=f"Gemini {title}": _ask_key(win, e, t, required=e == "GEMINI_API_KEY"))
+        win._key_row(page, title, hint + (f"\nResting now: {resting[:90]}" if resting else ""), value,
+                     lambda e=env, t=f"Gemini {title}": _ask_key(win, e, t, required=e == "GEMINI_API_KEY"),
+                     icon="gemini")
     if facts["gemini_keys"] > 1 and win._advanced():
         win._row_popup(page, "gemini_key_mode", "Using two keys",
                        [("split", "Voice on key 1, the rest on key 2"), ("primary", "Key 1 first, key 2 as backup")],
@@ -110,25 +112,63 @@ def _gemini_section(win, page, facts: dict) -> None:
 # --- providers ---------------------------------------------------------------------------------------
 
 def _providers_section(win, page, facts: dict) -> None:
-    page.section("Model providers for agents")
-    page.text("Add a key for any provider you want your agents to use; Test checks the key and lists its models. "
-              "Each agent picks its models below, with backups when one is rate-limited, out of credit or down.",
+    """AI models for your agents: the common providers (and every one with a key) first; More providers… opens the
+    rest right here, without All settings."""
+    ui = win.__dict__.setdefault("_models_ui", {"more": False})
+    every = win._advanced() or ui["more"]
+    keys = facts["keys"]
+    ollama = str(facts["settings"].get("ollama_base") or "").strip()
+    shown = [p for p in KEYED if every or p in ESSENTIAL or keys.get(p)] + (["ollama"] if every or ollama else [])
+    hidden = [p for p in KEYED + ("ollama",) if p not in shown]
+    page.section("AI models for your agents")
+    page.text("Your agents can think with other AI models too. To add one: get a key on the provider's site, press "
+              "Add key… and paste it. Test checks the key and lists its models; each agent picks its models below.",
               size=12, alpha=0.7)
-    for provider in KEYED:
+    for provider in shown:
         spec = catalog.PROVIDERS[provider]
-        value = facts["keys"].get(provider, "")
-        card, top, x, h = page.row(spec["label"], spec["hint"], control_w=330)
-        label = win._label(card, _shown(value), x, top + (h - 18) / 2, 130, size=12, alpha=0.7)
-        label.setAlignment_(AppKit.NSTextAlignmentRight)
-        label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
-        win._button(card, "Change…" if value else "Add…", x + 138, top + (h - 28) / 2, 92,
-                    lambda p=provider: _ask_key(win, catalog.PROVIDERS[p]["env"], catalog.PROVIDERS[p]["label"]))
-        button = win._button(card, "Test", x + 238, top + (h - 28) / 2, 92, lambda p=provider, l=label: _test(p, l))
-        button.setEnabled_(bool(value))
+        if provider == "ollama":
+            _ollama_row(win, page, facts)
+            continue
+        where = {}
+        win._key_row(page, spec["label"], GIVES.get(provider, spec["hint"]), keys.get(provider, ""),
+                     lambda p=provider: _ask_key(win, catalog.PROVIDERS[p]["env"], catalog.PROVIDERS[p]["label"]),
+                     icon=provider, test=lambda p=provider, w=where: _test(p, w.get("label")))
+        where["label"] = page.hint
 
-    # Ollama: an address, not a key.
-    card, top, x, h = page.row("Ollama (on this Mac)", catalog.PROVIDERS["ollama"]["hint"], control_w=330)
-    field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 24) / 2, 230, 24))
+    if every:
+        for cid, spec in facts["custom"].items():
+            card, top, x, h = page.row(spec["label"], f"OpenAI-compatible · {spec['base']}"
+                                       + (" · key set" if spec["has_key"] else " · no key"), control_w=164,
+                                       icon="custom")
+            status = page.hint
+            win._button(card, "Test", x, top + (h - 28) / 2, 64, lambda c=cid, s=status: _test(c, s))
+            win._button(card, "Remove", x + 72, top + (h - 28) / 2, 92,
+                        lambda c=cid, label=spec["label"]: (_confirm(f"Remove the endpoint {label}?",
+                                                "Agents that use it move on to their backups.")
+                                       and (catalog.remove_custom(c), win.refresh())))
+        win._row_buttons(page, "Another OpenAI-compatible endpoint",
+                         [("Add endpoint…", 130, lambda: _add_endpoint(win))],
+                         hint="LM Studio, vLLM, Together, DeepSeek, a company gateway - anything that speaks "
+                              "/v1/chat/completions.", icon="custom")
+
+    def toggle(more: bool) -> None:
+        ui["more"] = more
+        AppHelper.callAfter(lambda: win.refresh(keep_scroll=True))      # after the click: the button is rebuilt
+    if hidden:
+        names = ", ".join(catalog.PROVIDERS[p]["label"].replace(" (on this Mac)", "") for p in hidden)
+        win._row_buttons(page, "More providers…", [(f"Show {len(hidden)} more", 120, lambda: toggle(True))],
+                         hint=f"{names} - and your own endpoint.", icon="models")
+    elif ui["more"] and not win._advanced():
+        win._row_buttons(page, "", [("Show fewer", 120, lambda: toggle(False))])
+    page.end("Keys stay on this Mac, in a file only you can read. Each provider bills you directly; Groq and "
+             "OpenRouter have free models, Ollama is free.")
+
+
+def _ollama_row(win, page, facts: dict) -> None:
+    """Ollama: an address on this Mac, not a key."""
+    card, top, x, h = page.row("Ollama (on this Mac)", GIVES["ollama"], control_w=314, icon="ollama")
+    status = page.hint
+    field = AppKit.NSTextField.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 24) / 2, 242, 24))
     field.setStringValue_(facts["settings"].get("ollama_base") or "")
     field.setPlaceholderString_(catalog.PROVIDERS["ollama"]["base"])
     field.setBezelStyle_(AppKit.NSTextFieldRoundedBezel)
@@ -137,31 +177,21 @@ def _providers_section(win, page, facts: dict) -> None:
     win._handlers[objc.pyobjc_id(field)] = save
     win._ended_handlers[objc.pyobjc_id(field)] = save
     card.addSubview_(field)
-    status = win._label(card, "", 16, top + h - 16, 400, h=14, size=10, alpha=0.6)
-    win._button(card, "Test", x + 238, top + (h - 28) / 2, 92, lambda: (save(field), _test("ollama", status)))
-
-    for cid, spec in facts["custom"].items():
-        card, top, x, h = page.row(spec["label"], f"OpenAI-compatible · {spec['base']}"
-                                   + (" · key set" if spec["has_key"] else " · no key"), control_w=190)
-        status = win._label(card, "", 16, top + h - 16, 400, h=14, size=10, alpha=0.6)
-        win._button(card, "Test", x, top + (h - 28) / 2, 92, lambda c=cid, s=status: _test(c, s))
-        win._button(card, "Remove", x + 98, top + (h - 28) / 2, 92,
-                    lambda c=cid, label=spec["label"]: (_confirm(f"Remove the endpoint {label}?",
-                                            "Agents that use it move on to their backups.")
-                                   and (catalog.remove_custom(c), win.refresh())))
-    win._row_buttons(page, "Another OpenAI-compatible endpoint",
-                     [("Add endpoint…", 130, lambda: _add_endpoint(win))],
-                     hint="LM Studio, vLLM, Together, DeepSeek, a company gateway - anything that speaks "
-                          "/v1/chat/completions.")
-    page.end()
+    win._button(card, "Test", x + 250, top + (h - 28) / 2, 64, lambda: (save(field), _test("ollama", status)))
 
 
 def _test(provider: str, label) -> None:
-    label.setStringValue_("Testing…")
+    """Test: the result goes where the row's hint was, in the accent colour."""
+    if label is not None:
+        label.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
+        label.setTextColor_(AppKit.NSColor.controlAccentColor())
+        label.setStringValue_("Testing…")
 
     def run():
-        words = catalog.test(provider)
-        AppHelper.callAfter(label.setStringValue_, words)
+        words = " ".join(str(catalog.test(provider)).split())
+        if label is not None:
+            AppHelper.callAfter(label.setStringValue_, words)
+            AppHelper.callAfter(label.setToolTip_, words)
     threading.Thread(target=run, daemon=True, name="provider-test").start()
 
 
@@ -411,7 +441,7 @@ def _agents_section(win, page, facts: dict) -> None:
         else:
             win._row_value(page, f"●  {agent['name']}", "", hint=detail, w=40)
         _tint_dot(page, agent)
-    win._row_buttons(page, "", [("Add an agent…", 140, lambda: _edit_agent(win, None))],
+    win._row_buttons(page, "", [("Add an agent…", 140, lambda: _edit_agent(win, None), True)],
                      hint="Your own agent: its job, how it should work, and which models it uses.")
     page.end("Mint picks an agent by its role; you can also ask by name (\"ask Nova to…\").")
 
@@ -480,7 +510,7 @@ def _remove_agent(win, name: str) -> None:
 
 def _edit_agent(win, name: str | None) -> None:
     agent = registry.get(name) if name else None
-    models = list(agent.get("models") or []) if agent else [registry.DEFAULT_MODEL]
+    models = list(agent.get("models") or []) if agent else list(registry.GEMINI_FLASH)
     form = _Form.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 460, 404))
     y = 0
     _form_label(form, "Name", y)
@@ -561,7 +591,7 @@ def _edit_agent(win, name: str | None) -> None:
     instructions = str(text.string()).strip()
     new["instructions"] = instructions or f"You are {name_value}. {new['role']} Work carefully and report concisely."
     new["models"] = list(dict.fromkeys(chosen))
-    new["models_v2"] = True
+    new["models_v2"] = new["chose_models"] = True
     new["thinking"] = levels[thinking.indexOfSelectedItem()][0]
     kept = [t for t in (agent.get("tools") or []) if t not in WEB_TOOLS + ["create_pdf", "watch_video"]] if agent \
         else list(BASE_TOOLS)
@@ -574,5 +604,5 @@ def _edit_agent(win, name: str | None) -> None:
     missing = sorted({m.split("/", 1)[0] for m in new["models"] if not catalog.configured(m.split("/", 1)[0])})
     if missing:
         _confirm(f"Saved {new['name']}.", f"{', '.join(catalog.all_providers()[p]['label'] for p in missing)} has no "
-                 "key yet - add it under Model providers on this page (Show more); until then the backups run.", only_ok=True)
+                 "key yet - add it under AI models for your agents on this page; until then the backups run.", only_ok=True)
     win.refresh()

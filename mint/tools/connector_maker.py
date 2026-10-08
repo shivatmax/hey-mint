@@ -401,14 +401,20 @@ def _ask_planner(prompt: str) -> dict:
     return answer
 
 
-def plan(words: str) -> dict:
-    """-> {id, name, kind (app|web|builtin|none), actions, dropped, test, summary, ...} or {error}/{refuse}."""
+def plan(words: str, bundle_id: str = "") -> dict:
+    """-> {id, name, kind (app|web|builtin|none), actions, dropped, test, summary, ...} or {error}/{refuse}.
+
+    bundle_id: exactly this installed app (the app library's Connect) - the Telegram app, not the Telegram bot."""
     request = " ".join(str(words or "").split())
     what = _strip_words(request)
     if not what:
         return {"error": "Say which app or service to connect, e.g. “integrate Things”."}
     lib = connectors.get(what)
     app = connectors.find_app(what)
+    if bundle_id:
+        app = connectors.app_for(bundle_id) or app
+        if lib is not None and bundle_id not in lib.bundles:
+            lib = None
     if app is None and lib is not None and lib.bundles:
         app = lib.app()
     if lib is not None and not lib.bundles:                 # an account, a bridge, keys: nothing to make
@@ -521,6 +527,9 @@ def plan_text(result: dict) -> str:
     if result.get("test"):
         title = next(a["title"] for a in result["actions"] if a["id"] == result["test"])
         lines.append(f"After saving, Mint tests: {title}.")
+    else:
+        lines.append("After saving, Mint checks that its links open " + (result.get("app") or "the app") + "."
+                     if result.get("kind") == "app" else "After saving, Mint checks that the site answers.")
     if result.get("dropped"):
         lines.append("Left out: " + "; ".join(result["dropped"][:4]))
     if result.get("kind") == "web":
@@ -563,12 +572,82 @@ def _execute(item: dict, action: dict, values: dict) -> tuple[bool, str]:
     return True, f"opened {filled[:120]}"
 
 
+def _scheme_owner(scheme: str) -> str:
+    """The app that opens `scheme:` links on this Mac ('' when none does)."""
+    try:
+        import AppKit
+        url = AppKit.NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(
+            AppKit.NSURL.URLWithString_(f"{scheme}://"))
+        return str(url.path()) if url is not None else ""
+    except Exception:
+        return ""
+
+
+def _site_answers(url: str, timeout: float = 8.0) -> tuple[bool, str]:
+    import urllib.error
+    import urllib.request
+    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "Mozilla/5.0 (Macintosh) Mint"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return True, str(response.status)
+    except urllib.error.HTTPError as error:          # 401/403: there, it wants a sign-in - which the browser has
+        return error.code < 500, str(error.code)
+    except Exception as error:
+        return False, str(getattr(error, "reason", error))[:80]
+
+
+def check_links(item: dict, owner=_scheme_owner, answers=_site_answers) -> tuple[bool, str]:
+    """The check for a connector whose actions open links, pages or hand files over (nothing to run read-only):
+    the app is still installed, each of its link schemes opens that app, its website answers."""
+    found: list[str] = []
+    ok = True
+    app = connectors.app_for(item["bundle_id"]) if item.get("bundle_id") else None
+    if item.get("bundle_id") and app is None:
+        return False, f"{item.get('name') or 'the app'} isn't on this Mac any more"
+    schemes = []
+    for action in item["actions"]:
+        match = re.match(r"([a-z][a-z0-9+.-]*):", str(action.get("template") or ""), re.I)
+        if action["kind"] == "url" and match and match.group(1).lower() not in ("http", "https", "file"):
+            if match.group(1).lower() not in schemes:
+                schemes.append(match.group(1).lower())
+    for scheme in schemes:
+        path = owner(scheme)
+        if not path:
+            ok = False
+            found.append(f"nothing on this Mac opens {scheme}: links")
+        elif app and Path(path).resolve() != Path(app["path"]).resolve():
+            ok = False
+            found.append(f"{scheme}: links open {Path(path).stem}, not {item.get('name')}")
+        else:
+            found.append(f"{scheme}: links open {Path(path).stem}")
+    if any(a["kind"] == "files" for a in item["actions"]) and app:
+        found.append(f"files open in {app['name']}")
+    site = item.get("site") or (f"https://{item['domain']}/" if item.get("domain") else "")
+    if site and any(a["kind"] == "web" for a in item["actions"]):
+        there, code = answers(site)
+        ok = ok and there
+        host = urllib.parse.urlparse(site).netloc
+        found.append(f"{host} answers" if there else f"{host} didn't answer ({code})")
+    if not found:
+        return True, "nothing to check - its actions only open pages"
+    return ok, "; ".join(found)
+
+
 def test(item: dict, save: bool = True) -> tuple[bool, str]:
-    """Run the connector's read-only test action live (macOS may ask once for Automation)."""
+    """Check that the connector really works: its read-only action run live (macOS may ask once for
+    Automation), or - for one that only opens links, pages or hands over files - check_links."""
     action = next((a for a in item["actions"] if a["id"] == item.get("test")), None)
     if action is None or action["changes"] or action["kind"] != "applescript":
-        return True, "no live test (its actions open links); every link was checked"
+        action = next((a for a in item["actions"] if a["kind"] == "applescript" and not a["changes"]
+                       and not any(p.get("required") for p in a["params"])), None)
+    if action is None:
+        ok, out = check_links(item)
+        item["tested"] = {"ok": ok, "at": time.strftime("%Y-%m-%d %H:%M"), "action": "links", "result": out[:300]}
+        if save and item.get("file"):
+            connectors.save_custom(item)
+        return ok, out
     ok, out = _execute(item, action, {})
+    out = out.strip() or "ran, nothing to report (it answered with no text)"
     item["tested"] = {"ok": ok, "at": time.strftime("%Y-%m-%d %H:%M"), "action": action["id"], "result": out[:300]}
     if save and item.get("file"):
         connectors.save_custom(item)
@@ -590,9 +669,10 @@ def create(plan_id: str = "", run_test: bool = True) -> str:
             "domain": result.get("domain") or "", "site": result.get("site") or "", "actions": result["actions"],
             "test": result.get("test") or "", "made": time.strftime("%Y-%m-%d %H:%M"), "version": 1}
     words = ""
-    if run_test and item["test"]:
+    if run_test:
         ok, out = test(item, save=False)
-        words = f" Test “{next(a['title'] for a in item['actions'] if a['id'] == item['test'])}”: " + (
+        what = next((a["title"] for a in item["actions"] if a["id"] == item["tested"]["action"]), "links")
+        words = (f" Test “{what}”: " if what != "links" else " Checked: ") + (
             out[:200] if ok else f"didn't work - {out[:200]}")
     path = connectors.save_custom(item)
     result["created"] = cid
@@ -770,7 +850,9 @@ def tool(args: dict) -> str:
             lib = connectors.get(name)
             if lib is None:
                 return f"FAILED: no connector called '{name}'."
-            return lib.test() or f"{lib.name} has no test; its status: {connectors.status_text(lib.id)}"
+            words = lib.test()
+            return ("FAILED: " if words.startswith("Didn't work") else "NOT DONE: " if words.startswith("Not ready")
+                    else "DONE: ") + words
         if action == "remove":
             from mint.tools.harness import _asked
             request = _request()

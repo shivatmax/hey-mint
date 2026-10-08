@@ -365,3 +365,39 @@ def test_choosing_codexs_model_is_kept(tmp_path, monkeypatch):
     assert registry.get("Codex")["models"] == ["gpt-6-luna"]
     registry.save({**registry.get("Codex"), "role": "Coding in OpenAI Codex (GPT-6 Luna): builds websites"})
     assert registry.get("Codex")["role"] == "Coding in OpenAI Codex: builds websites"   # the model shows on its own
+
+
+# --- agents run on Gemini Flash by default (everyone has a Gemini key; few have an OpenAI one) -----------------------
+
+FLASH = ["gemini/gemini-3.8-flash", "gemini/gemini-3.7-flash", "gemini/gemini-3.6-flash"]
+
+
+def test_built_in_agents_default_to_the_gemini_flash_chain(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, monkeypatch)
+    for name in ("Astra", "Luna", "Sage"):
+        assert registry.get(name)["models"] == FLASH
+    from mint.agents import providers
+    chain = [f"{p}/{m}" for p, m in providers.chain(registry.get("Luna"))]
+    assert chain[:3] == FLASH and all(r.startswith("gemini/") for r in chain)       # no OpenAI anywhere
+
+
+def test_old_saved_agents_move_off_the_openai_default(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, monkeypatch)
+    (tmp_path / "agents.json").write_text(json.dumps({"agents": [
+        {"name": "Astra", "provider": "openai", "models": ["openai/gpt-6-luna"]},                        # legacy
+        {"name": "Luna", "provider": "openai", "models": ["openai/gpt-6-luna"], "models_v2": True},     # stock
+        {"name": "Sage", "provider": "openai", "models": ["openai/gpt-6-luna"], "models_v2": True,
+         "chose_models": True},                                                                       # chosen
+        {"name": "Nova", "models": ["anthropic/claude-sonnet-5-5"], "models_v2": True}]}))
+    assert registry.get("Astra")["models"] == FLASH and registry.get("Luna")["models"] == FLASH
+    assert registry.get("Sage")["models"] == ["openai/gpt-6-luna"]          # the user picked it: kept
+    assert registry.get("Nova")["models"] == ["anthropic/claude-sonnet-5-5"]
+
+
+def test_a_new_agent_without_a_model_is_on_gemini(tmp_path, monkeypatch):
+    registry = _registry(tmp_path, monkeypatch)
+    from mint.agents import catalog, orchestrator
+    orchestrator._create({"name": "Nova", "role": "Writes tweets"})
+    assert registry.get("Nova")["models"] == FLASH
+    assert catalog.resolve("gemini") == "gemini/gemini-3.8-flash"
+    assert catalog.GEMINI_LAST[:3] == FLASH                                   # the last resort is the same chain

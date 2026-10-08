@@ -56,6 +56,7 @@ SCREEN = {"open_app", "open_url", "open_folder", "open_chrome", "open_slack", "s
 # Never offered to a background job: the conversation's own controls, things that need a
 # picture of the screen, and the tools that start or steer jobs (no job starts jobs).
 NOT_FOR_JOBS = {"stop_listening", "set_preference", "chat_action", "show_chat", "plan_task", "step_done", "task",
+                "open_setup",
                 "set_voice", "express", "move_orb", "display_mode", "screen_share_visibility", "notch_files",
                 "look", "click_at", "mark_area", "clear_marks", "show_on_screen", "teach", "tutor", "dictation",
                 "screen_record", "google_meet", "meeting", "quit_mint", "fix_hearing", "claude_mode", "list_agents",

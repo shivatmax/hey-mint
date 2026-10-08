@@ -1,16 +1,19 @@
-"""Settings ▸ Accounts & connections, the lower half: the apps and services Mint works with (connectors.py),
-and making new ones (connector_maker.py). (It was its own page, Connectors; show("connectors") still lands here.)
+"""Settings ▸ Accounts & connections, the lower half: the apps Mint works with (app_library.py over connectors.py),
+and making new connectors (connector_maker.py). (It was its own page, Connectors; show("connectors") lands here.)
 
-    Connected apps          ready now: Test (a read-only check), or where its settings live
-    Available on this Mac   installed but not set up: Connect (asks macOS / opens the right settings), Make…
-                            for apps a connector can be made for; advanced: every other scriptable app
-    Your connectors         made from plain words: Test, Remove (advanced, or when there are some)
-    Connect any app         advanced: "Integrate an app, e.g. Things": Plan it (read back here), then Create
-    Not on this Mac         advanced: not installed: Get… opens where to get it
+    Connected            what works now: compact rows, the app's icon and a ✓ badge (the first few; +N more opens
+                         the app library window)
+    On your Mac          installed apps Mint can work with, not connected yet: what it does, Connect… (the first
+                         few; Show all opens the library at "On your Mac")
+    Suggested for you    common apps that aren't on this Mac: Get it, and Use in browser when Mint can
+    Accounts             Google, iCloud, Microsoft, Telegram - only while one isn't set up
+    Browse all apps…     the app library window (library_window.py), with search and categories
+    Your connectors      advanced: made from plain words: Test, Remove
+    Connect any app      advanced: "Integrate an app, e.g. Things": Plan it (read back here), then Create
 
-The page is built from a quick snapshot (bundle ids, permission states that never prompt), read off
-the main thread by `facts` (Settings shows "Loading…" until it is there); a fuller check (Mail's
-accounts, the scriptable-app scan) runs in the background and refreshes the page once.
+The page is built from app_library.groups(), read off the main thread by `facts` (Settings shows "Loading…" until
+it is there); the scan for every scriptable app runs in the background (app_library.warm) and refreshes the page
+once. Icons: the installed app's own icon, else its brand (brands.py), else a letter tile - as in the library.
 """
 
 from __future__ import annotations
@@ -26,43 +29,25 @@ from mint.tools import connectors
 from mint.core import prefs
 
 ICON = 28
-STATUS_W = 170
+STATUS_W = 150
 BUTTONS_W = 96
-FIRST_SCRIPTABLE = 6
-_COLORS = {"connected": AppKit.NSColor.systemGreenColor, "setup": AppKit.NSColor.systemOrangeColor,
-           "missing": AppKit.NSColor.tertiaryLabelColor, "scriptable": AppKit.NSColor.systemBlueColor}
+FIRST = 6                      # rows per group before "+N more" / Show all
+# A row's state -> the colour of its status badge (settings_window.TONES).
+_TONES = {"connected": "ok", "ready": "info", "setup": "warn", "get": "off", "web": "off", "missing": "off",
+          "scriptable": "info"}
 
 
-def _text_width(text: str, size: float) -> float:
-    font = AppKit.NSFont.systemFontOfSize_(size)
-    return float(AppKit.NSString.stringWithString_(text).sizeWithAttributes_({AppKit.NSFontAttributeName: font}).width)
-
-
-def _icon(card, row: dict, x: float, y: float) -> None:
-    """The app's own icon when it is installed, else the connector's SF Symbol on a soft accent tile."""
-    if row.get("path"):
-        image = AppKit.NSWorkspace.sharedWorkspace().iconForFile_(row["path"])
-        view = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(x - 2, y - 2, ICON + 4, ICON + 4))
-        view.setImage_(image)
-        view.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
-        card.addSubview_(view)
+def _icon(card, row: dict, x: float, y: float, size: float = ICON) -> None:
+    """The app's own icon when it is on this Mac, else its brand (brands.py), else a letter tile on its colour -
+    the app library window's own helper, so a brand looks the same in both places."""
+    try:
+        from mint.ui.library_window import LibraryWindow
+        LibraryWindow._icon(None, card, row, x, y, size)
         return
-    from mint.ui.settings import _cgc
-    accent = AppKit.NSColor.controlAccentColor()
-    tile = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, ICON, ICON))
-    tile.setWantsLayer_(True)
-    tile.layer().setCornerRadius_(7)
-    tile.layer().setBackgroundColor_(_cgc(accent, 0.14))
-    card.addSubview_(tile)
-    image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(row.get("icon") or
-                                                                               "puzzlepiece.extension", None)
-    if image is None:
-        image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_("puzzlepiece.extension", None)
-    config = AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_(14, AppKit.NSFontWeightMedium)
-    glyph = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(x + 4, y + 4, ICON - 8, ICON - 8))
-    glyph.setImage_(image.imageWithSymbolConfiguration_(config) if image is not None else None)
-    glyph.setContentTintColor_(accent)
-    card.addSubview_(glyph)
+    except Exception:
+        pass
+    from mint.ui import brands
+    brands.icon_tile(card, x, y, row.get("slug") or "", size)
 
 
 def _scroll_view(win):
@@ -83,10 +68,15 @@ def _refresh_keep(win, to: float | None = None) -> None:
 
 
 def facts(win) -> dict:
-    """Settings' reader thread: the snapshot (reused for 2 minutes, unless a connector was just removed)."""
+    """Settings' reader thread: the app library's groups and the connectors made here (reused for a minute or
+    two, unless something was just connected or removed)."""
+    from mint.tools import app_library
     state = win.__dict__.get("_connectors_ui") or {}
     fresh = bool(state.pop("fresh", False))
-    return {"snap": connectors.snapshot(deep=False, max_age=0 if fresh else 120)}
+    if fresh:
+        app_library.invalidate()
+    snap = connectors.snapshot(deep=False, max_age=0 if fresh else 120)
+    return {"snap": snap, "groups": app_library.groups()}
 
 
 def page(win, page, facts: dict) -> None:
@@ -116,52 +106,46 @@ def page(win, page, facts: dict) -> None:
 
         def run() -> None:
             try:
+                from mint.tools import app_library
                 connectors.installed_apps(fresh=force)
-                connectors.snapshot(deep=True)
+                app_library.all_rows(fresh=force, deep=True)
             except Exception:
                 pass
             state["deep_at"], state["deep_busy"] = time.time(), False
             later(refresh)
         background(run, "connectors-deep")
 
-    snap = facts["snap"]
-    advanced = win._advanced()
-    deep_refresh()
-
     # --- one row -------------------------------------------------------------------------------------------
-    def row(item: dict, buttons: list, state_key: str, detail: str) -> None:
-        widths = sum(w for _, w, _ in buttons) + 8 * max(0, len(buttons) - 1)
-        control_w = STATUS_W + 12 + max(widths, BUTTONS_W)        # statuses line up, with or without a button
+    def row(item: dict, buttons: list, detail: str, compact: bool = False) -> None:
+        """Icon, name, what Mint does with it (unless compact), a status badge, and its buttons."""
+        widths = sum(b[1] for b in buttons) + 8 * max(0, len(buttons) - 1)
+        status_w = STATUS_W if detail else 0                     # no badge: the words get its room
+        control_w = status_w + (12 if status_w and buttons else 0) + (max(widths, BUTTONS_W) if buttons else 0)
         label_x = 16 + ICON + 12
         label_w = page.width - label_x - 16 - control_w - 12
-        hint = state["msgs"].get(item["id"]) or item.get("enables") or ""
+        hint = state["msgs"].get(item["id"]) or ("" if compact else item.get("what") or item.get("enables") or "")
         hint_h = _text_height(hint, 11, label_w) if hint else 0      # the whole hint: never cut off with "…"
-        height = max(54, 18 + hint_h + 22)
+        height = max(40 if compact and not hint else 54, 18 + hint_h + 22)
         card, top, x, h = page.row("", height=height, control_w=control_w)
         _icon(card, item, 16, top + (h - ICON) / 2)
         title_y = top + (h - (18 + (hint_h + 2 if hint else 0))) / 2
-        win._label(card, item["name"], label_x, title_y, label_w, h=18, size=13)
+        win._label(card, item["name"], label_x, title_y, label_w, h=18, size=13).setLineBreakMode_(
+            AppKit.NSLineBreakByTruncatingTail)
         if hint:
             note = win._label(card, hint, label_x, title_y + 19, label_w, h=hint_h, size=11,
                               alpha=0.85 if item["id"] in state["msgs"] else 0.55, lines=0)
             if item["id"] in state["msgs"]:
                 note.setTextColor_(AppKit.NSColor.controlAccentColor())
             item["_note"] = note
-        # status: a coloured dot and the detail, right-aligned before the buttons
-        words = detail[:40]
-        status = win._label(card, words, x + 14, top + (h - 16) / 2, STATUS_W - 16, h=16, size=11, alpha=0.7)
-        status.setAlignment_(AppKit.NSTextAlignmentRight)
-        status.setLineBreakMode_(AppKit.NSLineBreakByTruncatingTail)
-        dot_x = max(x + 2, x + STATUS_W - 2 - _text_width(words, 11) - 16)
-        dot = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(dot_x, top + (h - 7) / 2, 7, 7))
-        dot.setWantsLayer_(True)
-        dot.layer().setCornerRadius_(3.5)
-        from mint.ui.settings import _cgc
-        dot.layer().setBackgroundColor_(_cgc(_COLORS.get(state_key, AppKit.NSColor.tertiaryLabelColor)()))
-        card.addSubview_(dot)
-        bx = x + STATUS_W + 12 + max(widths, BUTTONS_W) - widths
-        for text, w, handler in buttons:
-            win._button(card, text, bx, top + (h - 28) / 2, w, handler)
+        from mint.ui.settings import _badge
+        if detail:
+            words = (detail[:40] + " ✓") if item.get("state") == "connected" else detail[:40]
+            badge = _badge(card, words, x + STATUS_W, top + h / 2, _TONES.get(item.get("state"), "off"),
+                           max_w=STATUS_W)
+            badge.setToolTip_(detail)
+        bx = x + control_w - widths
+        for text, w, handler, *style in buttons:
+            win._button(card, text, bx, top + (h - 28) / 2, w, handler, primary=bool(style and style[0]))
             bx += w + 8
 
     def say(item: dict, words: str) -> None:
@@ -171,36 +155,60 @@ def page(win, page, facts: dict) -> None:
             AppHelper.callAfter(note.setStringValue_, words)
             AppHelper.callAfter(note.setTextColor_, AppKit.NSColor.controlAccentColor())
 
+    def ask_on_main(plan: dict) -> bool:
+        """app_library.connect's confirm: the plan as an alert, on the main thread (this runs on a worker)."""
+        from mint.tools import app_library
+        title, body = app_library.plan_summary(plan)
+        done, answer = threading.Event(), [False]
+
+        def show() -> None:
+            try:
+                alert = AppKit.NSAlert.alloc().init()
+                alert.setMessageText_(title)
+                alert.setInformativeText_(body)
+                alert.addButtonWithTitle_("Connect")
+                alert.addButtonWithTitle_("Cancel")
+                answer[0] = alert.runModal() == AppKit.NSAlertFirstButtonReturn
+            finally:
+                done.set()
+        AppHelper.callAfter(show)
+        done.wait(600)
+        return answer[0]
+
     def connect(item: dict) -> None:
-        lib = connectors.BY_ID.get(item["id"])
-        if lib is None:
-            return
-        if lib.settings_page and item["state"] != "missing":
-            win.select(lib.settings_page, anchor=lib.id)          # that page, scrolled to its part
-            return
-        say(item, "Connecting…")
+        """Connect / Set up / Get it: app_library.connect, on a thread (it may wait for macOS or the planner)."""
+        from mint.tools import app_library
+        say(item, "Connecting…" if item.get("action") == "connect" else "Opening…")
 
         def run() -> None:
-            try:
-                words = lib.connect()
-            except Exception as error:
-                words = f"Couldn't: {error}"
+            words = app_library.connect(item["id"], confirm=ask_on_main, say=lambda w: say(item, w))
             say(item, words)
+            state["fresh"] = True
             deep_refresh(force=True)
-        background(run, "connector-connect")
+        background(run, "app-connect")
+
+    def in_browser(item: dict) -> None:
+        from mint.tools import app_library
+
+        def run() -> None:
+            say(item, app_library.use_in_browser(item["id"]))
+            state["fresh"] = True
+            later(refresh)
+        background(run, "app-browser")
+
+    def library(category=None) -> None:
+        from mint.ui import library_window
+        library_window.open_library(category)
 
     def test(item: dict) -> None:
         say(item, "Testing…")
 
         def run() -> None:
             try:
-                if item.get("custom"):
-                    from mint.tools import connector_maker
-                    found = connectors.custom(item["id"])
-                    ok, out = connector_maker.test(found) if found else (False, "it was removed")
-                    words = ("Works: " if ok else "Didn't work: ") + " ".join(out.split())[:160]
-                else:
-                    words = " ".join((connectors.BY_ID[item["id"]].test() or "No test for this one.").split())[:160]
+                from mint.tools import connector_maker
+                found = connectors.custom(item["id"])
+                ok, out = connector_maker.test(found) if found else (False, "it was removed")
+                words = ("Works: " if ok else "Didn't work: ") + " ".join(out.split())[:160]
             except Exception as error:
                 words = f"Didn't work: {error}"
             say(item, words)
@@ -222,65 +230,82 @@ def page(win, page, facts: dict) -> None:
         state["desc"] = words
         plan_it(words)
 
-    def open_app(item: dict) -> None:
-        AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.fileURLWithPath_(item["path"]))
+    groups = facts.get("groups") or {}
 
-    def buttons_for(item: dict) -> list:
-        lib = connectors.BY_ID.get(item["id"])
-        if item["state"] == "connected":
-            if item.get("testable"):
-                return [("Test", 80, lambda i=item: test(i))]
-            if lib and lib.settings_page:
-                return [("Settings…", 96, lambda i=item: connect(i))]
-            if item.get("path"):
-                return [("Open", 80, lambda i=item: open_app(i))]
-            return []
-        if item["state"] == "setup":
-            if item.get("makeable") and item.get("path"):
-                return [("Make…", 80, lambda i=item: make(f"integrate {i['name']}"))]
-            return [("Settings…" if lib and lib.settings_page else "Connect", 96 if lib and lib.settings_page else 88,
-                     lambda i=item: connect(i))]
-        if item.get("site"):
-            return [("Get…", 72, lambda i=item: connectors.open_url(i["site"]))]
-        return []
-
-    library = snap["library"]
-    connected = [r for r in library if r["state"] == "connected"]
-    setup = [r for r in library if r["state"] == "setup"]
-    missing = [r for r in library if r["state"] == "missing"]
+    def more_row(words: str, button: str, handler) -> None:
+        win._row_buttons(page, "", [(button, max(110, 22 + 7.5 * len(button)), handler)], hint=words)
 
     # --- Connected ---
+    connected = list(groups.get("connected") or [])
     page.section("Connected apps")
-    page.text(f"Apps and services {name} can use right now. Everything happens on this Mac - through macOS accounts, "
-              "app scripting and links - with no server in between.", size=12, alpha=0.7)
-    for item in map(dict, connected):
-        row(item, buttons_for(item), "connected", item["detail"])
-    page.end("Test runs a read-only check. Mint never sends a message or email, pays, or deletes anything through "
-             "a connector unless you asked for exactly that.")
+    page.text(f"Apps and services {name} can use right now - all on this Mac, through macOS accounts, app "
+              "scripting and links, with no server in between.", size=12, alpha=0.7)
+    def check(item: dict) -> None:
+        from mint.tools import app_library
+        say(item, "Testing…")
+        later(refresh)                               # a compact row grows a line for what the test says
 
-    # --- Available on this Mac ---
-    page.section("Available on this Mac")
-    scriptable = snap["scriptable"] if advanced else []
-    if not setup and not scriptable:
-        page.text("Everything installed is connected." if not state["deep_busy"] else "Checking your apps…",
-                  size=12, alpha=0.7)
-    for item in map(dict, setup):
-        row(item, buttons_for(item), "setup", item["detail"])
-    if scriptable:
-        shown = scriptable if state["all"] else scriptable[:FIRST_SCRIPTABLE]
-        for app in shown:
-            item = {"id": "app:" + app["bundle_id"], "name": app["name"], "path": app["path"],
-                    "enables": "Scriptable: Mint can make a connector for it."}
-            row(item, [("Make…", 80, lambda a=app: make(f"integrate {a['name']}"))], "scriptable", "Scriptable")
-        if len(scriptable) > FIRST_SCRIPTABLE:
-            def toggle() -> None:
-                state["all"] = not state["all"]
-                refresh()
-            win._row_buttons(page, "", [("Show fewer" if state["all"] else f"Show all {len(scriptable)}", 130,
-                                         toggle)])
-    elif state["deep_busy"] and advanced:
-        page.text("Looking for scriptable apps…", size=11, alpha=0.55)
-    page.end("Connect asks macOS for permission once, or opens the right page of System Settings.")
+        def run() -> None:
+            say(item, app_library.check(item["id"]))
+            later(refresh)
+        background(run, "app-check")
+
+    for item in map(dict, connected[:FIRST]):
+        row(item, [("Test", 64, lambda i=item: check(i))], item.get("detail") or "Ready", compact=True)
+    if len(connected) > FIRST:
+        more_row(", ".join(r["name"] for r in connected[FIRST:FIRST + 5]) + ("…" if len(connected) > FIRST + 5
+                                                                               else ""),
+                 f"+{len(connected) - FIRST} more", library)
+    if not connected:
+        page.text("Nothing yet - connect one below.", size=12, alpha=0.6)
+    page.end("Mint never sends a message or email, pays, or deletes anything through an app unless you asked for "
+             "exactly that.")
+
+    # --- On your Mac ---
+    on_mac = list(groups.get("on_mac") or [])
+    page.section("On your Mac", icon=("desktopcomputer", (0.2, 0.6, 1.0)))
+    if not on_mac:
+        page.text("Everything Mint knows on this Mac is connected." if not state["deep_busy"] else
+                  "Checking your apps…", size=12, alpha=0.7)
+    for item in map(dict, on_mac[:FIRST]):
+        row(item, [(f"{item.get('button') or 'Connect'}…", 100, lambda i=item: connect(i), True)],
+            item.get("how_words") or "")
+    if len(on_mac) > FIRST:
+        more_row(f"{len(on_mac) - FIRST} more apps on this Mac Mint can work with.", f"Show all {len(on_mac)}",
+                 lambda: library("mac"))
+    page.end("Connect asks macOS once, or shows what Mint will be able to do before anything is saved.")
+
+    # --- Suggested for you ---
+    suggested = list(groups.get("suggested") or [])
+    if suggested:
+        page.section("Suggested for you", icon=("star.fill", (1.0, 0.7, 0.1)))
+        for item in map(dict, suggested):
+            buttons = [("Get it…", 84, lambda i=item: connect(i), True)]
+            if item.get("browser_ok"):
+                buttons.insert(0, ("Use in browser", 124, lambda i=item: in_browser(i)))
+            row(item, buttons, "")
+        page.end("Get it opens the App Store or the maker's page. Use in browser: Mint works in the web app, where "
+                 "you are signed in.")
+
+    # --- Accounts not set up ---
+    accounts = list(groups.get("accounts") or [])
+    if accounts:
+        page.section("Accounts", icon=("person.crop.circle.fill", (0.55, 0.45, 0.95)))
+        for item in map(dict, accounts):
+            row(item, [(f"{item.get('button') or 'Set up'}…", 100, lambda i=item: connect(i), True)],
+                item.get("detail") or "Not set up")
+        page.end()
+
+    page.section()
+    count = sum(len(groups.get(k) or []) for k in ("connected", "on_mac", "get", "browser", "more_on_mac"))
+    win._row_buttons(page, "Every app Mint can work with", [("Browse all apps…", 160, lambda: library(), True)],
+                     hint=f"{count} apps, by category, with search." if count else "By category, with search.",
+                     icon="library")
+    page.end()
+
+    snap = facts.get("snap") or {"custom": []}
+    advanced = win._advanced()
+    deep_refresh()
 
     # Making connectors is advanced - but a plan already under way (a Make… click) stays on screen.
     making = advanced or bool(state["plan"] or state["planning"] or state["creating"])
@@ -327,7 +352,7 @@ def page(win, page, facts: dict) -> None:
         background(run, "connector-create")
 
     # --- Your connectors ---
-    if making or snap["custom"]:
+    if making:
         page.section("Your connectors")
         if not snap["custom"]:
             page.text(f"None yet. Make one below - {name} reads the app's scripting dictionary and plans a few "
@@ -335,8 +360,8 @@ def page(win, page, facts: dict) -> None:
         for item in snap["custom"]:
             acts = item.get("actions") or []
             item = dict(item, enables=(item.get("enables") or "") + (f" · {', '.join(acts[:4])}" if acts else ""))
-            row(item, [("Test", 64, lambda i=item: test(i)), ("Remove", 84, lambda i=item: remove(i))],
-                item["state"], item["detail"])
+            row(dict(item, state="connected"), [("Test", 64, lambda i=item: test(i)),
+                                                ("Remove", 84, lambda i=item: remove(i))], item["detail"])
         page.end("Saved in ~/Library/Application Support/Mint/connectors. Say “what can you connect to?” to hear "
                  "them.")
 
@@ -358,7 +383,7 @@ def page(win, page, facts: dict) -> None:
         win._handlers[objc.pyobjc_id(field)] = lambda c: state.update(desc=str(c.stringValue()))
         card.addSubview_(field)
         views["field"] = field
-        plan_button = win._button(card, "Plan it", page.width - 16 - 196, top + 12, 96, lambda: plan_it())
+        plan_button = win._button(card, "Plan it", page.width - 16 - 196, top + 12, 96, lambda: plan_it(), primary=True)
         result = state["plan"]
         ready = bool(result and result.get("actions") and not result.get("created"))
         create_button = win._button(card, "Create", page.width - 16 - 92, top + 12, 92, lambda: create())
@@ -377,11 +402,3 @@ def page(win, page, facts: dict) -> None:
                                                          "Not saved yet." if ready else " "), size=11, alpha=0.6)
         page.end("Actions that change things only run when you ask for them. Mint leaves out anything that could "
                  "delete for good, run shell commands that change the system, or type into other apps.")
-
-    # --- Not on this Mac ---
-    if missing and advanced:
-        page.section("Not on this Mac")
-        page.text(f"Install one and {name} picks it up.", size=12, alpha=0.7)
-        for item in map(dict, missing):
-            row(item, buttons_for(item), "missing", item["detail"])
-        page.end()
