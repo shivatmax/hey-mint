@@ -166,6 +166,17 @@ def _attach(h):
     return mint
 
 
+async def _told(mint, *parts, within=15.0):
+    """What Mint was told, once it includes every part. A report waits for a quiet moment (until_quiet), so how
+    soon it lands depends on the machine: wait for it, up to a limit, instead of sleeping a fixed time."""
+    end = time.monotonic() + within
+    while True:
+        said = " ".join(t for t in mint.session.said if t)
+        if all(p in said for p in parts) or time.monotonic() > end:
+            return said
+        await asyncio.sleep(0.05)
+
+
 def test_slow_call_goes_on_in_the_background(hub, monkeypatch):
     monkeypatch.setattr(background, "DETACH_AFTER", 0.4)
 
@@ -184,7 +195,7 @@ def test_slow_call_goes_on_in_the_background(hub, monkeypatch):
         assert time.monotonic() - t0 < 1.0
         assert result.startswith("STILL RUNNING in the background as task-")
         assert background.running_note().startswith("Background jobs still running: task-")
-        await asyncio.sleep(3.0)
+        await _told(mint, "finished: Exported report.pdf")
         assert any("finished: Exported report.pdf" in t for t in mint.session.said), mint.session.said
         assert "Background work update" in mint.session.said[-1]
     run(go())
@@ -206,8 +217,7 @@ def test_talked_over_call_is_not_killed(hub):
         fake._detach_now.set()                     # the server cancelled it: the user talked
         result, _ = await asyncio.wait_for(call, 2)
         assert result.startswith("STILL RUNNING") and "interrupted" in result
-        await asyncio.sleep(2.0)
-        said = " ".join(mint.session.said)
+        said = await _told(mint, "Your interrupted call type_text")
         assert "Your interrupted call type_text" in said and "Typed hello" in said
         assert "say nothing about it" in said      # context only, no chatter
     run(go())
@@ -285,7 +295,7 @@ def test_two_jobs_run_side_by_side(hub, monkeypatch):
             if not any(r.active for r in hub.runs.values()):
                 break
             await asyncio.sleep(0.1)
-        await asyncio.sleep(1.5)
+        await _told(mint, "Job A done.", "Job B done.")
         searches = [e for e in log if e[0] in ("web_search", "read_url")]
         clicks = sorted((e for e in log if e[0] == "ui_act"), key=lambda e: e[2])
         assert len(searches) == 4 and len(clicks) == 2
@@ -502,8 +512,7 @@ def test_a_job_without_a_result_is_not_guessed(hub, monkeypatch):
                 break
             await asyncio.sleep(0.1)
         assert hub.runs[run_id].result == "The display shows 144." and "WITHOUT calling a tool" in seen[-1]
-        await asyncio.sleep(2.5)
-        assert "The display shows 144." in " ".join(mint.session.said)
+        assert "The display shows 144." in await _told(mint, "The display shows 144.")
     run(go())
     r = runtime.Run(background.worker_agent(), "x")
     r.id, r.title = "task-7", "x"

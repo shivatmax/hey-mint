@@ -574,7 +574,8 @@ def test_bridge_keeps_the_allowed_connection_across_mint_restarts(monkeypatch):
     threading.Thread(target=bridge.run, daemon=True).start()
     try:
         port_file = folder / "profile" / "DevToolsActivePort"
-        for _ in range(100):
+        deadline = _time.monotonic() + 30                          # a busy runner starts Chrome slowly
+        while _time.monotonic() < deadline:
             if port_file.exists() and (folder / "b.key").exists():
                 break
             _time.sleep(0.1)
@@ -584,7 +585,9 @@ def test_bridge_keeps_the_allowed_connection_across_mint_restarts(monkeypatch):
         first = cdp.Bridged(url)
         assert first.fresh
         b = cdp.Browser("chrome", first)
-        tab = b.new_tab("data:text/html,<title>one</title>")
+        # A front tab: a background one's renderer runs at macOS background priority, and on a busy runner it
+        # can sit unanswered past 15 s (Page.enable, Runtime.enable). The bridge is what's tested here.
+        tab = b.new_tab("data:text/html,<title>one</title>", visible=True)
         assert tab.js("document.title") == "one"
         first.close()                                             # Mint quits or restarts
         _time.sleep(0.3)
@@ -602,7 +605,7 @@ def test_bridge_keeps_the_allowed_connection_across_mint_restarts(monkeypatch):
             assert s.recv(100) == b""
         assert oct((folder / "b.sock").stat().st_mode & 0o777) == "0o600"
         allowed["pids"] = set()                                   # not Mint (even with the key): refused
-        assert cdp._bridge_ask({"probe": True}) == {}
+        assert not cdp._bridge_ask({"probe": True})                # no answer ({}, or None if it hung up first)
     finally:
         bridge.quit.set()
         chrome.kill()

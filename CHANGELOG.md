@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.10 (2026-10-08)
+
+- **Settings dropdowns that belong to the window:** every dropdown is a rounded control in the window's own style
+  (light and dark), showing the chosen option's icon and its whole name - never cut off. The options are visual:
+  each theme shows a little Mint orb in its colours, "Where Mint lives" and the orb's position show small screen
+  pictures, languages a flag and their own name (हिन्दी, 日本語…), microphones and speakers an AirPods, headphones,
+  built-in or virtual icon, and every other list a fitting coloured icon, often with a one-line explanation.
+- **Voices you can tell apart:** each of the 30 voices has a coloured avatar, a female / male tag and its character
+  word ("warm", "upbeat"…).
+- **Usage limits as bars:** Claude and Codex each show the 5-hour and weekly windows as slim bars with the percent
+  and when they reset, green, amber or red.
+- **Each agent wears a critter:** Astra the owl, Luna the bunny, Sage the kit, Codex the sprout, and every new agent
+  the first character nobody else wears, in its own colour - in Settings, on the desktop when it works, and in the
+  notch. Edit / Add agent lets you pick its character and colour.
+- **Real app logos** in the app library and Settings for apps that aren't installed (Notion, Zoom, Slack, Spotify,
+  Figma, GitHub, Google and Microsoft apps and more).
+- **Tidier buttons:** buttons size to their words and no longer end in "…" ("Add key", "Connect", "Set up").
+- **Setup:** the key buttons say "Connect" (Gemini) and "Save" (Jev) and check the key typed in the field; a setup
+  closed half-way opens again where it was left when you click Mint (the orb or the notch), as the app icon already
+  did. Jev stays optional.
+- **Fixes:** Refresh on Settings ▸ Apple Shortcuts updates in place instead of reloading the page at the top; the
+  Chrome connection helper writes its key only once it's ready to answer.
+
 ## 0.6.9 (2026-10-08)
 
 - **Only connections that fully work:** an app Mint can't plan and test a connection for is no longer marked

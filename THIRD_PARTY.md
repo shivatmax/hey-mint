@@ -47,6 +47,7 @@ review before redistributing a build:
 | openpyxl (MIT) | Writing .xlsx files for `make_spreadsheet` | `requirements.txt` |
 | parakeet-mlx (Apache-2.0), optional | On-device transcription for `watch_video`, when installed | `pip install parakeet-mlx` |
 | Google Fonts (Bricolage Grotesque, Atkinson Hyperlegible, JetBrains Mono) | The guide's typography | Loaded from fonts.googleapis.com |
+| Simple Icons (CC0-1.0) and svgl (MIT) logo SVGs | App logos in the app library and Settings (`mint/assets/brands/`); each logo is a trademark of its owner, shown only to name the app Mint works with | simpleicons.org, svgl.app |
 
 `models/hey_mint.json` and `models/hey_mint_data.npz` were trained for this project from
 synthetic “Hey Mint” phrases (macOS system voices) and public speech (LibriSpeech, CC BY 4.0)

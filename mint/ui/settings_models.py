@@ -27,6 +27,7 @@ import AppKit
 import objc
 from PyObjCTools import AppHelper
 
+from mint.ui import settings_art
 from mint.agents import catalog
 from mint.agents import registry
 
@@ -55,7 +56,23 @@ def facts() -> dict:
             "keys": {provider: catalog.key(provider) for provider in KEYED}, "settings": catalog.settings(),
             "custom": {cid: dict(spec, has_key=bool(catalog.key(cid)))
                        for cid, spec in catalog.custom_providers().items()},
-            "agents": registry.load(), "codex_problem": _codex_problem(), "codex_models": _codex_models()}
+            "agents": registry.load(), "codex_problem": _codex_problem(), "codex_models": _codex_models(),
+            "pals": _pals()}
+
+
+def _pals() -> dict:
+    """{agent name: (species, rgb)} - the critter each agent wears (critters.pal_for reads the registry: here, on
+    the reader thread)."""
+    from mint.ui import critters
+    out = {}
+    for agent in registry.load():
+        try:
+            pal = critters.pal_for(agent)
+        except Exception:
+            pal = None
+        if pal:
+            out[agent["name"]] = pal
+    return out
 
 
 def _codex_models() -> dict:
@@ -256,6 +273,9 @@ def _form_field(view, y, x=120, w=320, value="", placeholder="", secure=False):
     field = cls.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, w, 24))
     field.setStringValue_(value)
     field.setPlaceholderString_(placeholder)
+    field.setUsesSingleLineMode_(True)             # one line that scrolls: a long role was wrapped and cut in half
+    field.cell().setWraps_(False)
+    field.cell().setScrollable_(True)
     view.addSubview_(field)
     return field
 
@@ -298,7 +318,7 @@ OTHER = "__other__"
 def _model_menu(win, current: str, allow_none: bool, width: float = 320):
     """A pop-up of every provider's models, grouped; providers without a key are shown but disabled.
     "Other model…" asks for any "provider/model"."""
-    popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(0, 0, width, 26), False)
+    popup = settings_art.popup(AppKit.NSMakeRect(0, 0, width, 26))
     popup.setAutoenablesItems_(False)
     menu = popup.menu()
 
@@ -434,19 +454,19 @@ def _agents_section(win, page, facts: dict) -> None:
         buttons = [] if codex else [("Edit…", 80, lambda a=agent["name"]: _edit_agent(win, a))]
         if agent["name"].lower() not in BUILT_IN:
             buttons.append(("Remove", 84, lambda a=agent["name"]: _remove_agent(win, a)))
+        face = _face_icon(agent, (facts.get("pals") or {}).get(agent["name"]))
         if codex:
-            _codex_row(win, page, agent, facts.get("codex_problem", ""), facts.get("codex_models") or {})
+            _codex_row(win, page, agent, facts.get("codex_problem", ""), facts.get("codex_models") or {}, face)
         elif buttons:
-            win._row_buttons(page, f"●  {agent['name']}", buttons, hint=detail)
+            win._row_buttons(page, agent["name"], buttons, hint=detail, icon=face)
         else:
-            win._row_value(page, f"●  {agent['name']}", "", hint=detail, w=40)
-        _tint_dot(page, agent)
+            page.row(agent["name"], detail, icon=face)
     win._row_buttons(page, "", [("Add an agent…", 140, lambda: _edit_agent(win, None), True)],
                      hint="Your own agent: its job, how it should work, and which models it uses.")
     page.end("Mint picks an agent by its role; you can also ask by name (\"ask Nova to…\").")
 
 
-def _codex_row(win, page, agent, missing: str, offered: dict) -> None:
+def _codex_row(win, page, agent, missing: str, offered: dict, face=None) -> None:
     """Codex: which model it runs (Auto = whatever Codex itself is set to, or one of the models Codex offers this
     account) and an on/off switch. Without Codex on this Mac (it comes with the ChatGPT app) both are off: Mint never
     offers it, and hands building work to Luna instead."""
@@ -459,9 +479,8 @@ def _codex_row(win, page, agent, missing: str, offered: dict) -> None:
         options.append((chosen, chosen))                 # a model Codex no longer lists: still shown, still chosen
     hint = (f"{agent.get('role', '')}\nRuns in OpenAI Codex (the ChatGPT app). Auto: the model you picked in Codex."
             + ("\n" + missing.replace("The user needs to", "To use it,") if missing else ""))
-    card, top, x, h = page.row(f"●  {agent['name']}", hint, control_w=210 + 12 + 38)
-    popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 210, 26),
-                                                                   False)
+    card, top, x, h = page.row(agent["name"], hint, control_w=210 + 12 + 38, icon=face)
+    popup = settings_art.popup(AppKit.NSMakeRect(x, top + (h - 26) / 2, 210, 26))
     for _, title in options:
         popup.addItemWithTitle_(title)
     values = [v for v, _ in options]
@@ -486,20 +505,134 @@ def _codex_row(win, page, agent, missing: str, offered: dict) -> None:
         switch.setToolTip_(missing)
 
 
-def _tint_dot(page, agent) -> None:
-    """Colour the ● of the row just added with the agent's colour."""
-    try:
-        rgb = registry.color_rgb(agent)
-        for view in reversed(page.card.subviews()):
-            if isinstance(view, AppKit.NSTextField) and str(view.stringValue()).startswith("●"):
-                text = AppKit.NSMutableAttributedString.alloc().initWithString_(str(view.stringValue()))
-                text.addAttribute_value_range_(AppKit.NSForegroundColorAttributeName,
-                                               AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*rgb, 1.0),
-                                               AppKit.NSMakeRange(0, 1))
-                view.setAttributedStringValue_(text)
-                break
-    except Exception:
-        pass
+# --- critter faces ---------------------------------------------------------------------------------------
+
+def _face_view(x: float, y: float, size: float, species: str, rgb: tuple, face: float | None = None):
+    """An NSView holding critters.mini_face(species) in `rgb`, `size` points square."""
+    from mint.ui import critters
+    host = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(x, y, size, size))
+    host.setWantsLayer_(True)
+    layer = critters.mini_face(species, face or size, rgb)
+    layer.setPosition_((size / 2, size / 2))
+    host.layer().addSublayer_(layer)
+    host.setAccessibilityElement_(True)
+    host.setAccessibilityRole_(AppKit.NSAccessibilityImageRole)
+    host.setAccessibilityLabel_(f"{species} character")
+    return host
+
+
+def _face_icon(agent: dict, pal):
+    """A row icon (_Page.row's callable icon): the agent's critter face in its colour; a plain dot in its colour
+    if it has none."""
+    species, rgb = pal if pal else (None, registry.color_rgb(agent))
+
+    def draw(card, x, y, size):
+        if species:
+            card.addSubview_(_face_view(x, y, size, species, rgb))
+            return
+        dot = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(x + size / 2 - 6, y + size / 2 - 6, 12, 12))
+        dot.setWantsLayer_(True)
+        dot.layer().setCornerRadius_(6)
+        dot.layer().setBackgroundColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*rgb, 1.0).CGColor())
+        card.addSubview_(dot)
+    return draw
+
+
+class _SettingsPickTile(AppKit.NSView):
+    """A clickable square in the agent editor (a character or a colour); .pick() runs on click. Not flipped: the
+    critter layers are drawn y-up."""
+
+    def acceptsFirstMouse_(self, event):
+        return True
+
+    def mouseDown_(self, event):
+        self.pick()
+
+    def accessibilityPerformPress(self):
+        self.pick()
+        return True
+
+
+def _hex(rgb) -> str:
+    return "#%02X%02X%02X" % tuple(max(0, min(255, round(c * 255))) for c in rgb[:3])
+
+
+def _character_rows(form, y: float, species: str, color: str) -> tuple:
+    """The editor's Character row (the eight critters in the agent's colour, the chosen one ringed) and Colour row
+    (registry.PALETTE swatches and a colour well for any colour). -> (state dict with "pal" and "color", new y)."""
+    from mint.ui import critters
+    state = {"pal": species if species in critters.SPECIES else critters.SPECIES[0], "color": color.upper()}
+    tiles, swatches = {}, {}
+    accent = AppKit.NSColor.controlAccentColor()
+
+    def ring(tile, on: bool) -> None:
+        tile.layer().setBorderWidth_(2.0 if on else 0.5)
+        tile.layer().setBorderColor_((accent if on else AppKit.NSColor.separatorColor()).CGColor())
+
+    def paint() -> None:
+        rgb = registry.color_rgb({"color": state["color"]})
+        for sp, tile in tiles.items():
+            for layer in list(tile.layer().sublayers() or []):
+                layer.removeFromSuperlayer()
+            face = critters.mini_face(sp, 28, rgb)
+            face.setPosition_((18, 18))
+            tile.layer().addSublayer_(face)
+            ring(tile, sp == state["pal"])
+        for hexv, tile in swatches.items():
+            ring(tile, hexv == state["color"])
+        well.setColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(*rgb, 1.0))
+
+    _form_label(form, "Character", y + 8)
+    for i, sp in enumerate(critters.SPECIES):
+        tile = _SettingsPickTile.alloc().initWithFrame_(AppKit.NSMakeRect(120 + i * 40, y, 36, 36))
+        tile.setWantsLayer_(True)
+        tile.layer().setCornerRadius_(9)
+        tile.layer().setBackgroundColor_(AppKit.NSColor.labelColor().colorWithAlphaComponent_(0.05).CGColor())
+        tile.setAccessibilityElement_(True)
+        tile.setAccessibilityRole_(AppKit.NSAccessibilityButtonRole)
+        tile.setAccessibilityLabel_(sp)
+        tile.setToolTip_(sp.capitalize())
+
+        def pick(sp=sp) -> None:
+            state["pal"] = sp
+            paint()
+        tile.pick = pick
+        tiles[sp] = tile
+        form.addSubview_(tile)
+    y += 44
+    _form_label(form, "Colour", y + 4)
+    for i, hexv in enumerate(registry.PALETTE):
+        tile = _SettingsPickTile.alloc().initWithFrame_(AppKit.NSMakeRect(120 + i * 30, y + 1, 24, 24))
+        tile.setWantsLayer_(True)
+        tile.layer().setCornerRadius_(12)
+        tile.layer().setBackgroundColor_(AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(
+            *registry.color_rgb({"color": hexv}), 1.0).CGColor())
+        tile.setAccessibilityElement_(True)
+        tile.setAccessibilityRole_(AppKit.NSAccessibilityButtonRole)
+        tile.setAccessibilityLabel_(f"Colour {hexv}")
+
+        def choose(hexv=hexv) -> None:
+            state["color"] = hexv.upper()
+            paint()
+        tile.pick = choose
+        swatches[hexv.upper()] = tile
+        form.addSubview_(tile)
+    well = AppKit.NSColorWell.alloc().initWithFrame_(AppKit.NSMakeRect(120 + len(registry.PALETTE) * 30 + 6, y, 44, 26))
+    if hasattr(well, "setColorWellStyle_"):
+        well.setColorWellStyle_(getattr(AppKit, "NSColorWellStyleMinimal", 1))
+    well.setToolTip_("Any colour")
+    form.addSubview_(well)
+    state["well"] = well
+    state["paint"] = paint
+    paint()
+    return state, y + 34
+
+
+def _well_changed(state: dict) -> None:
+    color = state["well"].color().colorUsingColorSpace_(AppKit.NSColorSpace.sRGBColorSpace())
+    if color is not None:
+        state["color"] = _hex((color.redComponent(), color.greenComponent(), color.blueComponent()))
+        state["paint"]()
 
 
 def _remove_agent(win, name: str) -> None:
@@ -511,7 +644,7 @@ def _remove_agent(win, name: str) -> None:
 def _edit_agent(win, name: str | None) -> None:
     agent = registry.get(name) if name else None
     models = list(agent.get("models") or []) if agent else list(registry.GEMINI_FLASH)
-    form = _Form.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 460, 404))
+    form = _Form.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 460, 494))
     y = 0
     _form_label(form, "Name", y)
     name_field = _form_field(form, y, value=agent["name"] if agent else "", placeholder="e.g. Nova")
@@ -522,7 +655,18 @@ def _edit_agent(win, name: str | None) -> None:
     _form_label(form, "What it's for", y)
     role_field = _form_field(form, y, value=agent.get("role", "") if agent else "",
                              placeholder="One line, e.g. Writes marketing copy")
-    y += 32
+    y += 36
+    from mint.ui import critters
+    if agent:
+        pal = critters.pal_for(agent)
+        species, color = (pal[0] if pal else critters.SPECIES[0]), str(agent.get("color") or registry.next_color())
+    else:                                        # a new agent: the first character and colour nobody wears yet
+        worn = {p[0] for p in (critters.pal_for(a) for a in registry.load()) if p}
+        species = next((sp for sp in critters.SPECIES if sp not in worn), critters.SPECIES[0])
+        color = registry.next_color()
+    looks, y = _character_rows(form, y, species, color)
+    win._on(looks["well"], lambda c: _well_changed(looks))
+    y += 6
     _form_label(form, "How it works", y)
     scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(120, y, 320, 96))
     scroll.setHasVerticalScroller_(True)
@@ -543,7 +687,7 @@ def _edit_agent(win, name: str | None) -> None:
         menus.append(popup)
         y += 34
     _form_label(form, "Thinking", y)
-    thinking = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(120, y, 200, 26), False)
+    thinking = settings_art.popup(AppKit.NSMakeRect(120, y, 200, 26))
     levels = [("none", "None (fastest)"), ("low", "Low"), ("medium", "Medium (careful)")]
     for _, title in levels:
         thinking.addItemWithTitle_(title)
@@ -561,6 +705,7 @@ def _edit_agent(win, name: str | None) -> None:
     pdf.setFrame_(AppKit.NSMakeRect(118, y, 320, 20))
     pdf.setState_(AppKit.NSControlStateValueOn if "create_pdf" in tools else AppKit.NSControlStateValueOff)
     form.addSubview_(pdf)
+    form.setFrameSize_(AppKit.NSMakeSize(460, y + 26))     # just as tall as what is in it
 
     alert = AppKit.NSAlert.alloc().init()
     alert.setMessageText_(f"Edit {agent['name']}" if agent else "Add an agent")
@@ -586,7 +731,8 @@ def _edit_agent(win, name: str | None) -> None:
             break
         _confirm("Not saved yet.", problem, only_ok=True)
 
-    new = dict(agent) if agent else {"name": name_value, "color": registry.next_color()}
+    new = dict(agent) if agent else {"name": name_value}
+    new["pal"], new["color"] = looks["pal"], looks["color"]
     new["role"] = str(role_field.stringValue()).strip() or new.get("role", "")
     instructions = str(text.string()).strip()
     new["instructions"] = instructions or f"You are {name_value}. {new['role']} Work carefully and report concisely."

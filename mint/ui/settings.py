@@ -50,6 +50,7 @@ the menu - and Mint has no Dock icon or Force Quit entry, so the only way out wa
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import subprocess
@@ -64,9 +65,11 @@ from PyObjCTools import AppHelper
 
 from mint.voice import devices as audio_devices
 from mint.core import prefs
+from mint.ui import settings_art
 from mint.voice import voicelock
 from mint.voice import voices
 from mint.ui.brands import BRANDS, ICON, brand as _brand, icon_tile as _icon_tile, rgb as _rgb  # noqa: F401 - used here and by tests
+from mint.ui.brands import brand_image as _brand_image
 
 log = logging.getLogger("mint.settings")
 
@@ -76,39 +79,70 @@ PAD = 28                      # the page's side margins
 ROW = 44
 LOAD_WAIT = 0.25              # the main thread waits this long for a page's facts, then shows "Loading…"
 LOAD_SLOW = 8.0               # still not there: say so, offer Try again, log where the read is stuck
-ECHO = [("auto", "Automatic"), ("on", "Always on"), ("off", "Off")]
-STRICTNESS = [("relaxed", "Relaxed"), ("balanced", "Balanced (recommended)"), ("strict", "Strict")]
-THEMES = [("mint", "Mint"), ("blue", "Classic blue"), ("aurora", "Aurora"), ("sunset", "Sunset"),
-          ("rose", "Rose"), ("mono", "Mono")]
-PERSONALITIES = [("", "Default"), ("funny and playful, with light jokes", "Funny"),
-                 ("calm, gentle and patient", "Calm"),
-                 ("loves a friendly argument - pushes back and makes its case", "Argumentative"),
-                 ("dry and a little sarcastic, but kind", "Sarcastic"),
-                 ("an upbeat coach who cheers me on", "Motivating"),
-                 ("formal and precise, like a butler", "Formal")]
-STYLES = [("", "Natural (no style)"), ("warm and calm", "Warm and calm"),
-          ("cheerful and energetic", "Cheerful and energetic"), ("slow and clear", "Slow and clear"),
-          ("brisk and to the point", "Brisk and to the point"), ("soft and gentle", "Soft and gentle"),
-          ("professional and confident", "Professional and confident"),
-          ("friendly, with an Indian English accent", "Friendly, Indian English accent")]
-VOICE_FILTERS = [("all", "All 30 voices"), ("female", "Female voices"), ("male", "Male voices")]
-UNLOAD = [(0, "Never (recommended)"), (5, "After 5 minutes asleep"), (10, "After 10 minutes asleep"),
-          (20, "After 20 minutes asleep"), (30, "After 30 minutes asleep"), (60, "After an hour asleep")]
+# Pop-up options: (value, title[, icon[, subtitle]]) - icon: an SF Symbol name, (symbol, rgb), an NSImage or a
+# callable returning one (settings_art.resolve); subtitle: a grey second line in the menu.
+_BLUE, _GREEN, _ORANGE, _RED = (0.2, 0.55, 1.0), (0.2, 0.72, 0.42), (1.0, 0.58, 0.1), (0.95, 0.3, 0.3)
+_PURPLE, _PINK, _GREY, _TEAL = (0.58, 0.42, 0.95), (1.0, 0.38, 0.6), (0.5, 0.54, 0.62), (0.12, 0.68, 0.66)
+ECHO = [("auto", "Automatic", ("wand.and.stars", _BLUE), "Off with headphones, on with speakers"),
+        ("on", "Always on", ("checkmark.circle.fill", _GREEN)), ("off", "Off", ("xmark.circle", _GREY))]
+STRICTNESS = [("relaxed", "Relaxed", ("lock.open.fill", _GREEN), "Lets more through"),
+              ("balanced", "Balanced (recommended)", ("lock.fill", _BLUE)),
+              ("strict", "Strict", ("lock.shield.fill", _ORANGE), "Only a close match to your voice")]
+THEMES = [(theme, title, functools.partial(settings_art.orb, theme))
+          for theme, title in (("mint", "Mint"), ("blue", "Classic blue"), ("aurora", "Aurora"),
+                               ("sunset", "Sunset"), ("rose", "Rose"), ("mono", "Mono"))]
+PERSONALITIES = [("", "Default", ("person.crop.circle", _GREY)),
+                 ("funny and playful, with light jokes", "Funny", ("face.smiling.inverse", _ORANGE)),
+                 ("calm, gentle and patient", "Calm", ("leaf.fill", _GREEN)),
+                 ("loves a friendly argument - pushes back and makes its case", "Argumentative",
+                  ("bubble.left.and.bubble.right.fill", _RED)),
+                 ("dry and a little sarcastic, but kind", "Sarcastic", ("theatermasks.fill", _PURPLE)),
+                 ("an upbeat coach who cheers me on", "Motivating", ("flame.fill", (1.0, 0.45, 0.2))),
+                 ("formal and precise, like a butler", "Formal", ("text.book.closed.fill", _BLUE))]
+STYLES = [("", "Natural (no style)", ("waveform", _GREY)),
+          ("warm and calm", "Warm and calm", ("cup.and.saucer.fill", (0.82, 0.52, 0.3))),
+          ("cheerful and energetic", "Cheerful and energetic", ("sun.max.fill", (0.98, 0.72, 0.05))),
+          ("slow and clear", "Slow and clear", ("tortoise.fill", _GREEN)),
+          ("brisk and to the point", "Brisk and to the point", ("hare.fill", _ORANGE)),
+          ("soft and gentle", "Soft and gentle", ("cloud.fill", (0.45, 0.68, 0.98))),
+          ("professional and confident", "Professional and confident", ("briefcase.fill", _BLUE)),
+          ("friendly, with an Indian English accent", "Friendly, Indian English accent",
+           functools.partial(settings_art.flag, "Hindi"))]
+VOICE_FILTERS = [("all", "All 30 voices", ("person.2.fill", _GREY)),
+                 ("female", "Female voices", ("person.fill", settings_art.GENDER_RGB["female"])),
+                 ("male", "Male voices", ("person.fill", settings_art.GENDER_RGB["male"]))]
+UNLOAD = [(0, "Never (recommended)", ("bolt.fill", _GREEN), "Answers at once")] + [
+    (m, f"After {words} asleep", ("moon.zzz.fill", _PURPLE), "Wakes a second or two slower")
+    for m, words in ((5, "5 minutes"), (10, "10 minutes"), (20, "20 minutes"), (30, "30 minutes"), (60, "an hour"))]
 MCP_NAMES = {"claude": "Claude Code", "codex": "Codex"}
-WHERE = [(False, "A floating orb"), (True, "The notch")]
-OPEN_TO = [("auto", "Auto"), ("home", "Home"), ("search", "Search"), ("shelf", "Shelf"), ("agents", "Coding agents")]
-MOTION = [("full", "Full (playful)"), ("calm", "Calm"), ("minimal", "Minimal (fades only)")]
-AGENT_MODES = [("quiet", "Pop-ups only"), ("auto", "Live while they work"), ("on", "Always (Agents tab)"),
-               ("off", "Off")]
-WAKE_SENSITIVITY = [("normal", "Normal"), ("high", "High - catches more"), ("low", "Low - fewer false starts")]
-FOLLOW_UP = [(0, "No - always say the wake word"), (4, "4 seconds"), (6, "6 seconds"), (8, "8 seconds"),
-             (12, "12 seconds")]
-GUARD_LEVELS = [("all", "Deleting, changes and system commands"), ("delete", "Only deleting and system commands"),
-                ("off", "Never ask")]
-MEET_SHARE = [("screen", "The whole screen"), ("off", "Don't share")]
-AGENT_TELEGRAM = [("away", "When I'm away from the Mac"), ("always", "Always"), ("off", "Never")]
-POSITIONS = [("top-right", "Top right"), ("top-left", "Top left"), ("top-center", "Top centre"),
-             ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"), ("custom", "Where I dragged it")]
+WHERE = [(False, "A floating orb", functools.partial(settings_art.where, False), "Anywhere on screen - drag it"),
+         (True, "The notch", functools.partial(settings_art.where, True), "Lives in the island at the top")]
+OPEN_TO = [("auto", "Auto", ("sparkles", _PURPLE), "Home, or your agents while they work"),
+           ("home", "Home", ("house.fill", _BLUE)), ("search", "Search", ("magnifyingglass", _TEAL)),
+           ("shelf", "Shelf", ("tray.full.fill", _ORANGE)),
+           ("agents", "Coding agents", ("chevron.left.forwardslash.chevron.right", (0.85, 0.47, 0.34)))]
+MOTION = [("full", "Full (playful)", ("sparkles", _PINK), "Bounces, squishes and little hops"),
+          ("calm", "Calm", ("leaf.fill", _GREEN), "Gentle, no bounce"),
+          ("minimal", "Minimal (fades only)", ("circle.dotted", _GREY), "Like macOS Reduce motion")]
+AGENT_MODES = [("quiet", "Pop-ups only", ("bubble.left.fill", _BLUE), "When one asks or finishes"),
+               ("auto", "Live while they work", ("play.circle.fill", _GREEN), "Step by step as they go"),
+               ("on", "Always (Agents tab)", ("rectangle.stack.fill", _PURPLE), "The notch opens to your agents"),
+               ("off", "Off", ("xmark.circle", _GREY))]
+WAKE_SENSITIVITY = [("normal", "Normal", ("ear", _BLUE)),
+                    ("high", "High - catches more", ("ear.badge.waveform", _ORANGE)),
+                    ("low", "Low - fewer false starts", ("checkmark.shield", _GREEN))]
+FOLLOW_UP = [(0, "No - always say the wake word", ("mic.slash", _GREY))] + [
+    (s, f"{s} seconds", ("timer", _BLUE)) for s in (4, 6, 8, 12)]
+GUARD_LEVELS = [("all", "Deleting, changes and system commands", ("checkmark.shield.fill", _GREEN), "Safest"),
+                ("delete", "Only deleting and system commands", ("trash.fill", _ORANGE)),
+                ("off", "Never ask", ("exclamationmark.shield.fill", _RED), "Mint just does it")]
+MEET_SHARE = [("screen", "The whole screen", ("display", _GREEN)), ("off", "Don't share", ("eye.slash", _GREY))]
+AGENT_TELEGRAM = [("away", "When I'm away from the Mac", ("figure.walk", _BLUE)),
+                  ("always", "Always", ("paperplane.fill", (0.16, 0.62, 0.93))), ("off", "Never", ("bell.slash", _GREY))]
+POSITIONS = [(spot, title, functools.partial(settings_art.position, spot))
+             for spot, title in (("top-right", "Top right"), ("top-left", "Top left"), ("top-center", "Top centre"),
+                                 ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"),
+                                 ("custom", "Where I dragged it"))]
 LANGUAGES = [("auto", "Same as I speak (automatic)"), ("English", "English"), ("Hindi", "Hindi"),
              ("Hinglish", "Hinglish"), ("Bengali", "Bengali"), ("Marathi", "Marathi"), ("Tamil", "Tamil"),
              ("Telugu", "Telugu"), ("Gujarati", "Gujarati"), ("Kannada", "Kannada"), ("Punjabi", "Punjabi"),
@@ -117,9 +151,14 @@ LANGUAGES = [("auto", "Same as I speak (automatic)"), ("English", "English"), ("
              ("Turkish", "Turkish"), ("Arabic", "Arabic"), ("Japanese", "Japanese"), ("Korean", "Korean"),
              ("Chinese (Mandarin)", "Chinese (Mandarin)"), ("Indonesian", "Indonesian"),
              ("Vietnamese", "Vietnamese"), ("Thai", "Thai")]
-SCREENSHOTS = [("both", "A file and the clipboard"), ("clipboard", "The clipboard only"), ("file", "A file only")]
-CALLS = [("listen", "Keep listening for the wake word"), ("stop", "Stop listening until the call ends"),
-         ("nothing", "Do nothing special")]
+LANGUAGES = [(v, t, functools.partial(settings_art.flag, v) if v in settings_art.FLAGS else ("globe", _BLUE),
+              settings_art.NATIVE.get(v, "")) for v, t in LANGUAGES]
+SCREENSHOTS = [("both", "A file and the clipboard", ("square.on.square.fill", _BLUE)),
+               ("clipboard", "The clipboard only", ("doc.on.clipboard.fill", _PURPLE)),
+               ("file", "A file only", ("doc.fill", _TEAL))]
+CALLS = [("listen", "Keep listening for the wake word", ("ear", _GREEN)),
+         ("stop", "Stop listening until the call ends", ("mic.slash.fill", _ORANGE)),
+         ("nothing", "Do nothing special", ("phone", _GREY))]
 # (env, title, hint, advanced only)
 KEYS = [("GEMINI_API_KEY", "Gemini", "Required - free at aistudio.google.com/apikey", False),
         ("TYPESAFE_API_KEY", "TypeSafe (Jev)", "Optional - surer clicking and typing in any app", False),
@@ -227,6 +266,14 @@ def _cgc(color, alpha: float | None = None):
                                           rgb.alphaComponent() if alpha is None else alpha)
 
 
+def _menu(popup, options):
+    """Fill a pop-up with options - (value, title[, icon[, subtitle]]), see SettingsWindow._popup. -> popup."""
+    for option in options:
+        settings_art.add_item(popup, str(option[1]), option[2] if len(option) > 2 else None,
+                              option[3] if len(option) > 3 else "")
+    return popup
+
+
 def _text_height(text: str, size: float, width: float) -> float:
     font = AppKit.NSFont.systemFontOfSize_(size)
     # A label's cell lays text out 2 pt in from each side (line fragment padding): measured at the full width, a
@@ -323,7 +370,7 @@ class _Page:
 
     def row(self, title: str, hint: str = "", height: float = 0, control_w: float = 0, icon: str = "") -> tuple:
         """A row with `title` (and a grey `hint` under it) on the left - after a brand tile when `icon` is a
-        BRANDS kind. -> (card, top of the row, x where the control goes, row height). Rows grow to fit a long
+        BRANDS kind (or a picture drawn by `icon(card, x, y, size)` when it is a callable). -> (card, top of the row, x where the control goes, row height). Rows grow to fit a long
         hint; self.hint is the hint's label (a Test result can be written there)."""
         left = 16 + (ICON + 12 if icon else 0)
         label_w = self.width - left - 16 - (control_w + 16 if control_w else 0)
@@ -335,7 +382,9 @@ class _Page:
             self.card.addSubview_(line)
         top = self.card_y
         self.hint = None
-        if icon:
+        if callable(icon):                 # a picture of its own: icon(card, x, y, size)
+            icon(self.card, 16, top + (height - ICON) / 2, ICON)
+        elif icon:
             _icon_tile(self.card, 16, top + (height - ICON) / 2, icon)
         if title:
             title_y = top + (height - (18 + (hint_h + 2 if hint else 0))) / 2
@@ -446,10 +495,12 @@ class SettingsWindow:
         return field
 
     def _popup(self, view, key, options, x, y, w, on_change=None):
-        popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, y, w, 26), False)
-        for _, title in options:
-            popup.addItemWithTitle_(title)
-        values = [v for v, _ in options]
+        """A pop-up for pref `key`, drawn in the window's style (settings_art.popup). options: (value, title),
+        (value, title, icon) or (value, title, icon, subtitle) - icon: an SF Symbol name, (symbol, rgb), an
+        NSImage or a callable returning one; subtitle: a grey second line in the menu."""
+        popup = _menu(settings_art.popup(AppKit.NSMakeRect(x, y, w, 26)), options)
+        settings_art.fit(popup, w)                   # every closed title fits whole (grows leftwards)
+        values = [o[0] for o in options]
         current = prefs.get(key)
         if current in values:
             popup.selectItemAtIndex_(values.index(current))
@@ -471,10 +522,9 @@ class SettingsWindow:
         return switch
 
     def _button(self, view, title, x, y, w, handler, primary=False):
-        """A push button; `primary` (True, or a colour): the row's main action, filled in the accent colour."""
-        button = AppKit.NSButton.buttonWithTitle_target_action_(title, None, None)
-        button.setBezelStyle_(AppKit.NSBezelStyleRounded)
-        button.setFrame_(AppKit.NSMakeRect(x, y, w, 28))
+        """A push button; `primary` (True, or a colour): the row's main action, filled in the accent colour.
+        `w` is a minimum: it grows to fit its title (now and when the title changes), keeping its right edge."""
+        button = settings_art.push_button(title, AppKit.NSMakeRect(x, y, w, 28))
         if primary:
             _prominent(button, None if primary is True else primary)
         self._on(button, lambda c: handler())
@@ -512,6 +562,9 @@ class SettingsWindow:
             log.debug("sample sound failed", exc_info=True)
 
     def _row_popup(self, page, key, title, options, hint="", w=250, on_change=None):
+        """`w` is a minimum: the pop-up is as wide as its longest closed title needs (up to about half the row)."""
+        w = settings_art.fit_width(_menu(settings_art.popup(AppKit.NSMakeRect(0, 0, w, 26)), options), w,
+                                   page.width * 0.55)
         card, top, x, h = page.row(title, hint, control_w=w)
         return self._popup(card, key, options, x, top + (h - 26) / 2, w, on_change)
 
@@ -520,7 +573,10 @@ class SettingsWindow:
         return self._text(card, key, x, top + (h - 24) / 2, w, placeholder, settle)
 
     def _row_buttons(self, page, title, buttons, hint="", icon=""):
-        """buttons: [(title, width, handler)] or [(title, width, handler, primary)], right-aligned in order."""
+        """buttons: [(title, width, handler)] or [(title, width, handler, primary)], right-aligned in order. A width
+        is a minimum: each button is as wide as its title needs."""
+        buttons = [(words, settings_art.button_width(words, w), handler, *style)
+                   for words, w, handler, *style in buttons]
         total = sum(b[1] for b in buttons) + 8 * (len(buttons) - 1)
         card, top, x, h = page.row(title, hint, control_w=total, icon=icon)
         made = []
@@ -591,7 +647,8 @@ class SettingsWindow:
 
     def _link(self, view, title, right, y, handler, max_w: float = 240):
         """A borderless button in the accent colour, like a link: as wide as its words (at most `max_w`, the title
-        cut with "…" beyond that), its right edge at `right`."""
+        cut with "…" beyond that), its right edge at `right`. No trailing dots on the words ("All permissions")."""
+        title = settings_art.plain_title(title)
         button = AppKit.NSButton.buttonWithTitle_target_action_(title, None, None)
         button.setBordered_(False)
         button.setAttributedTitle_(AppKit.NSAttributedString.alloc().initWithString_attributes_(title, {
@@ -1056,11 +1113,8 @@ class SettingsWindow:
         self._handlers[objc.pyobjc_id(field)] = typed
         count.setStringValue_(f"{len(str(field.stringValue()))}/{PERSONALITY_LIMIT}")
 
-        presets = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            AppKit.NSMakeRect(x + 258, top + (h - 26) / 2, 92, 26), True)
-        presets.addItemWithTitle_("Presets")
-        for _, title in PERSONALITIES:
-            presets.addItemWithTitle_(title)
+        presets = _menu(settings_art.popup(AppKit.NSMakeRect(x + 258, top + (h - 26) / 2, 92, 26), True),
+                        [(None, "Presets")] + PERSONALITIES)
         card.addSubview_(presets)
 
         def preset(control) -> None:
@@ -1080,14 +1134,11 @@ class SettingsWindow:
         name = prefs.name()
         page.section("Voice")
         card, top, x, h = page.row("Show", control_w=250)
-        shown = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 250, 26),
-                                                                       False)
-        for _, title in VOICE_FILTERS:
-            shown.addItemWithTitle_(title)
+        shown = _menu(settings_art.popup(AppKit.NSMakeRect(x, top + (h - 26) / 2, 250, 26)), VOICE_FILTERS)
+        settings_art.fit(shown)
         card.addSubview_(shown)
         card, top, x, h = page.row("Voice", "Previews take a few seconds the first time.", control_w=350)
-        picker = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 250, 26),
-                                                                        False)
+        picker = settings_art.popup(AppKit.NSMakeRect(x, top + (h - 26) / 2, 250, 26))
         card.addSubview_(picker)
         listed: list[str] = []
 
@@ -1097,9 +1148,15 @@ class SettingsWindow:
             if chosen not in listed:                     # keep the current one visible
                 listed.insert(0, chosen)
             picker.removeAllItems()
-            for voice in listed:
-                picker.addItemWithTitle_(facts["labels"].get(voice, voice))
+            genders = {v: (g, t) for v, g, t in facts["catalog"]}
+            for voice in listed:                         # an avatar, then name · female/male · its character
+                gender, tone = genders.get(voice, ("", ""))
+                settings_art.add_item(picker, facts["labels"].get(voice, voice),
+                                      functools.partial(settings_art.avatar, voice),
+                                      attributed=settings_art.voice_title(voice, gender, tone) if gender or tone
+                                      else None)
             picker.selectItemAtIndex_(listed.index(chosen))
+            settings_art.fit(picker)
 
         fill("all")
         self._on(shown, lambda c: fill(VOICE_FILTERS[c.indexOfSelectedItem()][0]))
@@ -1124,11 +1181,8 @@ class SettingsWindow:
 
         card, top, x, h = page.row("Style", "Pace, mood, accent - for every voice.", control_w=350)
         style = self._text(card, "speaking_style", x, top + (h - 24) / 2, 250, "e.g. warm and calm", settle=3.0)
-        presets = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(
-            AppKit.NSMakeRect(x + 258, top + (h - 26) / 2, 92, 26), True)
-        presets.addItemWithTitle_("Presets")
-        for _, title in STYLES:
-            presets.addItemWithTitle_(title)
+        presets = _menu(settings_art.popup(AppKit.NSMakeRect(x + 258, top + (h - 26) / 2, 92, 26), True),
+                        [(None, "Presets")] + STYLES)
         card.addSubview_(presets)
 
         def preset(control) -> None:
@@ -1151,11 +1205,16 @@ class SettingsWindow:
         self._row_switch(page, "word_animation", "Word-by-word captions")
         page.end()
 
-    def _devices(self, output: bool) -> list[tuple[str, str]]:
-        found = [("", "System default")]
+    def _devices(self, output: bool) -> list[tuple]:
+        """[(uid, name, (symbol, rgb), transport)] - the icon (mic, speaker, headphones, AirPods, display…) is
+        drawn later, on the main thread, when the menu is built."""
+        found = [("", "System default", settings_art.device_spec("", "", output),
+                  "Follows macOS Sound settings")]
         for d in audio_devices.devices():
             if (d["outputs"] if output else d["inputs"]) and d["transport"] != "aggregate":
-                found.append((d["uid"], f"{d['name']}  ({d['transport']})"))
+                transport = str(d["transport"])
+                found.append((d["uid"], d["name"], settings_art.device_spec(d["name"], transport, output),
+                              transport[:1].upper() + transport[1:]))
         return found
 
     def _devices_section(self, page, facts: dict) -> None:
@@ -1177,15 +1236,13 @@ class SettingsWindow:
         page.section("Calls and meetings")
         current = ("nothing" if not prefs.get("share_mic") else
                    "stop" if prefs.get("listen_in_calls") is False else "listen")
+        calls_w = settings_art.fit_width(_menu(settings_art.popup(AppKit.NSMakeRect(0, 0, 270, 26)), CALLS), 270)
         card, top, x, h = page.row("During calls",
                                    f"Meet, Zoom, FaceTime… Keep listening: {name} still hears “{phrase}” without "
                                    "disturbing the call. Stop: it lets go of the microphone until the call ends.",
-                                   control_w=270)
-        popup = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(AppKit.NSMakeRect(x, top + (h - 26) / 2, 270, 26),
-                                                                       False)
-        for _, title in CALLS:
-            popup.addItemWithTitle_(title)
-        popup.selectItemAtIndex_([v for v, _ in CALLS].index(current))
+                                   control_w=calls_w)
+        popup = _menu(settings_art.popup(AppKit.NSMakeRect(x, top + (h - 26) / 2, calls_w, 26)), CALLS)
+        popup.selectItemAtIndex_([c[0] for c in CALLS].index(current))
 
         def chosen(control) -> None:
             value = CALLS[control.indexOfSelectedItem()][0]
@@ -1229,16 +1286,18 @@ class SettingsWindow:
             mcp = {"claude": None, "codex": None}
         try:
             from mint.tools import agent_checks
+            from mint.tools import agent_watch
             usage = agent_checks.limits_line()
+            limits = agent_watch.limits()            # files: read here, off the main thread
         except Exception:
-            usage = ""
+            usage, limits = "", None
         try:
             from mint.tools import agent_watch
             here = any(agent_watch.installed().values()) or prefs.is_set("agent_mode")
         except Exception:
             here = True
         return {"hooks": self._hooks_title(), "limits": self._limits_title(), "mcp": mcp, "usage": usage,
-                "agents_here": here}
+                "limits_data": limits, "agents_here": here}
 
     def _page_looks(self, page, facts: dict) -> None:
         """Appearance & Sound. The few things most people change; the rest with advanced settings."""
@@ -1301,15 +1360,45 @@ class SettingsWindow:
                          "A permission request or a question: Allow, Deny or pick the answer right in the pop-up.")
         self._row_switch(page, "agent_open_on_done", "Pop up when one finishes",
                          "What it did, for a few seconds. Nothing shows while they work.")
-        self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet",
-                        "Claude's from the Claude app (it notes them while it's open), Codex's from its logs. "
-                        "Ask: \"how much Claude do I have left?\"", w=250)
+        self._limits_rows(page, facts)
         # Connecting Claude Code is a setup step: in the basic view too.
         self._agent_hooks_row = self._row_buttons(
             page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks,
                                               facts["hooks"] != "Disconnect")],
             "Allow, Always or Deny Claude Code's permission requests, and answer its questions, from the notch (adds "
             "a hook to ~/.claude/settings.json; a backup is kept). The terminal still asks too.", icon="anthropic")
+
+    def _limits_rows(self, page, facts: dict) -> None:
+        """Usage limits used: per provider (Claude, Codex) a slim bar for the 5-hour and the weekly window - percent
+        used, coloured green / amber / red, and when it resets. Not seen yet when there is nothing to show."""
+        hint = ("Claude's from the Claude app (it notes them while it's open), Codex's from its logs. Ask: \"how "
+                "much Claude do I have left?\"")
+        data = facts.get("limits_data")
+        if data is None:                             # no limits read (older facts): the one-line summary
+            self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet", hint, w=250)
+            return
+        seen = {app: x for app, x in (data or {}).items() if isinstance(x, dict) and ("5h" in x or "week" in x)}
+        if not seen:
+            self._row_badge(page, "Usage limits used", "Not seen yet", tone="off", hint=hint, w=110)
+            return
+        page.row("Usage limits used", hint)
+        meter_w, gap = 150, 16
+        now = time.time()
+        for app, name, brand in (("claude", "Claude", "anthropic"), ("codex", "Codex", "openai")):
+            x = seen.get(app)
+            if x is None:
+                self._row_badge(page, name, "Not seen yet", tone="off", icon=brand, w=110)
+                continue
+            when = settings_art.ago(x.get("at") or 0, now)
+            card, top, left, h = page.row(name, f"Seen {when}" if when else "", height=58,
+                                          control_w=2 * meter_w + gap, icon=brand)
+            for i, (key, label) in enumerate((("5h", "5 hours"), ("week", "Week"))):
+                used = x.get(key)
+                meter = settings_art.usage_meter(
+                    AppKit.NSMakeRect(left + i * (meter_w + gap), top + (h - 40) / 2 + 1, meter_w, 40),
+                    label, None if used is None else float(used), x.get(f"{key}_resets") or 0, now)
+                meter.setAccessibilityLabel_(f"{name} {label.lower()} limit")
+                card.addSubview_(meter)
 
     def _show_tour(self) -> None:
         from mint.ui import onboarding
@@ -1521,9 +1610,19 @@ class SettingsWindow:
             background(run, "shortcut-add")
 
         def reload() -> None:
-            state["lib"] = ""
-            state["fresh"] = True                    # the next read asks `shortcuts list` again
-            self.refresh()
+            # Ask `shortcuts list` again off the main thread, then rebuild where the page was scrolled to - not a
+            # "Loading…" page that jumps back to the top.
+            state["lib"] = "Checking your shortcuts…"
+            lib_status.setStringValue_(state["lib"])
+
+            def run() -> None:
+                try:
+                    shortcut_library.installed(fresh=True)
+                except Exception:
+                    log.debug("shortcuts refresh failed", exc_info=True)
+                state["lib"] = ""
+                later(lambda: self.refresh(keep_scroll=True))
+            background(run, "shortcut-refresh")
         buttons = [("Refresh", 90, reload)]
         if missing:
             buttons.append(("Add all missing", 140, lambda: add(list(missing)), True))
@@ -1812,7 +1911,9 @@ class SettingsWindow:
             AppHelper.callLater(0.5, self.refresh)
         if advanced:
             self._row_popup(page, "email_backend", "Read mail with",
-                            [("auto", "Automatic"), ("imap", "Gmail app password"), ("mail", "Apple Mail (no password)")],
+                            [("auto", "Automatic", ("wand.and.stars", _BLUE)),
+                             ("imap", "Gmail app password", functools.partial(_brand_image, "gmail", 18)),
+                             ("mail", "Apple Mail (no password)", functools.partial(_brand_image, "mail", 18))],
                             hint="Automatic: the app password when one is saved - Gmail tells Mint about a new message "
                                  "at once and answers come back in seconds - else Apple Mail (checks every 30 s; works "
                                  "when Google won't make an app password).", on_change=changed)
@@ -1824,9 +1925,10 @@ class SettingsWindow:
         if mail:
             names = state.get("mail_accounts")
             current = state.get("mail_account", "")
-            options = [("", "Every inbox")] + [(n, n) for n in names or []]
+            options = [("", "Every inbox", ("tray.2.fill", _BLUE))] + [(n, n, ("envelope.fill", _GREY))
+                                                                        for n in names or []]
             if current and current not in (names or []):
-                options.append((current, current))
+                options.append((current, current, ("envelope.fill", _GREY)))
             self._row_popup(page, "email_mail_account", "Mail account", options,
                             hint=("Mail isn't open, so its accounts aren't listed yet." if names is None
                                   else "Add accounts in System Settings ▸ Internet Accounts (turn on Mail)."
@@ -1856,7 +1958,8 @@ class SettingsWindow:
         self._switch(card, x, top + (h - 22) / 2, state["enabled"], switch)
         if advanced or state["allow"] == "all":
             self._row_popup(page, "email_allow", "Who may send requests",
-                            [("list", "Only the addresses below"), ("all", "Anyone who knows the secret word")],
+                            [("list", "Only the addresses below", ("person.crop.circle.badge.checkmark", _GREEN)),
+                             ("all", "Anyone who knows the secret word", ("key.fill", (0.95, 0.68, 0.0)))],
                             hint="Either way, the mail server must vouch that a message really is from its sender.",
                             on_change=lambda: AppHelper.callLater(0.5, self.refresh))
         if advanced:
@@ -2587,6 +2690,9 @@ class SettingsWindow:
             return
         scroll = getattr(self, "_scroll", None)
         y = scroll.contentView().bounds().origin.y if keep_scroll and scroll is not None else 0.0
+        pending = self.__dict__.pop("_pending_scroll", 0.0)
+        if keep_scroll:
+            y = max(y, pending)                       # a rebuild while the page was still loading
         self._handlers.clear()
         self._ended_handlers.clear()
         self._fill()
@@ -2595,6 +2701,8 @@ class SettingsWindow:
         if y and self._scroll is not None:
             clip = self._scroll.contentView()
             doc_h = self._scroll.documentView().frame().size.height
+            if doc_h - clip.bounds().size.height < y:
+                self._pending_scroll = y          # still short ("Loading…"): the next rebuild goes back there
             y = min(y, max(0.0, doc_h - clip.bounds().size.height))
             clip.scrollToPoint_(AppKit.NSMakePoint(0, y))
             self._scroll.reflectScrolledClipView_(clip)

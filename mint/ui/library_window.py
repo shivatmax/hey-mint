@@ -458,7 +458,7 @@ class LibraryWindow:
         if state == "ready":
             return [("Connect", lambda r=row: self._run(r, "Connecting…", app_library.connect), True)]
         if state == "setup":
-            return [("Set up…", lambda r=row: self._run(r, "Opening…", app_library.connect), True)]
+            return [("Set up", lambda r=row: self._run(r, "Opening…", app_library.connect), True)]
         if state == "get":
             out = [("Get it", lambda r=row: self._run(r, "Opening…", app_library.connect), True)]
             if row.get("web_url"):

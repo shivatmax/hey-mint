@@ -202,7 +202,7 @@ def test_advanced_rows_show_only_when_asked(fresh_prefs, monkeypatch):
                 else any(w.startswith("More settings: ") for w in words))
     win.page_key = "voice"
     buttons = [str(v.title()) for v in _views(win._build_page(_column(), 480).doc) if isinstance(v, AppKit.NSButton)]
-    assert "Test microphone" in buttons and "Train my voice…" in buttons and "Test" not in buttons
+    assert "Test microphone" in buttons and "Train my voice" in buttons and "Test" not in buttons
     assert "Test this phrase" not in buttons and "Record 4 takes" not in buttons     # the custom wake phrase
 
     prefs.set("settings_advanced", True)
@@ -246,7 +246,7 @@ def test_needs_your_ok_shows_only_missing_important_permissions(fresh_prefs, mon
     assert words[:1] == ["Needs your OK"]                     # at the top of General
     assert "Microphone" in words and "Screen Recording" in words and "Accessibility" not in words
     titles = [str(b.title()) for b in _buttons(doc)]
-    assert "Allow…" in titles and "Open Settings…" in titles
+    assert "Allow" in titles and "Open Settings" in titles
 
 
 def test_permissions_page_lists_every_permission(fresh_prefs, monkeypatch):
@@ -264,7 +264,7 @@ def test_permissions_page_lists_every_permission(fresh_prefs, monkeypatch):
     assert words.count("Allowed ✓") == len(permissions.ALL) - 1 and words.count("Not allowed") == 1
     asked = []
     monkeypatch.setattr(permissions, "ask", lambda kind, already: asked.append(kind))
-    allow = next(b for b in _buttons(doc) if str(b.title()) == "Allow…")
+    allow = next(b for b in _buttons(doc) if str(b.title()) == "Allow")
     win._changed(allow)
     assert asked == ["calendar"]
 
@@ -307,7 +307,7 @@ def test_more_providers_open_in_place(fresh_prefs, monkeypatch):
     assert "OpenAI" in words and "Groq" in words              # the common one, and one with a key
     assert "Anthropic (Claude)" not in words and "More providers…" in words
     assert "Set ••••1234 ✓" in words and "Not set" in words
-    assert "Add key…" in [str(b.title()) for b in _buttons(doc)]
+    assert "Add key" in [str(b.title()) for b in _buttons(doc)]
     more = next(b for b in _buttons(doc) if str(b.title()).startswith("Show ") and str(b.title()).endswith(" more"))
     win._changed(more)
     words = _texts(win._build_page(_column(), 480).doc)

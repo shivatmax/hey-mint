@@ -229,11 +229,14 @@ class Bridge:
         finally:
             os.umask(old_mask)
         os.chmod(self.sock_path, 0o600)
-        fd = os.open(self.key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(self.key)
         server.listen(4)
         server.settimeout(1.0)
+        # The key appears whole and only once the socket listens: whoever reads it can connect at once.
+        partial = self.key_path.with_name(self.key_path.name + ".new")
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(self.key)
+        os.replace(partial, self.key_path)
         log.info("chrome bridge listening")
         try:
             while not self.quit.is_set():

@@ -94,9 +94,38 @@ def _ease(name=Quartz.kCAMediaTimingFunctionEaseInEaseOut):
 
 def _species(name: str) -> str:
     name = (name or "").strip().lower()
+    pal = pal_for(name)
+    if pal is not None:
+        return pal[0]
     if name in BY_NAME:
         return BY_NAME[name]
     return SPECIES[sum(ord(c) * (i + 1) for i, c in enumerate(name)) % len(SPECIES)]
+
+
+def pal_for(agent) -> tuple | None:
+    """(species, rgb): the character an agent of the registry wears everywhere (its critter, Settings, the notch).
+    Its own choice ("pal" in its config) if it made one; else the built-ins' own (Astra the owl, Luna the bun...);
+    else the first species no earlier agent wears - so every agent is a different character until all eight are
+    taken, and after that the colour (each agent's own) tells them apart. None for a name that isn't an agent."""
+    try:
+        from mint.agents import registry
+        agents = registry.load()
+    except Exception:
+        return None
+    name = (agent.get("name") if isinstance(agent, dict) else str(agent or "")).strip().lower()
+    taken: list[str] = []
+    for a in agents:
+        species = a.get("pal") if a.get("pal") in SPECIES else None
+        key = a["name"].strip().lower()
+        if species is None:
+            species = BY_NAME.get(key)
+        if species is None:
+            species = next((s for s in SPECIES if s not in taken),
+                           SPECIES[sum(ord(c) * (i + 1) for i, c in enumerate(key)) % len(SPECIES)])
+        taken.append(species)
+        if key == name:
+            return species, registry.color_rgb(a)
+    return None
 
 
 def _symbol_for(tool: str) -> str:
@@ -1187,7 +1216,10 @@ class Stage:
                 critter = None
             if critter is None or critter.state == "gone":
                 taken = {c.species for c in self.critters.values() if c.state != "gone"}
-                critter = Critter(run, str(event.get("agent", "Agent")), _rgb(event.get("color")), taken)
+                who = str(event.get("agent", "Agent"))
+                pal = pal_for(who)
+                critter = Critter(run, who, pal[1] if pal else _rgb(event.get("color")), taken,
+                                  species=pal[0] if pal else None)
                 parent = event.get("parent")
                 if parent and parent in self.critters and parent != run:
                     critter.parent = parent

@@ -27,6 +27,7 @@ from PyObjCTools import AppHelper
 
 from mint.tools import connectors
 from mint.core import prefs
+from mint.ui import settings_art
 
 ICON = 28
 STATUS_W = 150
@@ -80,7 +81,7 @@ def facts(win) -> dict:
 
 
 def page(win, page, facts: dict) -> None:
-    from mint.ui.settings import _text_height
+    from mint.ui.settings import _text_height, _text_width
     name = prefs.name()
     state = win.__dict__.setdefault("_connectors_ui", {
         "desc": "", "plan": None, "status": "", "msgs": {}, "deep_at": 0.0, "deep_busy": False, "all": False,
@@ -118,8 +119,12 @@ def page(win, page, facts: dict) -> None:
     # --- one row -------------------------------------------------------------------------------------------
     def row(item: dict, buttons: list, detail: str, compact: bool = False) -> None:
         """Icon, name, what Mint does with it (unless compact), a status badge, and its buttons."""
+        buttons = [(text, settings_art.button_width(text, w), *rest) for text, w, *rest in buttons]   # fit titles
         widths = sum(b[1] for b in buttons) + 8 * max(0, len(buttons) - 1)
-        status_w = STATUS_W if detail else 0                     # no badge: the words get its room
+        words = ((detail[:40] + " ✓") if item.get("state") == "connected" else detail[:40]) if detail else ""
+        # the badge as wide as its words (never "Add in Internet Accou…"), at least STATUS_W
+        badge_w = min(240.0, max(STATUS_W, _text_width(words, 11, bold=True) + 20)) if detail else 0
+        status_w = badge_w                                       # no badge: the words get its room
         control_w = status_w + (12 if status_w and buttons else 0) + (max(widths, BUTTONS_W) if buttons else 0)
         label_x = 16 + ICON + 12
         label_w = page.width - label_x - 16 - control_w - 12
@@ -139,9 +144,8 @@ def page(win, page, facts: dict) -> None:
             item["_note"] = note
         from mint.ui.settings import _badge
         if detail:
-            words = (detail[:40] + " ✓") if item.get("state") == "connected" else detail[:40]
-            badge = _badge(card, words, x + STATUS_W, top + h / 2, _TONES.get(item.get("state"), "off"),
-                           max_w=STATUS_W)
+            badge = _badge(card, words, x + badge_w, top + h / 2, _TONES.get(item.get("state"), "off"),
+                           max_w=badge_w)
             badge.setToolTip_(detail)
         bx = x + control_w - widths
         for text, w, handler, *style in buttons:

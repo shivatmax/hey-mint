@@ -436,11 +436,26 @@ def _assign_species(items) -> None:
     _assign(tuple(s.key for s in items))
 
 
+def _agent_pal(key: str):
+    """Mint's own agents (background jobs, key "mint:<agent>-<n>") wear their own character (critters.pal_for)."""
+    if not key.startswith("mint:"):
+        return None
+    try:
+        return critters.pal_for(key[5:].rsplit("-", 1)[0])
+    except Exception:
+        return None
+
+
 def _assign(keys: tuple) -> None:
     if keys == _species_sig[0]:
         return
     _species_sig[0] = keys
     used, out = set(), {}
+    for key in keys:
+        pal = _agent_pal(key)
+        if pal is not None:
+            out[key] = pal[0]
+            used.add(pal[0])
     for key in sorted(keys, key=lambda k: _species_age.get(k, 1e18)):
         sp = _species.get(key)
         if sp and sp not in used:
@@ -468,7 +483,10 @@ def species_of(key: str) -> str:
 
 
 def pal_of(key: str) -> tuple:
-    """(species, hue) of a session's pal."""
+    """(species, hue) of a session's pal (one of Mint's agents: its own character and colour)."""
+    pal = _agent_pal(key)
+    if pal is not None:
+        return pal
     sp = species_of(key)
     return sp, critters.species_hue(sp)
 
