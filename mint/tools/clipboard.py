@@ -168,7 +168,38 @@ def _image(board):
 
 def _secret(text: str) -> bool:
     from mint.knowledge.skills import has_secret
-    return has_secret(text)
+    return has_secret(text) or _token(text)
+
+
+_KEY_PREFIX = re.compile(r"^(ghp_|gho_|ghs_|ghr_|github_pat_|xox[abpr]-|sk-|sk_live_|rk_live_|pk_live_|AKIA[0-9A-Z]{12}|"
+                         r"ASIA[0-9A-Z]{12}|ya29\.|1//0|AMf-v|glpat-|npm_|pypi-|hf_|shpat_|SG\.|EAA)", re.I)
+
+
+def _token(text: str) -> bool:
+    """A copied key, token or password-like string on its own (an API key, an OAuth token, a base64 secret, a JWT,
+    a private key): never kept. Ordinary words, names, links, paths, emails and hex ids (commits, UUIDs) are."""
+    t = str(text or "").strip()
+    if "-----BEGIN" in t and "PRIVATE KEY" in t:
+        return True
+    if not 20 <= len(t) <= 4096 or any(c.isspace() for c in t):
+        return False
+    if _KEY_PREFIX.match(t) and len(t) >= 24:
+        return True
+    if t.startswith(("http://", "https://", "/", "~", "www.", "file:")) or "@" in t:
+        return False
+    if re.fullmatch(r"[0-9a-fA-F-]+", t):
+        return False                                    # a commit hash or a UUID
+    if re.fullmatch(r"eyJ[\w-]+\.[\w-]+\.[\w-]+", t):
+        return True                                     # a JWT
+    if not any(c.isupper() for c in t) or re.search(r"\.[A-Za-z]{2,5}$", t):
+        return False                                    # lowercase ids, file names
+    import math
+    from collections import Counter
+    classes = sum((any(c.islower() for c in t), any(c.isupper() for c in t), any(c.isdigit() for c in t),
+                   any(c in "+/=_-." for c in t)))
+    counts = Counter(t)
+    entropy = -sum(n / len(t) * math.log2(n / len(t)) for n in counts.values())
+    return classes >= 3 and entropy >= 4.0 and sum(c.isdigit() for c in t) >= 2
 
 
 def _describe(board) -> str:
@@ -230,8 +261,12 @@ def _load() -> None:
     except (OSError, ValueError):
         rows = []
     cutoff = time.time() - KEEP_DAYS * 86400
-    HISTORY[:] = [r for r in rows if r.get("at", 0) >= cutoff and (r["kind"] != "image" or Path(r.get("image", "")).exists())]
+    HISTORY[:] = [r for r in rows if r.get("at", 0) >= cutoff and (r["kind"] != "image" or Path(r.get("image", "")).exists())
+                  and not (r["kind"] == "text" and _secret(r.get("text", "")))]   # keys kept before the check
+    purged = any(r["kind"] == "text" and _secret(r.get("text", "")) for r in rows)
     _screenshot_count["n"] = max([r.get("shot", 0) for r in HISTORY] + [0])
+    if purged:
+        _save()                                     # the file on disk loses them too
 
 
 def _save() -> None:
@@ -325,6 +360,19 @@ def delete(ids: list[str]) -> int:
     HISTORY[:] = [h for h in HISTORY if h.get("id") not in set(ids)]
     _save()
     return before - len(HISTORY)
+
+
+def to_top(clip_id: str) -> dict | None:
+    """Copy from the clipboard window: the clip moves to the top of the history (as if just copied)."""
+    _load()
+    found = next((h for h in HISTORY if h.get("id") == clip_id), None)
+    if found is None:
+        return None
+    HISTORY.remove(found)
+    found["at"] = time.time()
+    HISTORY.insert(0, found)
+    _save()
+    return found
 
 
 def entry(clip_id: str) -> dict | None:

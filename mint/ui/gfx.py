@@ -177,20 +177,25 @@ class CloseButton(AppKit.NSButton):
         if getattr(self, "_mint_hot", None) is hot:
             return
         self._mint_hot = hot
-        self.layer().setBackgroundColor_(cg((1.0, 1.0, 1.0), 0.26 if hot else 0.12))
-        self.setContentTintColor_(ns((1.0, 1.0, 1.0), 1.0 if hot else 0.72))
+        base = getattr(self, "_mint_base", 0.12)
+        self.layer().setBackgroundColor_(cg((1.0, 1.0, 1.0), base + 0.14 if hot else base))
+        self.setContentTintColor_(ns((1.0, 1.0, 1.0), 1.0 if hot else 0.72 + base))
 
 
-def close_button(target, action: str, tip: str = "Close") -> CloseButton:
-    """A 20 pt round × (SF Symbol xmark) that calls `action` on `target`; place it with setFrameOrigin_."""
-    button = CloseButton.buttonWithImage_target_action_(symbol("xmark", 9, "bold"), target, action)
+def close_button(target, action: str, tip: str = "Close", size: float = CLOSE, rest: float = CLOSE_REST,
+                 base: float = 0.12) -> CloseButton:
+    """A round × (SF Symbol xmark), 20 pt unless `size`, that calls `action` on `target`; place it with
+    setFrameOrigin_. `rest`: how visible it is while the pointer is off its card; `base`: its circle's fill."""
+    button = CloseButton.buttonWithImage_target_action_(symbol("xmark", max(9, round(size * 0.42)), "bold"), target,
+                                                        action)
     button.setBordered_(False)
-    button.setFrame_(AppKit.NSMakeRect(0, 0, CLOSE, CLOSE))
+    button.setFrame_(AppKit.NSMakeRect(0, 0, size, size))
     button.setToolTip_(tip)
     button.setWantsLayer_(True)
-    button.layer().setCornerRadius_(CLOSE / 2)
+    button.layer().setCornerRadius_(size / 2)
+    button._mint_base, button._mint_rest = base, rest
     button.setHot_(False)
-    button.setAlphaValue_(CLOSE_REST)
+    button.setAlphaValue_(rest)
     return button
 
 
@@ -202,7 +207,7 @@ def track_close(button, on_card: bool, mouse) -> None:
     window = button.window()
     if window is None:
         return
-    want = 1.0 if on_card else CLOSE_REST
+    want = 1.0 if on_card else getattr(button, "_mint_rest", CLOSE_REST)
     if getattr(button, "_mint_want", None) != want:
         button._mint_want = want
         AppKit.NSAnimationContext.beginGrouping()

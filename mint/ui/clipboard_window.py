@@ -11,6 +11,10 @@ Esc, the × or a click on the face closes it.
 * Double-click or Return: paste into the app you were in (the clip stays). Copy puts the
   selection on the clipboard for you to paste (several pictures or files as files, several
   texts joined). Pin keeps it. Delete removes it. Drag a clip out into any app.
+* Each clip has its own Copy button (⧉): it goes on the clipboard and to the top of the list, for you to paste
+  wherever and whenever you like (nothing is pasted).
+* Rest the pointer on a clip and its preview opens beside the card: the picture large, or the whole text
+  (scrollable). Space shows or hides it for the selected clip.
 
 The history is clip_tools.HISTORY (on this Mac, secrets never kept); this card shows it and acts
 on it. Like all of Mint's windows it never appears in screen shares.
@@ -34,12 +38,17 @@ from mint.ui import gfx
 
 log = logging.getLogger("mint.ui.clipboard_window")
 
-W, H = 372, 500
-ROW = 54
+W, H = 364, 480
+ROW = 50
 FACE = 24
 MAX_PINS = 20
 TABS = (("all", "All"), ("mint", "Mint"), ("pinned", "Pinned"))
-SURFACE = (0.035, 0.035, 0.045)
+X_SIZE = 28                # the card's ×: big and plain to see
+PREVIEW_W, PREVIEW_MAX_H = 340, 420
+PREVIEW_AFTER = 0.45       # resting on a clip this long opens its preview
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".heic", ".webp", ".tiff", ".bmp")
+SURFACE = (0.055, 0.055, 0.068)      # a shade lighter than pure black, so the card reads on a dark screen
+EDGE = 0.22                          # its border: plain to see on black
 INK = (1.0, 1.0, 1.0)
 DIM = (0.62, 0.63, 0.68)
 SOURCES = {"you": ("You", (0.62, 0.66, 0.74)), "mint": ("Mint", None), "screenshot": ("Screenshot", (0.35, 0.62, 1.0)),
@@ -152,6 +161,16 @@ class _ClipboardRow(AppKit.NSView):
         self.dragging = False
 
 
+class MintClipRowButton(AppKit.NSButton):
+    def acceptsFirstMouse_(self, event):
+        return True
+
+
+class MintClipPreviewPanel(AppKit.NSPanel):
+    def canBecomeKeyWindow(self):
+        return False
+
+
 class _ClipboardTarget(AppKit.NSObject):
     def initWithOwner_(self, owner):
         self = objc.super(_ClipboardTarget, self).init()
@@ -169,6 +188,9 @@ class _ClipboardTarget(AppKit.NSObject):
 
     def copy_(self, sender):
         self.owner.copy_selection()
+
+    def copyRow_(self, sender):
+        self.owner.copy_one(getattr(sender, "clip_id", ""))
 
     def paste_(self, sender):
         self.owner.paste(list(self.owner.selected))
@@ -200,6 +222,11 @@ class ClipboardWindow:
         self.shown_ids: list[str] = []
         self.previous_app = None
         self.hud = None
+        self.preview = None                    # the preview panel beside the card
+        self.preview_id = ""                   # the clip it shows
+        self.hover_id, self.hover_since, self.left_at = "", 0.0, 0.0
+        self.sticky = False                    # opened with Space: stays until Space or Esc
+        self.copied_id, self.copied_at = "", 0.0
 
     # --- building -------------------------------------------------------------------------------
 
@@ -226,9 +253,9 @@ class ClipboardWindow:
         root.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
         layer = root.layer()
         layer.setBackgroundColor_(_cg(SURFACE))
-        layer.setCornerRadius_(24)
-        layer.setBorderColor_(_cg((1, 1, 1), 0.09))
-        layer.setBorderWidth_(0.5)
+        layer.setCornerRadius_(22)
+        layer.setBorderColor_(_cg((1, 1, 1), EDGE))
+        layer.setBorderWidth_(1.0)
         layer.setMasksToBounds_(True)
         # The card is built at full size in its own view and scaled while it grows out of the orb.
         card = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))
@@ -240,7 +267,7 @@ class ClipboardWindow:
         mint = tuple(gfx.accent())
 
         # Header: the title and count on the left, Mint's little face in the top-right corner.
-        title = _label("Clipboard", 16, AppKit.NSFontWeightBold)
+        title = _label("Clipboard", 15, AppKit.NSFontWeightBold)
         title.setFrame_(AppKit.NSMakeRect(20, H - 40, 100, 22))
         card.addSubview_(title)
         self.count = _label("", 11, AppKit.NSFontWeightMedium, DIM)
@@ -261,9 +288,10 @@ class ClipboardWindow:
         close.setAction_("close:")
         close.setToolTip_("Close (Esc)")
         card.addSubview_(close)
-        # A visible × beside the face too: the face alone didn't read as a way to close.
-        self.x_button = gfx.close_button(self.target, "close:", "Close (Esc)")
-        self.x_button.setFrameOrigin_(AppKit.NSMakePoint(W - 46 - 20, H - 26 - gfx.CLOSE / 2))
+        # A plain, big × beside the face: the face alone didn't read as a way to close, and a small faint × was
+        # hard to see on black.
+        self.x_button = gfx.close_button(self.target, "close:", "Close (Esc)", size=X_SIZE, rest=0.92, base=0.16)
+        self._place_x()
         card.addSubview_(self.x_button)
 
         # Search, full width.
@@ -275,16 +303,16 @@ class ClipboardWindow:
         self.field = field
 
         # Three tabs, centred, equal widths.
-        tab_w, gap = 100, 6
+        tab_w, gap = 96, 6
         x = (W - (len(TABS) * tab_w + (len(TABS) - 1) * gap)) / 2
         self.tabs = []
         for tag, (_key, words) in enumerate(TABS):
             tab = AppKit.NSButton.buttonWithTitle_target_action_(words, self.target, "tab:")
             tab.setTag_(tag)
             tab.setBordered_(False)
-            tab.setFrame_(AppKit.NSMakeRect(x, H - 122, tab_w, 28))
+            tab.setFrame_(AppKit.NSMakeRect(x, H - 120, tab_w, 26))
             tab.setWantsLayer_(True)
-            tab.layer().setCornerRadius_(14)
+            tab.layer().setCornerRadius_(13)
             card.addSubview_(tab)
             self.tabs.append(tab)
             x += tab_w + gap
@@ -344,6 +372,17 @@ class ClipboardWindow:
             except Exception:
                 self.hud = None
         return self.hud
+
+    def _place_x(self) -> None:
+        """The ×: right above the column of pick circles (the face's corner is taken only in orb mode)."""
+        try:
+            from mint.ui import notch
+            in_notch = bool(notch.enabled())
+        except Exception:
+            in_notch = False
+        self.face_host.setHidden_(in_notch)
+        right = W - 32 if in_notch else W - 46 - 4 - X_SIZE / 2          # the circles' centre, or left of the face
+        self.x_button.setFrameOrigin_(AppKit.NSMakePoint(right - X_SIZE / 2, H - 28 - X_SIZE / 2))
 
     def _frame(self):
         """The card's frame, its corner on the orb (the little face sits where the orb was)."""
@@ -412,6 +451,7 @@ class ClipboardWindow:
             self.previous_app = front
         clip_tools._load()
         self.version = -1
+        self._place_x()
         frame, _center = self._frame()
         self.panel.setFrame_display_(frame, False)
         self.panel.setAlphaValue_(0.0)
@@ -425,6 +465,8 @@ class ClipboardWindow:
     def close(self) -> None:
         if self.panel is None or not self.panel.isVisible():
             return
+        self.sticky = False
+        self.hide_preview()
         self._morph(False)
 
         def done():
@@ -450,6 +492,7 @@ class ClipboardWindow:
         if force or clip_tools.VERSION[0] != self.version:
             self.version = clip_tools.VERSION[0]
             self.rebuild()
+        self._hover_preview(mouse)
 
     # --- what is listed ----------------------------------------------------------------------------
 
@@ -520,13 +563,13 @@ class ClipboardWindow:
         row.setWantsLayer_(True)
         row.layer().setCornerRadius_(12)
         chosen = h["id"] in self.selected
-        row.layer().setBackgroundColor_(_cg(mint, 0.18) if chosen else _cg((1, 1, 1), 0.04))
+        row.layer().setBackgroundColor_(_cg(mint, 0.18) if chosen else _cg((1, 1, 1), 0.06))
         if chosen:
             row.layer().setBorderColor_(_cg(mint, 0.7))
             row.layer().setBorderWidth_(1)
         self.list.addSubview_(row)
         mid = (ROW - 4) / 2
-        thumb = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(8, mid - 17, 34, 34))
+        thumb = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(8, mid - 16, 32, 32))
         thumb.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
         thumb.setWantsLayer_(True)
         thumb.layer().setCornerRadius_(8)
@@ -543,23 +586,36 @@ class ClipboardWindow:
             thumb.layer().setBackgroundColor_(_cg((1, 1, 1), 0.08))
         row.addSubview_(thumb)
         title, detail = self._words(h)
-        text_w = width - 20 - 52 - 48
+        text_w = width - 20 - 50 - 46 - 34
         name = _label(title, 13, AppKit.NSFontWeightSemibold)
-        name.setFrame_(AppKit.NSMakeRect(52, mid - 17, text_w, 18))
+        name.setFrame_(AppKit.NSMakeRect(50, mid - 17, text_w, 18))
         row.addSubview_(name)
         words, rgb = SOURCES.get(h.get("source", "you"), SOURCES["you"])
         parts = [words] + ([detail] if detail else []) + [_ago(h.get("at", time.time()))]
         sub = _label(" · ".join(parts), 11, AppKit.NSFontWeightMedium, rgb or mint, 0.9)
-        sub.setFrame_(AppKit.NSMakeRect(52, mid + 2, text_w, 15))
+        sub.setFrame_(AppKit.NSMakeRect(50, mid + 2, text_w, 15))
         row.addSubview_(sub)
         # On the right, a round checkbox: empty, or filled with its place in the paste order.
-        check = gfx.number_badge(str(self.selected.index(h["id"]) + 1) if chosen else "", 22,
+        check = gfx.number_badge(str(self.selected.index(h["id"]) + 1) if chosen else "", 20,
                                  _cg(mint) if chosen else None, _cg((0.03, 0.08, 0.06)), 11,
                                  ring=None if chosen else _cg((1, 1, 1), 0.28))
-        check.setPosition_(Quartz.CGPointMake(width - 20 - 22, mid))
+        check.setPosition_(Quartz.CGPointMake(width - 20 - 22, mid))           # (its centre: W - 32 on the card)
         check.setGeometryFlipped_(True)                        # the row is flipped: flip back for the text
         row.layer().addSublayer_(check)
-        row.setToolTip_("Click the circle to pick several")
+        # Copy: on the clipboard and to the top of the list, for pasting later (nothing is pasted now).
+        just = h["id"] == self.copied_id and time.monotonic() - self.copied_at < 1.4
+        copy = MintClipRowButton.buttonWithImage_target_action_(gfx.symbol("checkmark" if just else "doc.on.doc", 11),
+                                                         self.target, "copyRow:")
+        copy.clip_id = h["id"]
+        copy.setBordered_(False)
+        copy.setFrame_(AppKit.NSMakeRect(width - 20 - 32 - 8 - 26, mid - 13, 26, 26))
+        copy.setWantsLayer_(True)
+        copy.layer().setCornerRadius_(13)
+        copy.layer().setBackgroundColor_(_cg(mint, 0.9) if just else _cg((1, 1, 1), 0.09))
+        copy.setContentTintColor_(AppKit.NSColor.blackColor() if just else _ns(INK, 0.85))
+        copy.setToolTip_("Copy - it goes to the top, ready to paste with ⌘V")
+        row.addSubview_(copy)
+        row.setToolTip_("Rest here for a preview · ⧉ copies · ◯ picks several")
 
     @staticmethod
     def _words(h: dict) -> tuple[str, str]:
@@ -607,14 +663,30 @@ class ClipboardWindow:
         if int(event.keyCode()) in (51, 117) and self.selected:          # delete
             self.delete_selection()
             return True
+        if int(event.keyCode()) == 49 and not self.field.currentEditor():  # space: the preview, Quick Look style
+            if self.preview_id and self.preview is not None and self.preview.isVisible():
+                self.sticky = False
+                self.hide_preview()
+            else:
+                clip_id = self.selected[0] if self.selected else self.hover_id
+                if clip_id:
+                    self.sticky = True
+                    self.show_preview(clip_id)
+            return True
         if int(event.keyCode()) == 53:                                   # esc
+            if self.preview is not None and self.preview.isVisible():
+                self.sticky = False
+                self.hide_preview()
+                return True
             self.close()
             return True
         return False
 
     def _paint_bar(self) -> None:
         n = len(self.selected)
-        self.hint.setStringValue_("Tap ◯ to pick several · double-click to paste · drag out")
+        if time.monotonic() < getattr(self, "flash_until", 0.0):
+            return                                              # a "Copied" note is showing: leave it
+        self.hint.setStringValue_("Hover to preview · ⧉ copy · double-click to paste")
         self.hint.setHidden_(bool(n))
         for button in self.actions:
             button.setHidden_(not n)
@@ -695,11 +767,194 @@ class ClipboardWindow:
         self.rebuild()
 
     def _flash(self, text: str) -> None:
+        self.flash_until = time.monotonic() + 1.8
         self.hint.setStringValue_(text)
         self.hint.setHidden_(False)
         for button in self.actions:
             button.setHidden_(True)
-        AppHelper.callLater(1.8, self._paint_bar)
+        AppHelper.callLater(1.85, self._paint_bar)
+
+    def copy_one(self, clip_id: str) -> None:
+        """The row's Copy: on the clipboard, and the clip moves to the top of the list. Nothing is pasted."""
+        c = self._find(clip_id)
+        if not c:
+            return
+        why = clip_tools._put_back(c)
+        if why:
+            self._flash(why.replace("FAILED: ", "").capitalize())
+            return
+        if not clip_id.startswith("pin:"):
+            clip_tools.to_top(clip_id)
+        self.version = clip_tools.VERSION[0]                   # (already shown: no second rebuild)
+        self.copied_id, self.copied_at = clip_id, time.monotonic()
+        self.selected = []
+        self.rebuild()
+        self.list.scrollPoint_(AppKit.NSMakePoint(0, 0))
+        AppHelper.callLater(1.5, self.rebuild)                 # the ✓ goes back to the copy icon
+        self._flash("Copied - it's at the top · paste anywhere with ⌘V")
+
+    # --- the preview beside the card ------------------------------------------------------------------
+
+    def _hover_row(self, mouse) -> str:
+        """The clip under the pointer ('' when it isn't over the list)."""
+        if self.panel is None or not AppKit.NSPointInRect(mouse, self.panel.frame()):
+            return ""
+        visible = self.scroll.contentView().documentVisibleRect()
+        point = self.list.convertPoint_fromView_(self.panel.convertPointFromScreen_(mouse), None)
+        if not AppKit.NSPointInRect(point, visible):
+            return ""
+        i = int((point.y - 2) // ROW)
+        return self.shown_ids[i] if 0 <= i < len(self.shown_ids) else ""
+
+    def _hover_preview(self, mouse) -> None:
+        now = time.monotonic()
+        hover = self._hover_row(mouse)
+        on_preview = self.preview is not None and self.preview.isVisible() and \
+            AppKit.NSPointInRect(mouse, self.preview.frame())
+        if hover != self.hover_id:
+            self.hover_id, self.hover_since = hover, now
+        if hover:
+            self.left_at = 0.0
+            if (hover != self.preview_id or not self.preview.isVisible()) and now - self.hover_since > PREVIEW_AFTER:
+                self.sticky = False
+                self.show_preview(hover)
+        elif not on_preview and not self.sticky and self.preview is not None and self.preview.isVisible():
+            self.left_at = self.left_at or now
+            if now - self.left_at > 0.2:
+                self.hide_preview()
+
+    def _preview_panel(self):
+        if self.preview is None:
+            panel = MintClipPreviewPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                AppKit.NSMakeRect(0, 0, PREVIEW_W, 200), AppKit.NSWindowStyleMaskBorderless
+                | AppKit.NSWindowStyleMaskNonactivatingPanel, AppKit.NSBackingStoreBuffered, False)
+            panel.setOpaque_(False)
+            panel.setBackgroundColor_(AppKit.NSColor.clearColor())
+            panel.setHasShadow_(True)
+            panel.setLevel_(AppKit.NSStatusWindowLevel)
+            panel.setHidesOnDeactivate_(False)
+            panel.setReleasedWhenClosed_(False)
+            panel.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                                         | AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary)
+            panel.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+            try:
+                from mint.ui.effects import SHARING
+                panel.setSharingType_(SHARING)
+            except Exception:
+                pass
+            self.preview = panel
+        return self.preview
+
+    def show_preview(self, clip_id: str) -> None:
+        c = self._find(clip_id)
+        if c is None or self.panel is None:
+            return
+        panel = self._preview_panel()
+        inner_w = PREVIEW_W - 24
+        root = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, PREVIEW_W, 100))
+        root.setWantsLayer_(True)
+        layer = root.layer()
+        layer.setBackgroundColor_(_cg(SURFACE))
+        layer.setCornerRadius_(18)
+        layer.setBorderColor_(_cg((1, 1, 1), EDGE))
+        layer.setBorderWidth_(1.0)
+        layer.setMasksToBounds_(True)
+        title, detail = self._words(c)
+        caption = _label(title, 12, AppKit.NSFontWeightSemibold)
+        sub = _label(detail or "", 11, AppKit.NSFontWeightMedium, DIM)
+        picture = None
+        if c.get("image") and Path(c["image"]).exists():
+            picture = c["image"]
+        elif c["kind"] == "files" and c.get("files") and Path(c["files"][0]).suffix.lower() in IMAGE_EXTS \
+                and Path(c["files"][0]).exists():
+            picture = c["files"][0]
+        if picture:
+            image = AppKit.NSImage.alloc().initWithContentsOfFile_(picture)
+            size = image.size() if image is not None else AppKit.NSMakeSize(1, 1)
+            scale = min(inner_w / max(size.width, 1), (PREVIEW_MAX_H - 64) / max(size.height, 1), 1.0 if
+                        size.width > 120 else 3.0)
+            w, h = max(40, size.width * scale), max(30, size.height * scale)
+            body_h = h
+            view = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect((PREVIEW_W - w) / 2, 46, w, h))
+            view.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
+            view.setImage_(image)
+            view.setWantsLayer_(True)
+            view.layer().setCornerRadius_(10)
+            view.layer().setMasksToBounds_(True)
+            view.layer().setBorderColor_(_cg((1, 1, 1), 0.14))
+            view.layer().setBorderWidth_(0.5)
+            if size.width and size.height:
+                sub.setStringValue_(f"{int(size.width)} × {int(size.height)}" + (f" · {detail}" if detail else ""))
+        else:
+            if c["kind"] == "files":
+                text = "\n".join(c.get("files", [])[:40])
+            elif c.get("source") == "pinned" and c["kind"] != "text":
+                text = c.get("label", "")
+            else:
+                text = c.get("text", "") or c.get("label", "")
+            text = text[:20000]
+            scroll = AppKit.NSScrollView.alloc().initWithFrame_(AppKit.NSMakeRect(12, 46, inner_w, 100))
+            scroll.setDrawsBackground_(False)
+            scroll.setHasVerticalScroller_(True)
+            scroll.setAutohidesScrollers_(True)
+            scroll.setScrollerStyle_(AppKit.NSScrollerStyleOverlay)
+            words = AppKit.NSTextView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, inner_w, 100))
+            words.setEditable_(False)
+            words.setSelectable_(True)
+            words.setDrawsBackground_(False)
+            words.setTextContainerInset_(AppKit.NSMakeSize(0, 2))
+            words.textContainer().setWidthTracksTextView_(True)
+            words.setString_(text)
+            words.setFont_(_font(12.5))
+            words.setTextColor_(_ns(INK, 0.92))
+            words.layoutManager().ensureLayoutForTextContainer_(words.textContainer())
+            used = words.layoutManager().usedRectForTextContainer_(words.textContainer()).size.height + 8
+            body_h = max(24, min(PREVIEW_MAX_H - 64, used))
+            scroll.setFrame_(AppKit.NSMakeRect(12, 46, inner_w, body_h))
+            words.setFrame_(AppKit.NSMakeRect(0, 0, inner_w, max(used, body_h)))
+            scroll.setDocumentView_(words)
+            view = scroll
+        total = body_h + 46 + 14
+        root.setFrame_(AppKit.NSMakeRect(0, 0, PREVIEW_W, total))
+        view.setFrameOrigin_(AppKit.NSMakePoint(view.frame().origin.x, total - 12 - body_h))
+        root.addSubview_(view)
+        caption.setFrame_(AppKit.NSMakeRect(14, 22, PREVIEW_W - 28, 16))
+        sub.setFrame_(AppKit.NSMakeRect(14, 8, PREVIEW_W - 28, 14))
+        root.addSubview_(caption)
+        root.addSubview_(sub)
+        panel.setContentView_(root)
+        # Beside the card, on the side with room, level with the clip.
+        card = self.panel.frame()
+        screen = (self.panel.screen() or AppKit.NSScreen.mainScreen()).visibleFrame()
+        left = card.origin.x + W / 2 > screen.origin.x + screen.size.width / 2
+        x = card.origin.x - PREVIEW_W - 10 if left else card.origin.x + W + 10
+        y_mid = card.origin.y + card.size.height / 2
+        if clip_id in self.shown_ids:
+            i = self.shown_ids.index(clip_id)
+            point = self.list.convertPoint_toView_(AppKit.NSMakePoint(0, 2 + i * ROW + ROW / 2), None)
+            y_mid = self.panel.convertPointToScreen_(point).y
+        y = min(max(y_mid - total / 2, screen.origin.y + 8), screen.origin.y + screen.size.height - total - 8)
+        panel.setFrame_display_(AppKit.NSMakeRect(x, y, PREVIEW_W, total), True)
+        if not panel.isVisible():
+            panel.setAlphaValue_(0.0)
+            panel.orderFront_(None)
+            AppKit.NSAnimationContext.beginGrouping()
+            AppKit.NSAnimationContext.currentContext().setDuration_(0.14)
+            panel.animator().setAlphaValue_(1.0)
+            AppKit.NSAnimationContext.endGrouping()
+        self.preview_id = clip_id
+
+    def hide_preview(self) -> None:
+        self.preview_id = ""
+        self.left_at = 0.0
+        panel = self.preview
+        if panel is None or not panel.isVisible():
+            return
+        AppKit.NSAnimationContext.beginGrouping()
+        AppKit.NSAnimationContext.currentContext().setDuration_(0.1)
+        panel.animator().setAlphaValue_(0.0)
+        AppKit.NSAnimationContext.endGrouping()
+        AppHelper.callLater(0.11, lambda: self.preview_id or panel.orderOut_(None))
 
     # --- dragging a clip out ------------------------------------------------------------------------
 

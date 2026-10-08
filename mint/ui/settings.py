@@ -131,6 +131,12 @@ AGENT_MODES = [("quiet", "Pop-ups only", ("bubble.left.fill", _BLUE), "When one 
 WAKE_SENSITIVITY = [("normal", "Normal", ("ear", _BLUE)),
                     ("high", "High - catches more", ("ear.badge.waveform", _ORANGE)),
                     ("low", "Low - fewer false starts", ("checkmark.shield", _GREEN))]
+NOTCH_OPEN_AFTER = [(0.5, "Half a second", ("hare.fill", _GREEN)), (0.8, "Under a second", ("timer", _BLUE),
+                                                                            "Default"),
+                    (1.2, "About a second", ("timer", _BLUE)), (2.0, "Two seconds", ("tortoise.fill", _ORANGE))]
+NOTCH_CLOSE_AFTER = [(1.0, "1 second", ("hare.fill", _GREEN), "Default"), (2.0, "2 seconds", ("timer", _BLUE)),
+                     (3.0, "3 seconds", ("timer", _BLUE)), (5.0, "5 seconds", ("timer", _BLUE)),
+                     (8.0, "8 seconds", ("tortoise.fill", _ORANGE))]
 FOLLOW_UP = [(0, "No - always say the wake word", ("mic.slash", _GREY))] + [
     (s, f"{s} seconds", ("timer", _BLUE)) for s in (4, 6, 8, 12)]
 GUARD_LEVELS = [("all", "Deleting, changes and system commands", ("checkmark.shield.fill", _GREEN), "Safest"),
@@ -1311,6 +1317,11 @@ class SettingsWindow:
             self._row_popup(page, "position", "Orb position", POSITIONS, w=200)
         self._row_popup(page, "motion", "How much it moves", MOTION,
                         "Calm: gentle, no bounce. Minimal: fades only (as with macOS Reduce motion).", w=200)
+        if prefs.get("notch_mode"):
+            self._row_popup(page, "notch_open_after", "Open the full notch after", NOTCH_OPEN_AFTER,
+                            "Resting on the small row of controls (a click opens it at once).", w=200)
+            self._row_popup(page, "notch_close_after", "Fold it after you move away", NOTCH_CLOSE_AFTER,
+                            "A thin line along its bottom shows the time left.", w=200)
         if advanced:
             if prefs.get("notch_mode"):
                 self._row_popup(page, "position", "Orb position", POSITIONS, "When it isn't in the notch.", w=200)

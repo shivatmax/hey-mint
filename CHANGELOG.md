@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.11 (2026-10-08)
+
+- **Clipboard: preview and copy.** Rest the pointer on a clip and its preview opens beside the card (a picture
+  large with its size, or the whole text, scrollable; Space toggles it, Esc closes it). Each clip has a ⧉ Copy
+  button: it goes on the clipboard and to the top of the list, ready to paste whenever you like (nothing is pasted).
+  The card's × is bigger and sits above the pick circles; the card and the preview have a visible border so they
+  stand out on a black screen, and the rows and buttons are a little smaller.
+- **Copied keys and tokens are never kept in the clipboard history** (an OAuth token, a base64 secret, a JWT, a
+  GitHub/AWS/Slack/OpenAI-style key, a private key): before, only text like "password:" or a few known key shapes
+  were caught. Ones kept earlier are removed from the saved history.
+- **The notch's menu rolls down under its button** (the gear, or the small row's settings button) instead of popping
+  up in the middle; it rolls back up on a pick, a click elsewhere or Esc, and *Settings…* also folds the open notch.
+- **Notch timing:** an opened notch now folds 1 s after the pointer leaves (was 8 s), its countdown line starting the
+  moment the pointer leaves, and resting on the small row opens the full notch in under a second. Both are settings
+  (Appearance & Sound: "Open the full notch after", "Fold it after you move away": 1 to 8 s).
+
 ## 0.6.10 (2026-10-08)
 
 - **Settings dropdowns that belong to the window:** every dropdown is a rounded control in the window's own style

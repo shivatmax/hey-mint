@@ -854,6 +854,81 @@ def clipboard_window_scene(p):
     time.sleep(1.2)
 
 
+@scene("clipboard-preview", 14)
+def clipboard_preview_scene(p):
+    """The clipboard's preview (a screenshot large, then a text in full) and ⧉ Copy: the clip goes to the top. The
+    clipboard follows a scripted pointer (not the real one, which is hidden while it records)."""
+    import tempfile
+    import AppKit as _AK
+    import Quartz as _Q
+    from mint.tools import clipboard as C
+    from mint.ui import clipboard_window as CW
+    media = Path(__file__).resolve().parent / "media"
+    C.STORE = Path(tempfile.mkdtemp()) / "clipboard"
+    C._loaded = True
+    now = time.time()
+
+    def pic(name):
+        return C._png_file(C._as_png(media / name))
+    C.HISTORY[:] = [
+        {"id": "b1", "kind": "image", "image": pic("island-schedule.jpg"), "label": "screenshot 5 · screen",
+         "source": "screenshot", "at": now - 60},
+        {"id": "b2", "kind": "text", "label": "Release notes", "source": "you", "at": now - 200,
+         "text": "Release notes - 0.6.4\n\n- Download any video: a link, or the video on the page you're on.\n"
+                 "- Pages that only stream to their player are recorded from the player.\n"
+                 "- Whole playlists, subtitles inside the video, and stop.\n\nShip on Thursday after the demo."},
+        {"id": "b3", "kind": "text", "text": "https://hey-mint.pages.dev/docs#clipboard", "label": "link",
+         "source": "mint", "at": now - 900},
+        {"id": "b4", "kind": "text", "text": "Invoice #INV-2044 - due 12 October", "label": "Invoice",
+         "source": "mint", "at": now - 8000}]
+    C.VERSION[0] += 1
+    w = CW.window
+
+    class _Event:                                       # the clipboard follows POINTER, not the real pointer
+        @staticmethod
+        def mouseLocation():
+            return _AK.NSMakePoint(*POINTER)
+
+    class _Proxy:
+        NSEvent = _Event
+
+        def __getattr__(self, name):
+            return getattr(_AK, name)
+    real = CW.AppKit
+    CW.AppKit = _Proxy()
+    POINTER[0], POINTER[1] = 40.0, 40.0                 # off the card to begin with
+    ms.main_sync(lambda: _Q.CGDisplayHideCursor(_Q.CGMainDisplayID()))
+
+    def spot(i, x_from_right=None):
+        """A row's middle (or a point x from its right end) in Quartz screen points (top-left origin)."""
+        def find():
+            width = w.scroll.contentSize().width
+            x = width / 2 if x_from_right is None else 10 + width - 20 - x_from_right
+            point = w.list.convertPoint_toView_(_AK.NSMakePoint(x, 2 + i * CW.ROW + CW.ROW / 2), None)
+            screen = w.panel.convertPointToScreen_(point)
+            return (screen.x, ms.SH - screen.y)
+        return ms.main_sync(find)
+    try:
+        time.sleep(0.6)
+        ms.main_sync(w.show)
+        time.sleep(1.0)
+        _glide(spot(0), 0.6)                            # resting on the screenshot: its preview opens
+        time.sleep(2.4)
+        _glide(spot(1), 0.4)                            # then the release notes: the whole text
+        time.sleep(2.6)
+        _glide(spot(3, 32 + 8 + 13), 0.6)               # ⧉ on the invoice: copied, and to the top
+        time.sleep(0.4)
+        ms.main_sync(lambda: w.copy_one("b4"))
+        time.sleep(0.3)
+        _glide((POINTER[0] + 400, ms.SH - POINTER[1]), 0.5)   # away from the list: the preview goes
+        time.sleep(2.2)
+        ms.main_sync(w.close)
+        time.sleep(1.0)
+    finally:
+        CW.AppKit = real
+        ms.main_sync(lambda: _Q.CGDisplayShowCursor(_Q.CGMainDisplayID()))
+
+
 @scene("image-card", 44)
 def image_card_scene(p):
     """A real picture from Image Playground on the card, then a typed change redraws it."""
@@ -2255,7 +2330,7 @@ def tour(p):
                      island_teach, island_video, island_download, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
-                     clipboard_scene, clipboard_window_scene, image_card_scene,
+                     clipboard_scene, clipboard_window_scene, clipboard_preview_scene, image_card_scene,
                      badge_scene, poke_scene, glow_scene, settings_look_scene)
         for step in steps:
             step(p)

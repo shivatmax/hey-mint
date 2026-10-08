@@ -90,6 +90,8 @@ DEFAULTS: dict = {
     "sounds_play": True,        # sounds: pokes, dizzy, the morning hello
     "wander": True,             # the orb takes a little trip near home now and then (motion.py)
     "motion": "full",           # animation: full (bouncy, playful) / calm (gentle, fewer extras) / minimal (fades only)
+    "notch_open_after": 0.8,    # notch mode: resting on the small row this long (s) opens the full notch
+    "notch_close_after": 1.0,   # notch mode: an opened notch folds this long (s) after the pointer leaves it
     "notch_open_to": "auto",    # notch mode: the tab the open notch shows first - auto / home / search / shelf / agents
     "menubar_face": True,       # the menu bar icon is Mint's face and shows its state
     # Claude mode (notch_agents): Claude Code and Codex in the notch. quiet = only a pop-up when one asks you something

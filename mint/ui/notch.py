@@ -54,6 +54,9 @@ BTN, STEP = 30, 37     # hover controls: button size, spacing
 PLAYER_W, PLAYER_H = 360, 110      # the music player inside the open notch
 PAUSED_WINGS = 12.0    # a paused song keeps the notch's wings this long, then the little Mint returns
 INNER_OPEN = 0.8                     # resting on the small row's plain part opens the full notch after this
+                                     # (Settings: notch_open_after)
+AFTER_LEAVE = 1.0                    # an opened notch folds this long after the pointer leaves it (notch_close_after);
+                                     # the countdown line runs the whole time, from the moment the pointer leaves
 PEEK_AFTER = 0.3                     # a short rest peeks the controls (notch_state: an opened notch folds 8 s
                                      # after the pointer leaves, or after a quiet minute under it)
 CLOSE_LEAD = 0.12                    # folding: the content goes first, the shape follows this much later
@@ -69,6 +72,14 @@ SIDE_W = HOME_W - 32 - PLAYER_W - 12   # the right-hand pane: the week calendar 
 WIN_W, WIN_H = 900, 860    # room for the notch to wrap cards (two side by side) or the chat under it
 # Over the menu bar, as notch apps do (main menu + 3).
 LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 3
+
+
+def _seconds(key: str, default: float) -> float:
+    """A timing from Settings, within sane bounds."""
+    try:
+        return max(0.2, min(30.0, float(prefs.get(key) or default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def enabled() -> bool:
@@ -300,7 +311,7 @@ class Notch:
         self.caption = None             # (shown, full) attributed strings while words are showing
         self.progress = None            # 0..1 for long tasks
         # Hover dwell, a notch you opened and when it folds, and the agents' alerts one at a time (notch_state).
-        self.st = NotchState(timing={"peek": PEEK_AFTER})
+        self.st = NotchState(timing={"peek": PEEK_AFTER, "after_leave": AFTER_LEAVE, "countdown": AFTER_LEAVE})
         self._acts = []
         self._ind = ""
         self._styled: dict = {}             # guest windows dressed as part of the notch -> how they were
@@ -925,6 +936,9 @@ class Notch:
             self._sync_agents(now)
         # notch_state keeps the timing: the peek's dwell (starting over while the pointer wanders), a notch you
         # opened folding 8 s after the pointer leaves or after a quiet minute under it, `armed`, the alerts.
+        leave = _seconds("notch_close_after", AFTER_LEAVE)
+        if st.T.get("after_leave") != leave:
+            st.T["after_leave"] = st.T["countdown"] = leave
         st.pointer(inside or near_notch, now, (mouse.x, mouse.y))
         if st.is_open and (self._typing() or self._holding()):
             st.keep(now)                        # typing in Search, a menu, Quick Look or a share sheet from it
@@ -940,7 +954,7 @@ class Notch:
                 self.inner_since = 0.0
             else:
                 self.inner_since = max(self.inner_since or now, st.still_at)    # wandering starts it over
-                if now - self.inner_since > INNER_OPEN:
+                if now - self.inner_since > _seconds("notch_open_after", INNER_OPEN):
                     self.inner_since = 0.0
                     st.open_by("hover", now)
                     _sfx("open")
@@ -2730,7 +2744,40 @@ class Notch:
         sharing.set_visible(not sharing.visible())
 
     def _menu_from_button(self) -> None:
-        self._popup(None)
+        """The gear (open notch) or the small row's settings button: the menu rolls down right under it."""
+        factory = getattr(self.hud, "menu_factory", None)
+        menu = factory() if factory else None
+        button = self._menu_button()
+        if menu is None or button is None or button.window() is None:
+            self._popup(None)
+            return
+        from mint.ui.notch_menu import menu as dropdown
+        if dropdown.is_open():
+            dropdown.close()
+            return
+        rect = button.window().convertRectToScreen_(button.convertRect_toView_(button.bounds(), None))
+        self._menus = getattr(self, "_menus", 0) + 1          # the notch stays open while it's down
+
+        def closed():
+            self._menus = max(0, self._menus - 1)
+
+        def settings():
+            self.st.close(time.monotonic())                  # opened only to get to Settings: fold the notch
+        dropdown.show(menu, rect, LEVEL, on_close=closed, on_settings=settings)
+
+    def _menu_button(self):
+        """The settings button the pointer is on (or nearest): the open notch's gear, or the small row's."""
+        mouse = AppKit.NSEvent.mouseLocation()
+        found = []
+        home = getattr(self, "home", None) or {}
+        candidates = [home.get("gear")] + [b for sym, b in getattr(self, "buttons", []) if sym == "slider.horizontal.3"]
+        for b in candidates:
+            if b is None or b.isHidden() or b.alphaValue() < 0.05 or b.window() is None:
+                continue
+            r = b.window().convertRectToScreen_(b.convertRect_toView_(b.bounds(), None))
+            cx, cy = r.origin.x + r.size.width / 2, r.origin.y + r.size.height / 2
+            found.append(((cx - mouse.x) ** 2 + (cy - mouse.y) ** 2, b))
+        return min(found, key=lambda f: f[0])[1] if found else None
 
     # --- drag the little Mint out: the notch gives way to the orb ---------------------------------
 

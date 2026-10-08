@@ -49,6 +49,7 @@ CUTS = {
     "video-edit":      ("video-edit", 1050, 520, 390, 346, 0, None),
     "clipboard":       ("clipboard", 200, 128, 1240, 738, 0, None),
     "clipboard-window": ("clipboard-window", 1028, 334, 412, 532, 0, None),
+    "clipboard-preview": ("clipboard-preview", 660, 334, 780, 532, 0, None),
     "image-card":      ("image-card", 1028, 232, 412, 634, 0, None),
     # Notch mode: the top middle of the screen, the (demo) menu bar included.
     "notch":           ("notch", 440, 0, 560, 140, 0, None),
