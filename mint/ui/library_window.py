@@ -94,6 +94,14 @@ class MintLibraryFlipped(AppKit.NSView):
         return True
 
 
+def _short(said: str, name: str) -> str:
+    """A Test result for a small tile: without the app's name, which the tile shows already."""
+    for prefix in (f"✓ {name} works: ", f"✗ {name}: "):
+        if said.startswith(prefix):
+            return said[0] + " " + said[len(prefix):]
+    return said
+
+
 class MintLibraryCard(AppKit.NSView):
     """A rounded card, in the system's colours (redrawn for light and dark)."""
 
@@ -384,14 +392,15 @@ class LibraryWindow:
 
     def _tiles(self, items: list[dict], y: float) -> float:
         """Connected apps as small tiles: logo, name, and what is set up."""
-        cols, gap, icon = 4, 10, 28
+        cols, gap, icon, test_w = 4, 10, 28, 46
         w = (W - 2 * PAD - gap * (cols - 1)) / cols
         tx = 10 + icon + 9
-        tw = w - tx - 10
+        tw = w - tx - 10 - test_w - 6
         name_font, note_font = _font(12.5, AppKit.NSFontWeightSemibold), _font(11)
         for i in range(0, len(items), cols):
             line = items[i:i + cols]
-            notes = [("✓ " + (r["detail"] if r.get("detail") and r["detail"] != "Ready" else "Connected"))
+            notes = [self.busy.get(r["id"]) or _short(self.msgs.get(r["id"], ""), r["name"])
+                     or ("✓ " + (r["detail"] if r.get("detail") and r["detail"] != "Ready" else "Connected"))
                      for r in line]
             h = max(max(_text_height(r["name"], name_font, tw) + 1 + _text_height(n, note_font, tw), icon) + 20
                     for r, n in zip(line, notes))
@@ -402,7 +411,21 @@ class LibraryWindow:
                 name_h, note_h = _text_height(r["name"], name_font, tw), _text_height(note, note_font, tw)
                 ty = (h - (name_h + 1 + note_h)) / 2
                 _label(card, r["name"], tx, ty, tw, name_font, h=name_h)
-                _label(card, note, tx, ty + name_h + 1, tw, note_font, AppKit.NSColor.systemGreenColor(), h=note_h)
+                tested = r["id"] in self.msgs or r["id"] in self.busy
+                color = (AppKit.NSColor.systemRedColor() if note.startswith("✗") else
+                         AppKit.NSColor.controlAccentColor() if tested else AppKit.NSColor.systemGreenColor())
+                _label(card, note, tx, ty + name_h + 1, tw, note_font, color, h=note_h)
+                button = AppKit.NSButton.buttonWithTitle_target_action_("Test", self.target, "act:")
+                button.setBezelStyle_(AppKit.NSBezelStyleRounded)
+                button.setControlSize_(AppKit.NSControlSizeSmall)
+                button.setFont_(_font(11))
+                button.setFrame_(AppKit.NSMakeRect(w - 10 - test_w, (h - 22) / 2, test_w, 22))
+                if r["id"] in self.busy:
+                    button.setEnabled_(False)
+                else:
+                    button.setTag_(self._handler(lambda row=r: self._run(row, "Testing…", app_library.check)))
+                button.setToolTip_(f"Check that {r['name']} really works with Mint")
+                card.addSubview_(button)
                 card.setToolTip_(f"{r['name']}: {r['what']}")
             y += h + gap
         return y + 14
@@ -595,7 +618,7 @@ class LibraryWindow:
 
         def run() -> None:
             try:
-                if fn is app_library.connect:
+                if fn in (app_library.connect, app_library.use_in_browser):
                     words = fn(app_id, confirm=self._confirm, say=lambda w: self._say(app_id, w))
                 else:
                     words = fn(app_id)

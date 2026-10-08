@@ -191,7 +191,7 @@ def page(win, page, facts: dict) -> None:
         from mint.tools import app_library
 
         def run() -> None:
-            say(item, app_library.use_in_browser(item["id"]))
+            say(item, app_library.use_in_browser(item["id"], confirm=ask_on_main, say=lambda w: say(item, w)))
             state["fresh"] = True
             later(refresh)
         background(run, "app-browser")
@@ -280,9 +280,12 @@ def page(win, page, facts: dict) -> None:
     if suggested:
         page.section("Suggested for you", icon=("star.fill", (1.0, 0.7, 0.1)))
         for item in map(dict, suggested):
-            buttons = [("Get it…", 84, lambda i=item: connect(i), True)]
-            if item.get("browser_ok"):
-                buttons.insert(0, ("Use in browser", 124, lambda i=item: in_browser(i)))
+            if item.get("state") == "web":
+                buttons = [("Use in browser", 124, lambda i=item: in_browser(i), True)]
+            else:
+                buttons = [("Get it…", 84, lambda i=item: connect(i), True)]
+                if item.get("browser_ok"):
+                    buttons.insert(0, ("Use in browser", 124, lambda i=item: in_browser(i)))
             row(item, buttons, "")
         page.end("Get it opens the App Store or the maker's page. Use in browser: Mint works in the web app, where "
                  "you are signed in.")

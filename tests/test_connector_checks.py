@@ -59,10 +59,26 @@ def test_web_connector_checks_the_site():
             "site": "https://www.notion.so/", "actions": [dict(_url("search", "https://www.notion.so/search"),
                                                             kind="web")]}
     asked = []
-    ok, words = connector_maker.check_links(item, answers=lambda url: asked.append(url) or (True, "200"))
-    assert ok and words == "www.notion.so answers" and asked == ["https://www.notion.so/"]
-    ok, words = connector_maker.check_links(item, answers=lambda url: (False, "timed out"))
-    assert not ok and "didn't answer (timed out)" in words
+
+    def real_pages_only(url):                   # like GitHub: a made-up address is a 404
+        asked.append(url)
+        return ("mint-check-" not in url), "200"
+    ok, words = connector_maker.check_links(item, answers=real_pages_only)
+    assert ok and words == "all 1 pages on www.notion.so are there"
+    assert asked[0] == "https://www.notion.so/search" and "mint-check-" in asked[1]
+    ok, words = connector_maker.check_links(item, answers=lambda url: (True, "200"))
+    assert ok and "loads any address" in words          # a web app that answers everything: said, not claimed
+    ok, words = connector_maker.check_links(item, answers=lambda url: (False, "404"))
+    assert not ok and "1 of 1 pages on www.notion.so aren't there" in words
+
+
+def test_pages_that_are_not_there_are_left_out_of_a_plan():
+    good = dict(_url("inbox", "https://app.todoist.com/app/inbox"), kind="web")
+    bad = dict(_url("add", "https://app.todoist.com/app/search/x"), kind="web")
+    dropped = []
+    kept = connector_maker._reachable([good, bad], dropped,
+                                      answers=lambda url: ("search" not in url, "404"))
+    assert kept == [good] and dropped == ["'add': its page isn't there (404)"]
 
 
 def test_test_runs_a_check_for_link_connectors_and_records_it(installed, monkeypatch):

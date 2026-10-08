@@ -81,14 +81,36 @@ def test_suggestions_are_capped_popular_and_not_installed():
     assert "Notion" not in names and "Slack" not in names
     ranks = [r["common"] for r in g["suggested"]]
     assert ranks == sorted(ranks) and all(ranks)
-    assert all(r["state"] == "get" and r["button"] == "Get it" for r in g["suggested"])
+    assert all((r["state"], r["button"]) in (("get", "Get it"), ("web", "Use in browser")) for r in g["suggested"])
     assert app_library.groups(installed=set(), max_suggested=3)["counts"]["suggested"] == 3
     assert app_library.groups(installed=set())["suggested"][0]["name"] == "Notion"
+
+
+def test_no_app_without_real_support():
+    """Every entry works through something real: a built-in connector with tools, a connector planned from the
+    app's scripting or links and tested, the web app (a planned, checked web connector), or an account."""
+    for app in app_library.CATALOG:
+        assert app.how in ("connector", "scripting", "links", "browser", "account"), app.id
+        if app.how == "browser":
+            assert app.web.startswith("https://"), app.id
+    gone = {"signal", "bear", "things", "omnifocus", "fantastical", "libreoffice", "photoshop", "firefox", "cursor",
+            "gemini"}
+    assert not gone & {a.id for a in app_library.CATALOG}
+
+
+def test_web_apps_are_offered_in_the_browser_not_as_a_download():
+    g = app_library.groups(installed=set())
+    linear = next(r for r in g["suggested"] + g["browser"] if r["id"] == "linear")
+    assert linear["state"] == "web" and linear["button"] == "Use in browser"
+    installed = app_library.groups(installed={"com.linear": "/Applications/Linear.app"})
+    row = next(r for r in installed["on_mac"] if r["id"] == "linear")
+    assert row["button"] == "Connect" and row["how_words"] == "Works in your browser"
 
 
 def test_suggestions_say_when_they_work_in_the_browser():
     g = app_library.groups(installed=set())
     notion = next(r for r in g["suggested"] if r["id"] == "notion")
+    assert notion["state"] == "web"
     zoom = next(r for r in g["suggested"] if r["id"] == "zoom")
     assert notion["browser_ok"] and notion["web_url"].startswith("https://")
     assert not zoom["browser_ok"]
@@ -168,25 +190,67 @@ def test_search():
 
 def test_get_it_opens_where_to_get_it(_private):
     _fake()
-    words = app_library.connect("notion")
-    assert _private == ["https://www.notion.com/desktop"]
-    assert "Notion" in words
+    words = app_library.connect("zoom")
+    assert _private == [next(a.get for a in app_library.CATALOG if a.id == "zoom")]
+    assert "Zoom" in words
 
 
-def test_use_in_browser_remembers_it(_private):
+def _web_plan(name="Trello"):
+    return {"id": "w1", "name": name, "kind": "web", "summary": "Boards.",
+            "actions": [{"title": "Open my boards", "risk": [], "changes": False}]}
+
+
+def test_use_in_browser_makes_a_checked_web_connector(_private, monkeypatch):
+    try:
+        from mint.tools import connector_maker
+    except ImportError:
+        from mint import connector_maker
     _fake()
-    words = app_library.use_in_browser("trello")
-    assert _private == ["https://trello.com/"] and "browser" in words
-    assert "trello" in app_library.load_mine()
-    rows = _fake(mine=app_library.load_mine())
-    assert next(r for r in rows if r["id"] == "trello")["state"] == "connected"
-    assert app_library.disconnect("trello") == "Disconnected Trello."
-    assert "trello" not in app_library.load_mine()
+    asked = []
+    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False: asked.append((words, web))
+                        or _web_plan())
+    monkeypatch.setattr(connector_maker, "create",
+                        lambda pid: "DONE: saved the Trello connector. Checked: all 1 pages on trello.com are there.")
+    assert app_library.use_in_browser("trello", confirm=lambda plan: False) == "Not connected."
+    assert _private == []                                 # nothing opens before the user says yes
+    words = app_library.use_in_browser("trello", confirm=lambda plan: True)
+    assert asked == [("integrate Trello", True)] * 2
+    assert words.startswith("Connected Trello in your browser: 1 things") and "trello.com are there" in words
+    assert _private == ["https://trello.com/"]
+
+
+def test_use_in_browser_that_cannot_be_planned_is_not_connected(_private, monkeypatch):
+    try:
+        from mint.tools import connector_maker
+    except ImportError:
+        from mint import connector_maker
+    _fake()
+    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False: {"error": "no site"})
+    assert app_library.use_in_browser("trello") == "Couldn't connect Trello: no site"
+    assert _private == [] and app_library.load_mine() == {}
+
+
+def test_web_connectors_belong_to_their_own_entry():
+    """Word, Excel and PowerPoint share office.com: a connector made for Excel connects Excel only."""
+    excel = {"id": "microsoft_excel", "name": "Microsoft Excel", "domain": "office.com", "actions": [{}]}
+    rows = _fake(customs=[excel])
+    state = {r["id"]: r["state"] for r in rows}
+    assert state["excel"] == "connected" and state["word"] == "web" and state["powerpoint"] == "web"
+
+
+def _refuse(monkeypatch):
+    try:
+        from mint.tools import connector_maker
+    except ImportError:
+        from mint import connector_maker
+    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False: {"refuse": "no links"})
 
 
 def test_connect_an_app_mint_uses_through_its_window(_private, monkeypatch):
-    """Connected only after the real check: Mint read the app's menus through Accessibility."""
+    """An app with nothing to script or link to: connected only after the real check - Mint read the app's menus
+    through Accessibility."""
     _fake(installed={"com.figma.Desktop"})
+    _refuse(monkeypatch)
     checked = []
     monkeypatch.setattr(app_library, "check_window",
                         lambda row: checked.append(row["bundle_id"]) or (True, "Mint can read and use its menus (File)"))
@@ -203,6 +267,7 @@ def test_window_app_is_not_connected_without_accessibility(_private, monkeypatch
     except ImportError:
         from mint import permissions
     _fake(installed={"com.figma.Desktop"})
+    _refuse(monkeypatch)
     panes = []
     monkeypatch.setattr(permissions, "open_pane", panes.append)
     monkeypatch.setattr(app_library, "check_window", lambda row: (False, "accessibility"))
@@ -213,6 +278,7 @@ def test_window_app_is_not_connected_without_accessibility(_private, monkeypatch
 
 def test_window_app_that_hides_its_controls_is_not_connected(_private, monkeypatch):
     _fake(installed={"com.figma.Desktop"})
+    _refuse(monkeypatch)
     monkeypatch.setattr(app_library, "check_window", lambda row: (False, "Figma doesn't show Mint its menus"))
     assert app_library.connect("figma").startswith("Not connected: Figma doesn't show")
     assert app_library.load_mine() == {}
@@ -232,18 +298,14 @@ def test_check_window_reads_the_menus():
 
 
 def test_an_app_with_no_links_falls_back_to_its_window(_private, monkeypatch):
-    """Linear has no scripting and the planner refuses: it is not marked connected unless the window check passes."""
-    try:
-        from mint.tools import connector_maker
-    except ImportError:
-        from mint import connector_maker
-    _fake(installed={"com.linear"})
-    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="": {"refuse": "no dictionary"})
-    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "Linear didn't start"))
-    assert app_library.connect("linear") == "Not connected: Linear didn't start"
+    """The Telegram app when the planner finds no links it can use: not connected unless the window check passes."""
+    _fake(installed={"ru.keepcoder.Telegram"})
+    _refuse(monkeypatch)
+    monkeypatch.setattr(app_library, "check_window", lambda row: (False, "Telegram didn't start"))
+    assert app_library.connect("telegram_app") == "Not connected: Telegram didn't start"
     assert app_library.load_mine() == {}
     monkeypatch.setattr(app_library, "check_window", lambda row: (True, "Mint can read and use its menus (File)"))
-    assert app_library.connect("linear").startswith("Connected Linear")
+    assert app_library.connect("telegram_app").startswith("Connected Telegram")
 
 
 def test_connect_plans_for_exactly_that_app(_private, monkeypatch):
@@ -254,8 +316,8 @@ def test_connect_plans_for_exactly_that_app(_private, monkeypatch):
         from mint import connector_maker
     _fake(installed={"ru.keepcoder.Telegram"})
     seen = []
-    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="": seen.append((words, bundle_id))
-                        or {"refuse": "x"})
+    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False:
+                        seen.append((words, bundle_id)) or {"refuse": "x"})
     monkeypatch.setattr(app_library, "check_window", lambda row: (False, "x"))
     app_library.connect("telegram_app")
     assert seen == [("integrate Telegram", "ru.keepcoder.Telegram")]
@@ -265,7 +327,7 @@ def test_prompt_names_connected_apps(_private):
     assert app_library.prompt_text() == ""
     _fake(installed={"com.figma.Desktop"})
     app_library._remember(app_library.get("figma"), "screen", checked="menus")
-    app_library.use_in_browser("trello")
+    app_library._remember(app_library.get("trello"), "browser")
     words = app_library.prompt_text()
     assert "through their window" in words and "Figma" in words
     assert "Trello (https://trello.com/)" in words
@@ -280,7 +342,7 @@ def test_connect_plans_a_connector_and_asks_first(monkeypatch):
     plan = {"id": "p1", "name": "Linear", "app": "Linear", "summary": "Open issues.",
             "actions": [{"title": "Open my issues", "risk": [], "changes": False},
                         {"title": "New issue", "risk": [], "changes": True}]}
-    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="": plan)
+    monkeypatch.setattr(connector_maker, "plan", lambda words, bundle_id="", web=False: plan)
     created = []
     monkeypatch.setattr(connector_maker, "create", lambda pid: created.append(pid) or "DONE: saved")
     asked = []

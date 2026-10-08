@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.8 (2026-10-08)
+
+- **No app in the library without real support:** every app listed now works through something Mint really has -
+  its own built-in tools, a connector planned from the app's scripting or links and tested, the web app, or an
+  account. Signal, Bear, Things, OmniFocus, Fantastical, LibreOffice, Photoshop, Firefox, Cursor and the Gemini app
+  are gone: Mint had nothing specific for them (an installed app that can be scripted still shows under "More on
+  your Mac", where Connect plans and tests a connector for it).
+- **"Use in browser" is a real connection now:** it plans what Mint can open in the web app (search, inbox, new
+  page…), fetches every page once and leaves out any that isn't there, shows you the plan, saves it and checks it.
+  Notion, Linear, Todoist, Discord, Evernote, OneNote, Google Drive, Dropbox, Word, Excel, PowerPoint, Canva and
+  GitHub work this way - even when their Mac app is installed - and are offered in the browser instead of as a
+  download. A site that answers any address is reported as such, not as "every page checked". Word, Excel and
+  PowerPoint (all office.com) each get their own connection.
+- **Test on every connected app in the library too:** each connected tile has a Test button; the result shows on the
+  tile.
+
 ## 0.6.7 (2026-10-08)
 
 - **Settings, clearer and more colourful:** real brand marks (the installed app's own icon, else a drawn mark),

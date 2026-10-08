@@ -53,7 +53,19 @@ WEB = {"notion": ("notion.so", "https://www.notion.so/"), "todoist": ("todoist.c
        "slack": ("slack.com", "https://app.slack.com/"), "whatsapp": ("whatsapp.com", "https://web.whatsapp.com/"),
        "spotify": ("spotify.com", "https://open.spotify.com/"), "reddit": ("reddit.com", "https://www.reddit.com/"),
        "x": ("x.com", "https://x.com/"), "twitter": ("x.com", "https://x.com/"),
-       "obsidian": ("obsidian.md", "https://obsidian.md/")}
+       "obsidian": ("obsidian.md", "https://obsidian.md/"),
+       "canva": ("canva.com", "https://www.canva.com/"), "discord": ("discord.com", "https://discord.com/app"),
+       "evernote": ("evernote.com", "https://www.evernote.com/client/web"),
+       "onenote": ("onenote.com", "https://www.onenote.com/notebooks"),
+       "microsoft onenote": ("onenote.com", "https://www.onenote.com/notebooks"),
+       "word": ("office.com", "https://www.office.com/launch/word"),
+       "microsoft word": ("office.com", "https://www.office.com/launch/word"),
+       "excel": ("office.com", "https://www.office.com/launch/excel"),
+       "microsoft excel": ("office.com", "https://www.office.com/launch/excel"),
+       "powerpoint": ("office.com", "https://www.office.com/launch/powerpoint"),
+       "microsoft powerpoint": ("office.com", "https://www.office.com/launch/powerpoint"),
+       "google sheets": ("docs.google.com", "https://docs.google.com/spreadsheets/"),
+       "google calendar": ("calendar.google.com", "https://calendar.google.com/")}
 
 # Never in a connector, whatever the plan says.
 _NEVER = re.compile(r"\b(run\s+script|load\s+script|store\s+script|administrator\s+privileges|system\s+events|"
@@ -401,10 +413,11 @@ def _ask_planner(prompt: str) -> dict:
     return answer
 
 
-def plan(words: str, bundle_id: str = "") -> dict:
+def plan(words: str, bundle_id: str = "", web: bool = False) -> dict:
     """-> {id, name, kind (app|web|builtin|none), actions, dropped, test, summary, ...} or {error}/{refuse}.
 
-    bundle_id: exactly this installed app (the app library's Connect) - the Telegram app, not the Telegram bot."""
+    bundle_id: exactly this installed app (the app library's Connect) - the Telegram app, not the Telegram bot.
+    web: the service in the browser, even when its Mac app is installed (the app library's Use in browser)."""
     request = " ".join(str(words or "").split())
     what = _strip_words(request)
     if not what:
@@ -415,6 +428,8 @@ def plan(words: str, bundle_id: str = "") -> dict:
         app = connectors.app_for(bundle_id) or app
         if lib is not None and bundle_id not in lib.bundles:
             lib = None
+    if web:
+        app, lib = None, None
     if app is None and lib is not None and lib.bundles:
         app = lib.app()
     if lib is not None and not lib.bundles:                 # an account, a bridge, keys: nothing to make
@@ -488,6 +503,8 @@ def plan(words: str, bundle_id: str = "") -> dict:
             continue
         seen.add(action["id"])
         result["actions"].append(action)
+    if result["kind"] == "web" and result["actions"]:
+        result["actions"] = _reachable(result["actions"], result["dropped"])
     if not result["actions"]:
         result["error"] = "None of the planned actions passed the checks" + (
             f": {'; '.join(result['dropped'][:3])}" if result["dropped"] else ".")
@@ -591,9 +608,38 @@ def _site_answers(url: str, timeout: float = 8.0) -> tuple[bool, str]:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return True, str(response.status)
     except urllib.error.HTTPError as error:          # 401/403: there, it wants a sign-in - which the browser has
-        return error.code < 500, str(error.code)
+        return error.code < 500 and error.code not in (404, 410), str(error.code)
     except Exception as error:
         return False, str(getattr(error, "reason", error))[:80]
+
+
+def _page_of(action: dict) -> str:
+    params = {p["name"]: p for p in action["params"]}
+    return fill(action["template"], params, _sample(params), "url")
+
+
+def _reachable(actions: list[dict], dropped: list[str], answers=None) -> list[dict]:
+    """Web actions whose page is really there: each is fetched once with sample values (in parallel); a page the
+    site says doesn't exist (404/410) or a site that doesn't answer is left out. A sign-in page is fine."""
+    import concurrent.futures
+    answers = answers or _site_answers
+    web = [a for a in actions if a["kind"] == "web"]
+
+    def probe(action):
+        try:
+            return answers(_page_of(action))
+        except Exception as error:
+            return False, str(error)[:60]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        results = dict(zip((id(a) for a in web), pool.map(probe, web)))
+    kept = []
+    for action in actions:
+        ok, code = results.get(id(action), (True, ""))
+        if ok:
+            kept.append(action)
+        else:
+            dropped.append(f"'{action['title']}': its page isn't there ({code})")
+    return kept
 
 
 def check_links(item: dict, owner=_scheme_owner, answers=_site_answers) -> tuple[bool, str]:
@@ -622,12 +668,20 @@ def check_links(item: dict, owner=_scheme_owner, answers=_site_answers) -> tuple
             found.append(f"{scheme}: links open {Path(path).stem}")
     if any(a["kind"] == "files" for a in item["actions"]) and app:
         found.append(f"files open in {app['name']}")
-    site = item.get("site") or (f"https://{item['domain']}/" if item.get("domain") else "")
-    if site and any(a["kind"] == "web" for a in item["actions"]):
-        there, code = answers(site)
-        ok = ok and there
-        host = urllib.parse.urlparse(site).netloc
-        found.append(f"{host} answers" if there else f"{host} didn't answer ({code})")
+    pages = [a for a in item["actions"] if a["kind"] == "web"]
+    if pages:
+        missing = []
+        _reachable(pages, missing, answers=answers)
+        host = urllib.parse.urlparse(_page_of(pages[0])).netloc
+        if missing:
+            ok = False
+            found.append(f"{len(missing)} of {len(pages)} pages on {host} aren't there: " + "; ".join(missing[:2]))
+        elif answers(f"https://{host}/mint-check-{uuid.uuid4().hex[:10]}")[0]:
+            # the site answers any address (a web app that routes after sign-in): the check can't tell a real
+            # page from a made-up one - say so instead of claiming every page is there
+            found.append(f"{host} answers; it loads any address, so each page shows once you're signed in")
+        else:
+            found.append(f"all {len(pages)} pages on {host} are there")
     if not found:
         return True, "nothing to check - its actions only open pages"
     return ok, "; ".join(found)

@@ -138,50 +138,37 @@ CATALOG: tuple[App, ...] = (
       (0.38, 0.39, 0.65), ("teams",)),
     A("meet", "Google Meet", "Chat & calls", "Records your calls and writes up notes and action items.", (),
       "browser", "meetings", "meet", "", "https://meet.google.com/", 0, (0.0, 0.53, 0.32), ("meet",)),
-    A("discord", "Discord", "Chat & calls", "Opens your servers and chats, and reads what's new.",
-      ("com.hnc.Discord",), "links", "", "discord", "https://discord.com/download", "https://discord.com/app", 9,
+    A("discord", "Discord", "Chat & calls", "Opens your servers, chats and DMs in Discord on the web.",
+      ("com.hnc.Discord",), "browser", "", "discord", "https://discord.com/download", "https://discord.com/app", 9,
       (0.35, 0.4, 0.95)),
     A("telegram_app", "Telegram", "Chat & calls", "Opens your chats and reads what's new.",
       ("ru.keepcoder.Telegram", "org.telegram.desktop"), "links", "", "telegram", "https://macos.telegram.org/",
       "https://web.telegram.org/", 10, (0.15, 0.65, 0.89)),
-    A("signal", "Signal", "Chat & calls", "Opens a chat and writes a message for you to send.",
-      ("org.whispersystems.signal-desktop",), "screen", "", "signal", "https://signal.org/download/macos/", "", 0,
-      (0.23, 0.46, 0.94)),
     # --- notes and documents ---
-    A("notion", "Notion", "Notes & docs", "Opens pages and searches your workspace.", ("notion.id",), "connector",
-      "notion", "notion", "https://www.notion.com/desktop", "https://www.notion.so/", 1, (0.1, 0.1, 0.1)),
+    A("notion", "Notion", "Notes & docs", "Opens your pages, searches your workspace and starts new pages, on the web.", ("notion.id",), "browser",
+      "", "notion", "https://www.notion.com/desktop", "https://www.notion.so/", 1, (0.1, 0.1, 0.1)),
     A("obsidian", "Obsidian", "Notes & docs", "Opens and searches your notes; they're files Mint can read.",
       ("md.obsidian",), "connector", "obsidian", "obsidian", "https://obsidian.md/download", "", 0,
       (0.49, 0.23, 0.93)),
-    A("evernote", "Evernote", "Notes & docs", "Finds and opens your notes.", ("com.evernote.Evernote",), "screen", "",
+    A("evernote", "Evernote", "Notes & docs", "Searches your notes and starts new ones in Evernote on the web.", ("com.evernote.Evernote",), "browser", "",
       "evernote", "https://evernote.com/download", "https://www.evernote.com/client/web", 0, (0.0, 0.66, 0.29)),
-    A("bear", "Bear", "Notes & docs", "Makes notes and finds the ones you have.", ("net.shinyfrog.bear",), "links",
-      "", "bear", "https://bear.app/", "", 0, (0.85, 0.25, 0.2)),
-    A("onenote", "Microsoft OneNote", "Notes & docs", "Finds and opens your notebooks.",
-      ("com.microsoft.onenote.mac",), "screen", "", "microsoftonenote", _mas(784801555),
+    A("onenote", "Microsoft OneNote", "Notes & docs", "Opens your notebooks in OneNote on the web.",
+      ("com.microsoft.onenote.mac",), "browser", "", "microsoftonenote", _mas(784801555),
       "https://www.onenote.com/notebooks", 0, (0.47, 0.22, 0.6), ("onenote",)),
     A("google_docs", "Google Docs", "Notes & docs", "Writes and edits documents in your browser.", (), "browser", "",
       "googledocs", "", "https://docs.google.com/", 0, (0.26, 0.52, 0.96), ("docs", "gdocs")),
-    A("google_drive", "Google Drive", "Notes & docs", "Finds and opens your Drive files.", ("com.google.drivefs",),
-      "screen", "", "googledrive", "https://www.google.com/drive/download/", "https://drive.google.com/", 0,
+    A("google_drive", "Google Drive", "Notes & docs", "Searches your Drive and opens recent, starred and shared files.", ("com.google.drivefs",),
+      "browser", "", "googledrive", "https://www.google.com/drive/download/", "https://drive.google.com/", 0,
       (0.26, 0.52, 0.96), ("drive",)),
-    A("dropbox", "Dropbox", "Notes & docs", "Finds and opens your Dropbox files.", ("com.getdropbox.dropbox",),
-      "screen", "", "dropbox", "https://www.dropbox.com/install", "https://www.dropbox.com/home", 0,
+    A("dropbox", "Dropbox", "Notes & docs", "Searches your Dropbox and opens your files, photos and shared folders.", ("com.getdropbox.dropbox",),
+      "browser", "", "dropbox", "https://www.dropbox.com/install", "https://www.dropbox.com/home", 0,
       (0.0, 0.38, 1.0)),
     # --- tasks ---
-    A("todoist", "Todoist", "Tasks", "Adds tasks and opens your projects.", ("com.todoist.mac.Todoist",),
-      "connector", "todoist", "todoist", "https://todoist.com/downloads", "https://app.todoist.com/", 12,
+    A("todoist", "Todoist", "Tasks", "Opens your inbox, today and upcoming in Todoist on the web.", ("com.todoist.mac.Todoist",),
+      "browser", "", "todoist", "https://todoist.com/downloads", "https://app.todoist.com/", 12,
       (0.89, 0.26, 0.2)),
-    A("things", "Things", "Tasks", "Adds to-dos and reads your Today list.", ("com.culturedcode.ThingsMac",),
-      "connector", "things", "things", "https://culturedcode.com/things/", "", 0, (0.2, 0.5, 0.95), ("things 3",)),
-    A("linear", "Linear", "Tasks", "Opens issues and projects, and reads what's on screen.", ("com.linear",),
-      "links", "", "linear", "https://linear.app/download", "https://linear.app/", 16, (0.37, 0.42, 0.82)),
-    A("omnifocus", "OmniFocus", "Tasks", "Adds tasks and reads your lists.",
-      ("com.omnigroup.OmniFocus4", "com.omnigroup.OmniFocus3"), "scripting", "", "omnifocus",
-      "https://www.omnigroup.com/omnifocus", "", 0, (0.55, 0.3, 0.85)),
-    A("fantastical", "Fantastical", "Tasks", "Adds events and reminders from plain words.",
-      ("com.flexibits.fantastical2.mac",), "scripting", "", "fantastical", "https://flexibits.com/fantastical", "", 0,
-      (0.85, 0.2, 0.25)),
+    A("linear", "Linear", "Tasks", "Opens your issues, projects and inbox in Linear on the web.", ("com.linear",),
+      "browser", "", "linear", "https://linear.app/download", "https://linear.app/", 16, (0.37, 0.42, 0.82)),
     A("trello", "Trello", "Tasks", "Opens your boards and cards.", (), "browser", "", "trello", "",
       "https://trello.com/", 0, (0.0, 0.47, 0.75)),
     A("asana", "Asana", "Tasks", "Opens your tasks and projects.", (), "browser", "", "asana", "",
@@ -189,13 +176,13 @@ CATALOG: tuple[App, ...] = (
     A("jira", "Jira", "Tasks", "Opens your issues and boards.", (), "browser", "", "jira", "",
       "https://home.atlassian.com/", 0, (0.0, 0.32, 0.8)),
     # --- office ---
-    A("word", "Microsoft Word", "Office", "Opens, writes and edits documents.", ("com.microsoft.Word",), "scripting",
+    A("word", "Microsoft Word", "Office", "Starts and finds documents in Word on the web.", ("com.microsoft.Word",), "browser",
       "", "microsoftword", _mas(462054704), "https://www.office.com/launch/word", 6, (0.17, 0.34, 0.6), ("word",)),
-    A("excel", "Microsoft Excel", "Office", "Opens spreadsheets and fills them in.", ("com.microsoft.Excel",),
-      "scripting", "", "microsoftexcel", _mas(462058435), "https://www.office.com/launch/excel", 8,
+    A("excel", "Microsoft Excel", "Office", "Starts and finds spreadsheets in Excel on the web.", ("com.microsoft.Excel",),
+      "browser", "", "microsoftexcel", _mas(462058435), "https://www.office.com/launch/excel", 8,
       (0.13, 0.45, 0.27), ("excel",)),
-    A("powerpoint", "Microsoft PowerPoint", "Office", "Opens and builds slides.", ("com.microsoft.Powerpoint",),
-      "scripting", "", "microsoftpowerpoint", _mas(462062816), "https://www.office.com/launch/powerpoint", 0,
+    A("powerpoint", "Microsoft PowerPoint", "Office", "Starts and finds presentations in PowerPoint on the web.", ("com.microsoft.Powerpoint",),
+      "browser", "", "microsoftpowerpoint", _mas(462062816), "https://www.office.com/launch/powerpoint", 0,
       (0.82, 0.28, 0.15), ("powerpoint",)),
     A("outlook", "Microsoft Outlook", "Office", "Reads your work email and calendar.", ("com.microsoft.Outlook",),
       "connector", "microsoft", "microsoftoutlook", _mas(985367838), "https://outlook.office.com/", 13,
@@ -206,9 +193,6 @@ CATALOG: tuple[App, ...] = (
       "iwork", "keynote", _mas(409183694), "", 0, (0.1, 0.55, 1.0)),
     A("numbers", "Numbers", "Office", "Makes spreadsheets and fills them in.", ("com.apple.iWork.Numbers",),
       "connector", "iwork", "numbers", _mas(409203825), "", 0, (0.2, 0.75, 0.3)),
-    A("libreoffice", "LibreOffice", "Office", "Opens and edits documents and spreadsheets.",
-      ("org.libreoffice.script",), "screen", "", "libreoffice", "https://www.libreoffice.org/download/", "", 0,
-      (0.1, 0.65, 0.35)),
     A("google_sheets", "Google Sheets", "Office", "Makes and fills in spreadsheets in your browser.", (), "browser",
       "", "googlesheets", "", "https://sheets.google.com/", 0, (0.06, 0.62, 0.35), ("sheets",)),
     # --- music and video ---
@@ -227,12 +211,9 @@ CATALOG: tuple[App, ...] = (
       "browser", "", "youtube", "", "https://www.youtube.com/", 0, (1.0, 0.0, 0.0)),
     # --- design ---
     A("figma", "Figma", "Design", "Opens your design files and reads what's on screen.", ("com.figma.Desktop",),
-      "screen", "", "figma", "https://www.figma.com/downloads/", "https://www.figma.com/", 11, (0.95, 0.31, 0.12)),
-    A("canva", "Canva", "Design", "Opens your designs and starts new ones.", ("com.canva.CanvaDesktop",), "screen",
+      "links", "", "figma", "https://www.figma.com/downloads/", "https://www.figma.com/", 11, (0.95, 0.31, 0.12)),
+    A("canva", "Canva", "Design", "Opens your designs and starts new ones in Canva on the web.", ("com.canva.CanvaDesktop",), "browser",
       "", "canva", "https://www.canva.com/download/mac/", "https://www.canva.com/", 0, (0.0, 0.77, 0.8)),
-    A("photoshop", "Adobe Photoshop", "Design", "Opens pictures and runs simple edits.", ("com.adobe.Photoshop",),
-      "scripting", "", "adobephotoshop", "https://www.adobe.com/products/photoshop.html", "", 0, (0.0, 0.2, 0.4),
-      ("photoshop",)),
     # --- browsers ---
     A("chrome", "Google Chrome", "Browsers", "Browses, clicks and fills in pages for you.", ("com.google.Chrome",),
       "connector", "chrome", "googlechrome", "https://www.google.com/chrome/", "", 0, (0.26, 0.52, 0.96),
@@ -244,21 +225,17 @@ CATALOG: tuple[App, ...] = (
       ("edge",)),
     A("arc", "Arc", "Browsers", "Browses, clicks and fills in pages for you.", ("company.thebrowser.Browser",),
       "connector", "chrome", "arc", "https://arc.net/", "", 0, (0.99, 0.25, 0.4)),
-    A("firefox", "Firefox", "Browsers", "Opens pages and reads them to you.", ("org.mozilla.firefox",), "screen", "",
-      "firefoxbrowser", "https://www.mozilla.org/firefox/mac/", "", 0, (1.0, 0.45, 0.1)),
     # --- developer ---
     A("vscode", "VS Code", "Developer", "Opens your projects; Mint's coding agents work in them.",
       ("com.microsoft.VSCode",), "connector", "vscode", "visualstudiocode", "https://code.visualstudio.com/", "", 0,
       (0.0, 0.48, 0.8), ("visual studio code", "code")),
-    A("cursor", "Cursor", "Developer", "Opens your projects and files.", ("com.todesktop.230313mzl4w4u92",), "screen",
-      "", "cursor", "https://cursor.com/download", "", 0, (0.1, 0.1, 0.1)),
     A("terminal", "Terminal", "Developer", "Tells you when a long command finishes; runs commands you ask for.",
       ("com.apple.Terminal",), "connector", "terminal", color=(0.15, 0.15, 0.15)),
     A("iterm", "iTerm", "Developer", "Tells you when a long command finishes; runs commands you ask for.",
       ("com.googlecode.iterm2",), "connector", "terminal", "iterm2", "https://iterm2.com/", "", 0,
       (0.1, 0.1, 0.1), ("iterm2",)),
-    A("github", "GitHub", "Developer", "Opens your repositories, issues and pull requests.",
-      ("com.github.GitHubClient",), "screen", "", "github", "https://desktop.github.com/", "https://github.com/", 0,
+    A("github", "GitHub", "Developer", "Searches GitHub and opens your repositories, issues, pull requests and notifications.",
+      ("com.github.GitHubClient",), "browser", "", "github", "https://desktop.github.com/", "https://github.com/", 0,
       (0.1, 0.1, 0.1), ("github desktop",)),
     # --- AI ---
     A("chatgpt", "ChatGPT", "AI", "Asks ChatGPT for you and reads its answers.", ("com.openai.chat",), "connector",
@@ -269,8 +246,6 @@ CATALOG: tuple[App, ...] = (
     A("claude", "Claude", "AI", "Asks Claude for you and reads its answers.", ("com.anthropic.claudefordesktop",),
       "connector", "ai_apps", "anthropic", "https://claude.ai/download", "https://claude.ai/", 15,
       (0.85, 0.47, 0.34)),
-    A("gemini", "Gemini", "AI", "Asks Gemini for you and reads its answers.", ("com.google.GeminiMacOS",), "screen",
-      "", "gemini", "https://gemini.google.com/", "https://gemini.google.com/", 0, (0.3, 0.45, 0.95)),
     # --- accounts and bridges (no app of their own) ---
     A("google", "Google account", ACCOUNTS, "Gmail and Google Calendar, through your Mac's Internet Accounts.", (),
       "account", "google", "google", color=(0.26, 0.52, 0.96), aliases=("gmail", "google calendar")),
@@ -299,8 +274,18 @@ def _friendly(detail: str) -> str:
     return detail
 
 
+def _same_name(app: App, item: dict) -> bool:
+    """A web connector belongs to this entry by name too - Word, Excel and PowerPoint share office.com."""
+    names = {app.name.lower(), app.id.replace("_", " "), *(a.lower() for a in app.aliases)}
+    names |= {n.removeprefix("microsoft ").removeprefix("google ") for n in list(names)}
+    made = str(item.get("name") or item.get("id") or "").lower().replace("_", " ")
+    return any(n and (n in made or made in n) for n in names)
+
+
 def _custom_for(app: App, customs: list[dict]) -> dict | None:
     for item in customs:
+        if not item.get("bundle_id") and not _same_name(app, item):
+            continue
         if app.bundles and item.get("bundle_id") in app.bundles:
             return item
         domain = str(item.get("domain") or "").lower()
@@ -357,7 +342,7 @@ def build(installed: dict[str, str], states: dict[str, dict], mine: dict[str, di
             rows.append(_row(app, state, detail, path, bundle))
         elif custom or app.id in mine:
             rows.append(_row(app, "connected", "In your browser"))
-        elif app.bundles:
+        elif app.bundles and app.how != "browser":
             rows.append(_row(app, "get", "Not on this Mac"))
         else:
             rows.append(_row(app, "web", HOW_WORDS["browser"]))
@@ -397,7 +382,8 @@ def sort_groups(rows: list[dict], max_suggested: int = MAX_SUGGESTED) -> dict:
     on_mac = sorted((r for r in rows if r["state"] == "ready" and not r["extra"]), key=_popular_key)
     more = sorted((r for r in rows if r["state"] == "ready" and r["extra"]), key=lambda r: r["name"].lower())
     get = sorted((r for r in rows if r["state"] == "get"), key=_popular_key)
-    suggested = [r for r in get if r["common"] > 0][:max(0, max_suggested)]
+    popular = sorted((r for r in rows if r["state"] in ("get", "web") and r["common"] > 0), key=_popular_key)
+    suggested = popular[:max(0, max_suggested)]
     browser = sorted((r for r in rows if r["state"] == "web"), key=lambda r: r["name"].lower())
     accounts = sorted((r for r in rows if r["state"] == "setup"), key=lambda r: r["name"].lower())
     groups = {"connected": connected, "on_mac": on_mac, "suggested": suggested, "accounts": accounts,
@@ -702,8 +688,8 @@ def connect(app_id: str, confirm: Callable[[dict], bool] | None = None,
         if row["action"] == "get":
             connectors.open_url(row["get_url"])
             return f"Opened the page to get {name}. Once it's installed, press Connect."
-        if row["action"] == "web":
-            return use_in_browser(row["id"])
+        if row["action"] == "web" or (row["how"] == "browser" and not row["connector"]):
+            return use_in_browser(row["id"], confirm, say)
         lib = connectors.BY_ID.get(row["connector"]) if row["connector"] else None
         if lib is not None and lib.settings_page:
             from mint.tools import setup_guide
@@ -761,16 +747,40 @@ def check(app_id: str) -> str:
     return f"✓ {name} works: {words}." if ok else f"✗ {name}: {words}."
 
 
-def use_in_browser(app_id: str) -> str:
-    """Opens the web app and remembers it: Mint uses it in the browser, where the user is signed in."""
+def use_in_browser(app_id: str, confirm: Callable[[dict], bool] | None = None,
+                   say: Callable[[str], None] | None = None) -> str:
+    """Connect the web app: Mint plans a web connector for it (pages it can open: search, new, inbox...), every
+    page is fetched once and only the ones that are really there stay, `confirm(plan)` shows it, it is saved and
+    checked, and the web app opens so the user can sign in there once."""
+    say = say or (lambda words: None)
     row = get(app_id, all_rows())
     if row is None or not row.get("web_url"):
         return f"{app_id} has no web app Mint knows."
+    from mint.tools import connector_maker
     from mint.tools import connectors
-    _remember(row, "browser")
+    name = row["name"]
+    if row["state"] == "connected":
+        connectors.open_url(row["web_url"])
+        return f"{name} is already connected; opened it in your browser."
+    say(f"Reading what Mint can open in {name}…")
+    try:
+        plan = connector_maker.plan(f"integrate {name}", web=True)
+    except Exception as error:
+        log.info("web plan %s: %s", name, error)
+        plan = {"error": str(error)}
+    if not plan.get("actions"):
+        return f"Couldn't connect {name}: {plan.get('error') or plan.get('refuse') or 'no plan'}"
+    if confirm is not None and not confirm(plan):
+        return "Not connected."
+    say(f"Saving {name} and checking its pages…")
+    said = connector_maker.create(plan["id"])
     invalidate()
+    if not said.startswith("DONE"):
+        return said.removeprefix("FAILED: ")
     connectors.open_url(row["web_url"])
-    return f"Opened {row['name']} in your browser. Sign in there once; Mint uses it there when you ask."
+    checked = re.search(r"Checked: (.*?)(?= Changing actions|$)", said)
+    return (f"Connected {name} in your browser: {len(plan['actions'])} things Mint can open there"
+            + (f" ({checked.group(1).strip().rstrip('.')})" if checked else "") + ". Sign in there once if asked.")
 
 
 def disconnect(app_id: str) -> str:
