@@ -200,6 +200,9 @@ def _agents(monkeypatch, sessions, **settings):
     monkeypatch.setattr(notch_agents.prefs, "get", lambda key: values.get(key, prefs.DEFAULTS.get(key)))
     monkeypatch.setattr(notch_agents, "ordered", lambda items=None: list(sessions))
     monkeypatch.setattr(notch_agents, "pal_of", lambda key: ("cat", (1.0, 1.0, 1.0)))
+    # As on a Mac with Claude Code: without it Claude mode is off by itself (mode()), which is what the CI runner
+    # has - these tests are about what shows, not about detecting the apps.
+    monkeypatch.setattr(agent_watch, "installed", lambda: {"claude": True, "codex": True})
     return notch_agents
 
 
