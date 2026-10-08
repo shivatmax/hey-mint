@@ -60,6 +60,14 @@ class DRMProtected(Exception):
     pass
 
 
+class Stopped(Exception):
+    """The user said stop."""
+
+
+PLAYLIST_MAX = 50                 # videos from one playlist or channel page
+MIN_FREE = 1_500_000_000          # never fill the disk: at least this much stays free
+
+
 # --- helpers ------------------------------------------------------------------------------------------------
 
 def _bin(name: str) -> str | None:
@@ -222,7 +230,7 @@ def _options(folder: Path, quality: str, state: dict, headers: dict | None = Non
         elif d.get("status") == "finished":
             state["step"] = "Putting it together"
         if state.get("cancel"):
-            raise KeyboardInterrupt("stopped")
+            raise Stopped("stopped")
 
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "noprogress": True, "socket_timeout": 25,
             "retries": 5, "fragment_retries": 10, "concurrent_fragment_downloads": 4, "continuedl": True,
@@ -240,7 +248,29 @@ def _options(folder: Path, quality: str, state: dict, headers: dict | None = Non
         opts["extractor_args"] = {"generic": {"fragment_query": [""], "variant_query": [""], "key_query": [""]}}
     if cookiefile:
         opts["cookiefile"] = cookiefile
+    if state.get("subtitles") and ffmpeg:
+        lang = str(state["subtitles"]).lower()
+        if lang in ("true", "yes", "1", "on", "english"):
+            lang = "en"
+        langs = [lang, f"{lang}-orig", f"{lang}-US", f"{lang}-GB", f"{lang}-IN"]   # (not "en-de": translations)
+        opts.update(writesubtitles=True, writeautomaticsub=True, subtitleslangs=langs,
+                    postprocessors=[{"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False}])
+    if state.get("playlist"):
+        opts.update(noplaylist=False, playlistend=PLAYLIST_MAX, ignoreerrors="only_download",
+                    outtmpl=str(folder / "%(playlist_title,playlist_id|Playlist).80B" /
+                                "%(playlist_index|0)03d - %(title).100B.%(ext)s"))
     return opts
+
+
+def _room(folder: Path, need: float = 0) -> None:
+    """Refuse a download that would fill the disk."""
+    try:
+        free = shutil.disk_usage(folder if folder.exists() else folder.parent).free
+    except OSError:
+        return
+    if free < MIN_FREE or (need and need > free - MIN_FREE):
+        raise RuntimeError(f"not enough free space on the disk: {_size(free)} free"
+                           + (f", and it needs about {_size(need)}" if need else ""))
 
 
 class _Quiet:
@@ -268,9 +298,27 @@ def _ytdlp_fetch(url: str, folder: Path, quality: str, state: dict, headers: dic
     folder.mkdir(parents=True, exist_ok=True)
     opts = _options(folder, quality, state, headers, name, cookiefile)
     state["step"] = "Looking at the video"
+    _room(folder)
+    try:
+        return _fetch_with(yt_dlp, opts, url, folder, quality, state, name)
+    except (DRMProtected, Stopped):
+        raise
+    except Exception as error:
+        if not state.get("subtitles") or "subtitle" not in str(error).lower():
+            raise
+        log.info("subtitles failed, downloading without: %s", str(error)[:160])
+        state["subtitles"] = ""
+        state["subs_note"] = "the subtitles couldn't be fetched (the site said no), so it's without them"
+        opts = _options(folder, quality, state, headers, name, cookiefile)
+        return _fetch_with(yt_dlp, opts, url, folder, quality, state, name)
+
+
+def _fetch_with(yt_dlp, opts: dict, url: str, folder: Path, quality: str, state: dict, name: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if info.get("_type") in ("playlist", "multi_video") and info.get("entries"):
+            if state.get("playlist"):
+                return _fetch_playlist(ydl, info, folder, quality, state)
             info = next(e for e in info["entries"] if e)
         if _drm(info):
             raise DRMProtected("this video is protected (DRM)")
@@ -288,7 +336,8 @@ def _ytdlp_fetch(url: str, folder: Path, quality: str, state: dict, headers: dic
         raise RuntimeError("yt-dlp finished but no file was written")
     got = {"path": path, "title": info.get("title") or "", "height": info.get("height"),
            "duration": info.get("duration"), "via": info.get("extractor_key") or "yt-dlp",
-           "url": info.get("url") or url, "vcodec": str(info.get("vcodec") or "")}
+           "url": info.get("url") or url, "vcodec": str(info.get("vcodec") or ""),
+           "subs": sorted(info.get("requested_subtitles") or {})}
     if str(quality).lower() not in ("4k", "2160", "1440", "max", "highest", "audio"):
         got["path"] = _quicktime(got["path"], got["vcodec"], info.get("duration"), state)
     return got
@@ -325,6 +374,33 @@ def _quicktime(path: str, vcodec: str, duration, state: dict) -> str:
     return str(out)
 
 
+def _fetch_playlist(ydl, info: dict, folder: Path, quality: str, state: dict) -> dict:
+    """Every video of a playlist or channel page (up to PLAYLIST_MAX), into a folder named after it."""
+    entries = [e for e in info.get("entries") or [] if e][:PLAYLIST_MAX]
+    title = info.get("title") or "Playlist"
+    state["title"] = title
+    paths, failed = [], 0
+    for n, entry in enumerate(entries, 1):
+        if state.get("cancel"):
+            raise Stopped("stopped")
+        state["step"] = f"Video {n} of {len(entries)}"
+        try:
+            done = ydl.process_ie_result(entry, download=True)
+            for d in done.get("requested_downloads") or []:
+                if d.get("filepath") and os.path.exists(d["filepath"]):
+                    paths.append(_quicktime(d["filepath"], str(done.get("vcodec") or ""), done.get("duration"),
+                                            state) if quality not in ("4k", "audio") else d["filepath"])
+        except Stopped:
+            raise
+        except Exception as error:
+            failed += 1
+            log.info("playlist entry %s: %s", n, str(error)[:160])
+    if not paths:
+        raise RuntimeError("none of the playlist's videos could be downloaded")
+    return {"path": paths[0], "paths": paths, "title": title, "count": len(paths), "failed": failed,
+            "folder": str(Path(paths[0]).parent), "via": info.get("extractor_key") or "yt-dlp", "url": ""}
+
+
 def _download_skipping_drm(ydl, info: dict) -> dict:
     """Some sites (Vimeo) list a protected copy next to plain ones, and it only shows when the download starts:
     drop the copy that turned out protected and take the next best, up to 4 times."""
@@ -337,7 +413,20 @@ def _download_skipping_drm(ydl, info: dict) -> dict:
             if not trial["formats"]:
                 raise DRMProtected("every copy of this video is protected (DRM)")
         try:
+            chosen = ydl.process_ie_result(_copy.deepcopy(trial), download=False)
+            need = sum(float(f.get("filesize") or f.get("filesize_approx") or 0)
+                       for f in chosen.get("requested_formats") or [chosen])
+            _room(Path(ydl.params.get("outtmpl", {}).get("default", ".")).parent if isinstance(
+                ydl.params.get("outtmpl"), dict) else FOLDER, need)
+        except (RuntimeError, DRMProtected) as error:
+            if "free space" in str(error):
+                raise
+        except Exception:
+            pass
+        try:
             return ydl.process_ie_result(trial, download=True)
+        except Stopped:
+            raise
         except Exception as error:
             if "drm protected" not in str(error).lower() or not trial.get("formats"):
                 raise
@@ -396,6 +485,38 @@ HOOK = r"""
   try {
     const create = URL.createObjectURL;
     URL.createObjectURL = function (obj) { if (window.MediaSource && obj instanceof MediaSource) found.mse++; return create.apply(this, arguments); };
+  } catch (e) {}
+  // Capture (only when Mint turned it on for this page): what the player appends to its MediaSource, track by
+  // track, sent to Mint in pieces. The page's own playback is unchanged.
+  try {
+    if (window.MediaSource && window.SourceBuffer) {
+      let seq = 0;
+      const send = (id, data) => {
+        if (!window.__mintCapture || !window.__mintChunk) return;
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        const piece = 393216;
+        for (let at = 0; at < bytes.length; at += piece) {
+          const part = bytes.subarray(at, Math.min(bytes.length, at + piece));
+          let bin = '';
+          for (let i = 0; i < part.length; i += 32768) bin += String.fromCharCode.apply(null, part.subarray(i, i + 32768));
+          window.__mintChunk(JSON.stringify({t: id, n: seq++, first: at === 0, b: btoa(bin)}));
+        }
+      };
+      const addSB = MediaSource.prototype.addSourceBuffer;
+      MediaSource.prototype.addSourceBuffer = function (mime) {
+        const sb = addSB.apply(this, arguments);
+        found.tracks = (found.tracks || 0) + 1;
+        sb.__mintTrack = found.tracks;
+        (found.sbs = found.sbs || []).push({sb, v: null});
+        if (window.__mintCapture && window.__mintChunk) window.__mintChunk(JSON.stringify({t: sb.__mintTrack, mime: String(mime)}));
+        return sb;
+      };
+      const append = SourceBuffer.prototype.appendBuffer;
+      SourceBuffer.prototype.appendBuffer = function (data) {
+        try { if (this.__mintTrack) send(this.__mintTrack, data); } catch (e) {}
+        return append.apply(this, arguments);
+      };
+    }
   } catch (e) {}
   try {
     const open = XMLHttpRequest.prototype.open;
@@ -465,13 +586,19 @@ SCAN = r"""
 class Sniffer:
     """A page open in Mint's own background Chrome, with its network watched (iframes too)."""
 
-    def __init__(self, browser) -> None:
+    def __init__(self, browser, capture: Path | None = None) -> None:
         self.b = browser
         self.sessions: set[str] = set()
         self.requests: dict[str, dict] = {}
         self.media: dict[str, dict] = {}
         self.done = False
         self.tab = None
+        self.capture = capture                 # a folder: record what the player appends (MSE capture)
+        self.tracks: dict[tuple, dict] = {}    # (session, track) -> {"mime", "runs": [Path], "sizes": [int]}
+        self.last_chunk = 0.0
+
+    def _script(self) -> str:
+        return ("window.__mintCapture = true;\n" if self.capture else "") + HOOK
 
     def open(self, url: str) -> None:
         self.tab = self.b.new_tab("about:blank")
@@ -480,14 +607,17 @@ class Sniffer:
         t.on("Network.requestWillBeSent", self._request)
         t.on("Network.responseReceived", self._response)
         t.on("Target.attachedToTarget", self._attached)
+        if self.capture:
+            t.on("Runtime.bindingCalled", self._chunk)
+            self.tab.call("Runtime.addBinding", {"name": "__mintChunk"})
         self.tab.call("Network.enable", {"maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 20_000_000})
         try:
             self.tab.call("Network.setBypassServiceWorker", {"bypass": True})     # requests stay visible
         except Exception:
             pass
-        self.tab.call("Page.addScriptToEvaluateOnNewDocument", {"source": HOOK, "runImmediately": True})
+        self.tab.call("Page.addScriptToEvaluateOnNewDocument", {"source": self._script(), "runImmediately": True})
         try:
-            self.tab.call("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": False,
+            self.tab.call("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True,
                                                    "flatten": True})
         except Exception:
             log.debug("no auto-attach", exc_info=True)
@@ -497,10 +627,57 @@ class Sniffer:
         if self.done or session not in self.sessions:
             return
         child = params.get("sessionId")
-        if child and (params.get("targetInfo") or {}).get("type") in ("iframe", "page", "worker", "service_worker"):
+        kind = (params.get("targetInfo") or {}).get("type")
+        if not child:
+            return
+        if kind in ("iframe", "page", "worker", "service_worker"):
             self.sessions.add(child)
             self.b.t.post("Network.enable", {}, child)
-            self.b.t.post("Runtime.runIfWaitingForDebugger", {}, child)
+            if kind in ("iframe", "page"):            # the frame gets the same hooks before its scripts run
+                self.b.t.post("Page.addScriptToEvaluateOnNewDocument", {"source": self._script(),
+                                                                        "runImmediately": True}, child)
+                if self.capture:
+                    self.b.t.post("Runtime.addBinding", {"name": "__mintChunk"}, child)
+                self.b.t.post("Target.setAutoAttach", {"autoAttach": True, "waitForDebuggerOnStart": True,
+                                                       "flatten": True}, child)
+        self.b.t.post("Runtime.runIfWaitingForDebugger", {}, child)
+
+    def _chunk(self, params: dict, session) -> None:
+        """A piece the player appended (MSE capture): to its track's file. A new init segment starts a new run
+        (the player switched quality); the longest run of each track is used."""
+        if self.done or session not in self.sessions or params.get("name") != "__mintChunk" or not self.capture:
+            return
+        try:
+            d = json.loads(params.get("payload") or "{}")
+        except ValueError:
+            return
+        key = (session, d.get("t"))
+        track = self.tracks.setdefault(key, {"mime": "", "runs": [], "sizes": []})
+        if "mime" in d:
+            track["mime"] = d["mime"]
+            return
+        import base64
+        data = base64.b64decode(d.get("b") or "")
+        if not data:
+            return
+        init = d.get("first") and (data[4:8] == b"ftyp" or data[:4] == b"\x1aE\xdf\xa3")
+        if d.get("first") and not init:
+            stamp = _tfdt(data)                  # a piece the player sends again (after a seek): skip it
+            track["skip"] = stamp is not None and stamp <= track.get("last", -1)
+            if stamp is not None and not track["skip"]:
+                track["last"] = stamp
+        elif init:
+            track["skip"], track["last"] = False, -1
+        if track.get("skip"):
+            return
+        if init or not track["runs"]:
+            path = self.capture / f"track{len(self.tracks)}-{d.get('t')}-run{len(track['runs'])}.bin"
+            track["runs"].append(path)
+            track["sizes"].append(0)
+        with open(track["runs"][-1], "ab") as fh:
+            fh.write(data)
+        track["sizes"][-1] += len(data)
+        self.last_chunk = time.time()
 
     def _request(self, params: dict, session) -> None:
         if self.done or session not in self.sessions:
@@ -595,6 +772,16 @@ class Sniffer:
         self.done = True
         if self.tab is not None:
             self.tab.close()
+
+
+def _tfdt(data: bytes):
+    """The decode time of the first fragment in an fMP4 piece (its moof's tfdt), or None."""
+    i = data.find(b"tfdt", 0, 4096)
+    if i < 0 or len(data) < i + 16:
+        return None
+    if data[i + 4] == 1:
+        return int.from_bytes(data[i + 8:i + 16], "big")
+    return int.from_bytes(data[i + 8:i + 12], "big")
 
 
 def _kind(url: str, mime: str = "") -> str:
@@ -696,6 +883,143 @@ def sniff(url: str, seconds: float = SNIFF_SECONDS, browser=None) -> dict:
         s.close()
 
 
+# --- recording what the player plays (MSE capture: a page with no playlist or file to fetch) -------------------
+
+CAPTURE_MAX = 25 * 60             # seconds of wall time a capture may take at most
+
+STATUS = r"""
+(() => {
+  const vids = [...document.querySelectorAll('video')];
+  let best = null;
+  for (const v of vids) { const a = v.videoWidth * v.videoHeight + (v.paused ? 0 : 1); if (!best || a > best.a) best = {v, a}; }
+  if (!best) return {};
+  const v = best.v;
+  return {d: isFinite(v.duration) ? v.duration : 0, t: v.currentTime, ended: v.ended, paused: v.paused, rate: v.playbackRate,
+          w: v.videoWidth, h: v.videoHeight, drm: !!v.mediaKeys || !!(window.__mintVideo && window.__mintVideo.drm),
+          title: (document.querySelector('meta[property="og:title"]') || {}).content || document.title || ''};
+})()
+"""
+
+FAST = r"""
+((rate) => {
+  for (const v of document.querySelectorAll('video')) { try { v.muted = true;
+    if (v.playbackRate !== rate) v.playbackRate = rate;
+    if (v.paused && !v.ended) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+    // What's been played (and recorded) is let go of, so the player never hits the browser's buffer limit.
+    const keep = v.currentTime - 8;
+    for (const x of (window.__mintVideo && window.__mintVideo.sbs) || []) {
+      try { const b = x.sb.buffered; if (keep > 0 && !x.sb.updating && b.length && b.start(0) < keep - 2) x.sb.remove(0, keep); } catch (e) {}
+    }
+  } catch (e) {} }
+  return true;
+})(%RATE%)
+"""
+
+
+def capture(url: str, folder: Path, state: dict, browser=None) -> dict:
+    """Open the page again with recording on, play the video muted at up to 16x speed from the start, and keep
+    what its player appends; then join the tracks into one file. For pages whose video has no playlist or file
+    to fetch (it's built in the browser). Never for DRM: a page that asks for a key system is refused."""
+    import subprocess
+    import tempfile
+    from mint.tools import cdp
+    ffmpeg = _ffmpeg()
+    if not ffmpeg:
+        raise RuntimeError("recording a page's player needs ffmpeg, which isn't installed")
+    work = Path(tempfile.mkdtemp(prefix="mint-capture-"))
+    browser = browser or cdp.get("headless")
+    s = Sniffer(browser, capture=work)
+    info: dict = {}
+    try:
+        s.open(url)
+        start = time.time()
+        rate, last_t, moved, kicks, smooth = 4, -1.0, time.time(), 0, 0
+        for _ in range(3):
+            try:
+                s.tab.js(PLAY, timeout=8, await_promise=True)
+            except Exception:
+                pass
+            time.sleep(1.0)
+            if s.tracks:
+                break
+        while True:
+            if state.get("cancel"):
+                raise Stopped("stopped")
+            try:
+                s.tab.js(FAST.replace("%RATE%", str(rate)), timeout=5)
+                info = s.tab.js(STATUS, timeout=5) or info
+            except Exception:
+                log.debug("capture status", exc_info=True)
+            t_now = float(info.get("t") or 0)
+            if t_now > last_t + 0.5:
+                if kicks and time.time() - moved < 3:
+                    smooth += 1
+                    if smooth >= 20 and rate < 4:      # flowing again for a while: back up to speed
+                        rate, smooth = rate * 2, 0
+                last_t, moved, kicks = t_now, time.time(), 0
+            elif time.time() - moved > 6 and kicks < 6:
+                # Stuck: the player gave up a download it thought too slow. A tiny seek makes it fetch again;
+                # and slower.
+                rate, kicks, moved, smooth = max(1, rate // 2), kicks + 1, time.time(), 0
+                try:
+                    s.tab.js("(() => { for (const v of document.querySelectorAll('video')) "
+                             "if (!v.ended) v.currentTime = v.currentTime + 0.05; return true; })()")
+                except Exception:
+                    pass
+            if info.get("drm"):
+                raise DRMProtected("the page plays it with DRM")
+            d, t = float(info.get("d") or 0), float(info.get("t") or 0)
+            if d:
+                state["percent"] = min(99, round(100 * t / d))
+            state["step"] = f"Recording the player {state.get('percent', 0)}%"
+            waited = time.time() - start
+            limit = min(CAPTURE_MAX, (d / 2 + 120) if d else 300)
+            quiet = s.last_chunk and time.time() - s.last_chunk > 25 and time.time() - moved > 25 and kicks >= 6
+            if info.get("ended") or (d and t >= d - 0.6) or waited > limit or (quiet and waited > 30) or \
+                    (not s.tracks and waited > 40):
+                break
+            time.sleep(1.0)
+    finally:
+        s.close()
+    try:
+        return _join_tracks(s.tracks, work, folder, info, ffmpeg, subprocess, url)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _join_tracks(tracks: dict, work: Path, folder: Path, info: dict, ffmpeg: str, subprocess, url: str) -> dict:
+    files = []
+    for track in tracks.values():
+        if not track["runs"]:
+            continue
+        best = max(range(len(track["runs"])), key=lambda i: track["sizes"][i])
+        if track["sizes"][best] > 50_000:
+            files.append((track["runs"][best], track["mime"]))
+    if not files:
+        raise RuntimeError("the page's player didn't give anything to record (it may need you signed in)")
+    files.sort(key=lambda f: 0 if "video" in f[1] else 1)
+    title = info.get("title") or _host(url) or "video"
+    folder.mkdir(parents=True, exist_ok=True)
+    for ext in (".mp4", ".mkv"):
+        out = _free(folder / (_safe_name(title) + ext))
+        cmd = [ffmpeg, "-v", "error", "-y"]
+        for path, _mime in files:
+            cmd += ["-i", str(path)]
+        for n in range(len(files)):
+            cmd += ["-map", f"{n}"]
+        cmd += ["-c", "copy"] + (["-movflags", "+faststart"] if ext == ".mp4" else []) + [str(out)]
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if done.returncode == 0 and out.exists() and out.stat().st_size > 50_000:
+            vcodec = "avc1" if any("avc1" in m or "avc3" in m for _p, m in files) else \
+                next((m for _p, m in files if "video" in m), "")
+            path = _quicktime(str(out), vcodec, info.get("d"), {})
+            return {"path": path, "title": title, "height": info.get("h") or None, "duration": info.get("d") or None,
+                    "media": url, "headers": {}, "note": "recorded from the page's player (it had no file to fetch)"}
+        out.unlink(missing_ok=True)
+        log.info("joining the recorded tracks (%s) failed: %s", ext, done.stderr[-300:])
+    raise RuntimeError("recorded the player, but the pieces couldn't be joined into a video")
+
+
 # --- the whole job ------------------------------------------------------------------------------------------
 
 def _user_chrome():
@@ -755,10 +1079,8 @@ def download(url: str, quality: str = "best", folder: Path | None = None, state:
             got = _ytdlp_fetch(url, folder, quality, state)
             got.update(media=url, headers={}, note="")
             return got
-        except DRMProtected:
+        except (DRMProtected, Stopped):
             raise
-        except KeyboardInterrupt:
-            raise RuntimeError("stopped")
         except Exception as error:
             if "drm protected" in str(error).lower():
                 raise DRMProtected("this video is protected (DRM)")
@@ -805,21 +1127,26 @@ def download(url: str, quality: str = "best", folder: Path | None = None, state:
                 raise DRMProtected("this stream is protected (DRM)")
             raise RuntimeError(_why(error))
     # Not a site yt-dlp knows: find the video in the page.
+    if state.get("cancel"):
+        raise Stopped("stopped")
     state["step"] = "Finding the video"
     try:
         found = sniff(url)
     except Exception as error:
         raise RuntimeError(f"couldn't open the page to look for the video ({str(error)[:160]})")
-    if not found["candidates"] and not found["frames"] and not found.get("drm"):
+    if not found["candidates"] and not found["frames"] and not found.get("drm") and not found.get("mse"):
         mine = _user_chrome()                   # a page that shows its video only to a signed-in visitor
         if mine is not None:
             state["step"] = "Trying your Chrome"
             try:
                 found = sniff(url, browser=mine)
+                found["browser"] = mine
             except Exception as error:
                 log.info("sniff in the user's Chrome: %s", str(error)[:160])
     state["title"] = found.get("title") or state.get("title") or ""
     ua = found.get("ua") or ""
+    if state.get("cancel"):
+        raise Stopped("stopped")
     for frame in found["frames"]:                       # a player from another site (Vimeo, Wistia...)
         state["step"] = f"Found a {_host(frame).split('.')[-2]} player"
         try:
@@ -844,9 +1171,11 @@ def download(url: str, quality: str = "best", folder: Path | None = None, state:
                 pass
     if found.get("drm"):
         raise DRMProtected(f"the page plays it with DRM ({found['drm']})")
-    if any(v.get("blob") for v in found.get("videos") or []) and not found["candidates"]:
-        raise RuntimeError("the page builds the video in the browser from pieces it doesn't name (no playlist or "
-                           "file to fetch) - it may need you signed in, or it's protected")
+    if found.get("mse") or any(v.get("blob") for v in found.get("videos") or []):
+        if state.get("cancel"):
+            raise Stopped("stopped")
+        state["step"] = "Recording the player"          # no file or playlist: keep what the player plays
+        return capture(url, folder, state, found.get("browser"))
     if errors:
         raise RuntimeError("found the video but the site refused the download: " + errors[0])
     if first_error is not None and not _no_site_support(first_error):
@@ -918,6 +1247,12 @@ def _front_url() -> str:
 
 
 def _report(got: dict) -> str:
+    if got.get("paths"):
+        where = str(got.get("folder") or Path(got["path"]).parent).replace(str(Path.home()), "~")
+        text = f"Downloaded {got['count']} video{'s' if got['count'] != 1 else ''} of “{got.get('title')}”: {where}"
+        if got.get("failed"):
+            text += f" ({got['failed']} couldn't be downloaded: private, removed or protected)"
+        return text
     path = Path(got["path"])
     size = path.stat().st_size if path.exists() else 0
     bits = [b for b in (f"{got['height']}p" if got.get("height") else "", _clock(got.get("duration")) if
@@ -936,7 +1271,30 @@ def _report(got: dict) -> str:
     return text
 
 
+def stop_all() -> str:
+    with _lock:
+        states = list(_jobs.values())
+    for state in states:
+        state["cancel"] = True
+    if not states:
+        return "No video is downloading."
+    names = ", ".join(f"“{s.get('title')}”" for s in states if s.get("title")) or "the video"
+    return f"Stopping the download of {names}; the part already downloaded is removed."
+
+
+def _clean_partial(folder: Path, since: float) -> None:
+    for pattern in ("*.part", "*.ytdl", "*.part-Frag*", "*.temp.*", "*.f[0-9]*.*"):
+        for p in folder.rglob(pattern):
+            try:
+                if p.stat().st_mtime >= since - 2:
+                    p.unlink()
+            except OSError:
+                pass
+
+
 def download_video(args: dict) -> str:
+    if args.get("stop"):
+        return stop_all()
     url = str(args.get("url") or "").strip()
     if not url or url.lower() in ("this", "this video", "front", "current"):
         url = _front_url()
@@ -952,12 +1310,19 @@ def download_video(args: dict) -> str:
             folder = target.parent
         except Exception:
             log.debug("save_to", exc_info=True)
-    state: dict = {"step": "Starting", "started": time.time(), "url": url}
+    state: dict = {"step": "Starting", "started": time.time(), "url": url,
+                   "playlist": bool(args.get("playlist")), "subtitles": args.get("subtitles") or ""}
     key = f"dl-{time.time():.3f}"
 
     def run():
         try:
             got = download(url, quality, folder, state, script)
+            if state.get("subs_note"):
+                got["note"] = "; ".join(x for x in (got.get("note"), state["subs_note"]) if x)
+            elif state.get("subtitles"):
+                said = (f"with {', '.join(got['subs'])} subtitles" if got.get("subs") else
+                        "the video has no subtitles in that language")
+                got["note"] = "; ".join(x for x in (got.get("note"), said) if x)
             if script and not got.get("script"):
                 got["script"] = str(write_script(Path(got["path"]), got.get("media") or url, got.get("headers") or {},
                                                  quality))
@@ -972,8 +1337,12 @@ def download_video(args: dict) -> str:
             state["result"] = (f"FAILED: not downloaded - {error}. Mint doesn't get around copy protection (Netflix, "
                                "Prime Video, paid streams).")
         except Exception as error:
-            log.info("download_video %s: %s", url, error)
-            state["result"] = f"FAILED: couldn't download it - {error}"
+            if state.get("cancel") or isinstance(error, Stopped) or "stopped" in str(error).lower():
+                _clean_partial(folder, state["started"])
+                state["result"] = "Stopped the download (nothing half-done was kept)."
+            else:
+                log.info("download_video %s: %s", url, error)
+                state["result"] = f"FAILED: couldn't download it - {error}"
         with _lock:
             _jobs.pop(key, None)
             late = state.get("late")
@@ -1023,8 +1392,10 @@ video on this page", "get me the mp4 of <link>", "download it in 720p", "just th
 (the link; empty = the page open in the browser), quality (best / 4k / 1080 / 720 / 480 / audio) and save_to only if \
 the user named a place (default: Downloads). It works for YouTube and ~1,800 sites, and for other pages it finds the \
 video the page plays (embedded players, HLS/DASH streams). "show me how / give me the script / the command" -> \
-script=true (saves a .command next to the video). It never downloads DRM-protected streams (Netflix, Prime...) - \
-say so plainly. For watching/summarising a video use watch_video instead."""
+script=true (saves a .command next to the video). "download the whole playlist / all videos of this channel" -> \
+playlist=true (up to 50). "with subtitles" / "with Hindi subtitles" -> subtitles="yes" / "hi". "stop the download" -> \
+stop=true. It never downloads DRM-protected streams (Netflix, Prime...) - say so plainly. For watching or \
+summarising a video use watch_video instead."""
 
 
 def declarations():
@@ -1042,7 +1413,13 @@ def declarations():
             "save_to": types.Schema(type=types.Type.STRING,
                                     description="Only if the user named a place; default Downloads"),
             "script": types.Schema(type=types.Type.BOOLEAN,
-                                   description="Also save the found address and a download command next to it")})
+                                   description="Also save the found address and a download command next to it"),
+            "playlist": types.Schema(type=types.Type.BOOLEAN,
+                                     description="The whole playlist or channel page (up to 50 videos), only if "
+                                                 "the user asked for all of them"),
+            "subtitles": types.Schema(type=types.Type.STRING,
+                                      description="Embed subtitles: a language (en, hi, es...) or 'yes' for English"),
+            "stop": types.Schema(type=types.Type.BOOLEAN, description="Stop the download that is running")})
     )]
 
 

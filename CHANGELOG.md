@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **"What Mint can do", any time:** Settings ▸ General ▸ Getting to know Mint ▸ Show me (or the menu bar's "What Mint
+  can do…") opens setup's "What I can do" page on its own - no Back, no Skip, Done puts it away and setup's own state
+  stays as it was. "Welcome tour…" next to it runs the whole setup again.
+
+## 0.6.3 (2026-10-08)
+
+- **Deaf after the first answer, fixed:** Mint switched its microphone between two modes on waking and on falling
+  asleep - the switch lost the first words of a request, and once the audio engine failed to come back
+  ("-10875 outputHWFormat") and Mint heard nothing until restarted. It now keeps one microphone mode (calls still get
+  the plain microphone), and a restart that fails is retried. The microphone, which closes while Mint speaks on
+  speakers, could also stay closed for good when a reply was cut by a restart (the microphone test then said "No
+  sound at all reached Mint"); it now always reopens, and a watchdog reopens it within 1.5 s if anything is missed.
+- **Tools found with their guidance:** with long tool descriptions (the video tools) the usage guidance was left out
+  of a tool search, and the first call was then refused with "read it first". Room for it is kept now.
+- **Your assistant's name everywhere:** renamed in onboarding (say "Alex"), the notch, the chat, Settings and the
+  log still said "Say Hey Mint". They now show the wake phrase that actually works.
+- **Wake word sensitivity:** Settings ▸ Voice & wake word ▸ Sensitivity (Normal / High / Low). Near misses are
+  logged with their score ("heard something like Hey Alex - score 0.62, needs 0.85"), and the microphone test shows
+  it too.
+- **A new name learns your voice:** a custom wake phrase is built from the Mac's own voices; onboarding now
+  recommends the four takes of yours for it (15 seconds), and so does the "ready" notice.
+
 ## 0.6.2 (2026-10-08)
 
 - **"Hey Mint" works during calls:** in Google Meet, Zoom, FaceTime and other call apps Mint used to let go of the

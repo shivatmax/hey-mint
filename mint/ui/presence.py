@@ -312,6 +312,7 @@ class Presence:
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._add_settings(menu)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
+        self._row(menu, f"What {prefs.name()} can do…", "onboarding:tour")
         self._row(menu, "Welcome tour…", "onboarding:show")
         self._row(menu, "Grant Accessibility…", "grant")
         self._row(menu, "Forget conversation history", "forget")
@@ -343,7 +344,10 @@ class Presence:
             report.open_issue()
         elif kind == "onboarding":
             from mint.ui import onboarding
-            onboarding.onboarding.show()
+            if value == "tour":
+                onboarding.show_tour()
+            else:
+                onboarding.onboarding.show()
         elif kind == "halt":
             from mint.tools import automations       # stops running jobs: off the main thread
             threading.Thread(target=automations.halt, args=(value == "on", "menu"), daemon=True).start()

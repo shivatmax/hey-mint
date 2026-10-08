@@ -430,6 +430,12 @@ class HUD:
     on_poke = None      # optional: callable() -> bool; True means the click was handled
 
     def _orb_clicked(self) -> None:
+        try:
+            from mint.ui import onboarding
+            if onboarding.resume_if_unfinished():
+                return                      # setup closed half-way: a click on Mint brings it back
+        except Exception:
+            pass
         # Poke play: the face reacts to every click (a slap, dizzy, annoyed); the click still does its job.
         try:
             center, mouse = self.orb_center(), AppKit.NSEvent.mouseLocation()

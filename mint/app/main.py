@@ -387,7 +387,7 @@ def main() -> int:
             AppHelper.callAfter(presence.register_shortcuts)
         elif key == "listen_while_working":
             mint.listen_while_working = bool(value)
-        elif key in ("voice_lock", "wake_phrase", "wake_models", "quiet_while_waiting"):
+        elif key in ("voice_lock", "wake_phrase", "wake_models", "quiet_while_waiting", "wake_sensitivity"):
             mint.refresh_voice_lock()             # reloads the wake word models and the mic mode too
         elif key in ("theme", "position", "face"):
             presence.refresh()
@@ -436,7 +436,9 @@ def main() -> int:
                 print(f"  [wake word ready: {report}]", flush=True)
                 from mint.voice import voicelock
                 presence.action(f"“Hey {name}” is ready" + (" - retrain your voice so the voice lock knows it"
-                                                            if voicelock.lock.enrolled else ""))
+                                                            if voicelock.lock.enrolled else
+                                                            " - Settings ▸ Voice ▸ Record 4 takes makes it sure of "
+                                                            "your voice"))
             except Exception as error:
                 print(f"  [could not set up 'Hey {name}': {error}; 'Hey Mint' still works]", flush=True)
                 presence.action(f"Could not set up “Hey {name}” - “Hey Mint” still works")
@@ -651,9 +653,20 @@ def main() -> int:
         # Later runs still ask for Accessibility once if it is missing, like macOS apps do.
         from mint.ui import onboarding
         if onboarding.needed():
-            onboarding.onboarding.show()
+            onboarding.resume()
         elif not fastinput.has_accessibility():
             fastinput.request_accessibility()
+        # The app icon clicked (Dock, Launchpad, Finder) while Mint runs: the launcher forwards it. Setup not
+        # finished: setup again, where it was left. Otherwise the console. (It used to do nothing.)
+        from Foundation import NSDistributedNotificationCenter, NSOperationQueue
+
+        def reopened(note):
+            if onboarding.needed():
+                onboarding.resume()
+            else:
+                presence.fire("console")
+        observers.append(NSDistributedNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+            "local.mint.reopen", None, NSOperationQueue.mainQueue(), reopened))
         # Last: the main thread's heartbeat for Mint.app's watchdog (a hung Mint is restarted, its
         # stack logged) - see ear.py.
         from mint.app import ear

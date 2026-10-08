@@ -253,8 +253,9 @@ class ChatPanel:
         scroll.setDocumentView_(doc)
         parent.addSubview_(scroll)
         self._scroll, self._doc = scroll, doc
+        from mint.voice.wake import display_phrase
         self._empty = AppKit.NSTextField.labelWithString_(
-            "Say “Hey Mint”, or type below.\nSay “stop” any time to stop everything.")
+            f"Say “{display_phrase()}”, or type below.\nSay “stop” any time to stop everything.")
         self._empty.setFont_(_font(12))
         self._empty.setAlignment_(AppKit.NSTextAlignmentCenter)
         self._empty.setTextColor_(AppKit.NSColor.tertiaryLabelColor())

@@ -99,6 +99,18 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The app icon clicked while Hey Mint already runs (Dock, Launchpad, Finder, `open`). Not running Mint:
+    /// start it, onto the console. Running: Mint shows setup again if unfinished, else the console.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if child == nil {
+            launch(reason: "console")
+        } else {
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("local.mint.reopen"), object: nil, userInfo: nil, deliverImmediately: true)
+        }
+        return false
+    }
+
     func checkAutomations() {
         guard child == nil, !launching, !quitting else { return }
         let path = Bundled.root + "/automations-next"

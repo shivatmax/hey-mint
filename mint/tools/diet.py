@@ -321,6 +321,7 @@ def _sources() -> dict:
     from mint.tools import translate
     from mint.ui import tutor
     from mint.tools import video
+    from mint.tools import video_download
     from mint.tools import video_edit
     return {"apple_apps": apple_apps, "apple_shortcuts": apple_shortcuts, "automations": automations,
             "briefing": briefing, "cards": cards, "connector_maker": connector_maker, "convert": convert,
@@ -329,7 +330,7 @@ def _sources() -> dict:
             "merge": merge, "notch_agents": notch_agents, "notifications": notifications, "rewrite": rewrite,
             "screenrec": screenrec, "screenshots": screenshots, "sheets": sheets, "shortcut_maker": shortcut_maker,
             "teach": teach, "tidy": tidy, "trackers": trackers, "translate": translate, "tutor": tutor,
-            "video": video, "video_edit": video_edit}
+            "video": video, "video_download": video_download, "video_edit": video_edit}
 
 
 def _section(source: str) -> str:
@@ -464,14 +465,18 @@ def find(query: str, budget: int = BUDGET) -> str:
     head = f"Tools for '{query}' - run one with use_tool(name, args=JSON object):"
     out, used = [head], len(head)
     first_family = family_of(best[0])
+    # Room for the family's guidance is kept first: with long tool descriptions (the video tools, 8 Oct) the list
+    # filled the budget, the guidance was left out, and use_tool then refused the first call to "read it first".
+    guidance = guide(first_family)
+    reserve = min(len(guidance), GUIDE_MAX) + 60 if guidance else 0
     shown, short = [], []
     for name in best:
         decl = _all()[name]
         entry = f"\n- {name}: {_named(decl.description or '')}\n  args: {_schema(decl)}"
-        if used + len(entry) > budget - 200 and shown:
+        if used + len(entry) > budget - 200 - reserve and shown:
             short.append(name)
             continue
-        out.append(entry[: budget - used - 200] if not shown else entry)
+        out.append(entry[: max(200, budget - used - 200 - reserve)] if not shown else entry)
         used += len(out[-1])
         shown.append(name)
     if short:
@@ -479,7 +484,7 @@ def find(query: str, budget: int = BUDGET) -> str:
             f"{n} ({(_all()[n].description or '').split('. ')[0][:70]})" for n in short)
         out.append(line)
         used += len(line)
-    text = guide(first_family)
+    text = guidance
     if text and used < budget - 120:
         _served.add(first_family)
         room = min(GUIDE_MAX, budget - used - 40)

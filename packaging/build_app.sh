@@ -235,6 +235,11 @@ if [[ -n "${NOTARY_PROFILE:-}" && "$IDENTITY" == "Developer ID Application:"* ]]
   xcrun stapler staple "$DMG"
 fi
 (cd "$DIST" && shasum -a 256 "$(basename "$DMG")") | tee "$DMG.sha256"
+# The app in dist/ and the DMG staging copy are build outputs, not apps to open: keep them out of Launchpad and
+# Spotlight (they showed up as extra "Hey Mint"s beside the installed one, 8 Oct).
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+for built in "$APP" "$STAGE/Hey Mint.app"; do "$LSREGISTER" -u "$built" >/dev/null 2>&1 || true; done
+rm -rf "$STAGE"
 
 # latest.json: what the app's updater (mint/app/updater.py) reads from the release.
 python3 -B - "$DMG" "$VERSION" "$MIN_MACOS" "$DIST/latest.json" <<'PY'

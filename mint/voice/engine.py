@@ -345,8 +345,20 @@ class VoiceAudio:
             print(f"  [audio: restarting - {reason}]", flush=True)
             self._teardown()
             try:
-                self._build()
-                self._start()
+                # Right after voice processing is torn down the output device can briefly report no valid format
+                # (8 Oct: "-10875 IsFormatSampleRateAndChannelCountValid(outputHWFormat)" on going back to sleep,
+                # and Mint was deaf until the watchdog noticed). Give it a moment and try again.
+                for attempt in range(4):
+                    try:
+                        self._build()
+                        self._start()
+                        break
+                    except Exception as error:
+                        if attempt == 3:
+                            raise
+                        log.warning("audio restart attempt %d failed (%s); retrying", attempt + 1, error)
+                        self._teardown()
+                        time.sleep(0.4 * (attempt + 1))
             except Exception as error:
                 log.error("audio restart failed: %s", error)
                 print(f"  [audio: could not restart the microphone: {error}]", flush=True)

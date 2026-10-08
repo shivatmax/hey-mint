@@ -140,9 +140,14 @@ DEFAULTS: dict = {
     # After Mint is done, it listens this many seconds for a follow-up, then needs the wake word
     # again (listening.py). 0 = the wake word every time.
     "follow_up_seconds": 6,
-    # While Mint only waits for "Hey Mint", the plain microphone: other apps' sound (a video, music) is not turned
-    # down and the mic hears as it is. Echo cancellation comes on in a conversation (audio_vp). False = always on.
-    "quiet_while_waiting": True,
+    # True: while Mint only waits for the wake word, the plain microphone (other apps' sound is not turned down),
+    # echo cancellation only in a conversation. False (default since 8 Oct): one microphone mode all the time -
+    # switching rebuilt the audio engine mid-conversation (the user's first words lost while it switched, 10 s
+    # after the wake word) and on falling asleep (once it failed to come back: Mint deaf). Calls still get the
+    # plain microphone (listen_in_calls).
+    "quiet_while_waiting": False,
+    # How readily the wake word fires: normal | high (catches more, a few more false starts) | low.
+    "wake_sensitivity": "normal",
     # A voice model that stalls, answers slowly or fails: use the next one for a while (live_models.py).
     "switch_when_slow": True,
     # The voice models to use, best first ([] = Mint's pool), and each one's tokens-a-minute limit.

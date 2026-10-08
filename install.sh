@@ -264,6 +264,9 @@ pkill -x MintScreen 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALL"
 ditto "$BUILD" "$INSTALL"
+# The build copy is not an app to keep: unregister and remove it, or Launchpad and Spotlight list a second Mint.
+"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" -u "$BUILD" >/dev/null 2>&1 || true
+rm -rf "$BUILD"
 echo "Installed: $INSTALL"
 
 if [[ "${1:-}" == "--login" || "$RELOGIN" == 1 ]]; then

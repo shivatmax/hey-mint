@@ -1751,7 +1751,8 @@ class Notch:
             h["title"].setStringValue_(title)
             h["hint"].setMaximumNumberOfLines_(3 if words else 2)
             h["hint"].setTextColor_(_white(0.85 if words else 0.55))
-            h["hint"].setStringValue_(words or ("Say “Hey Mint”, or press the chat button." if prefs.get("mic")
+            from mint.voice.wake import display_phrase
+            h["hint"].setStringValue_(words or (f"Say “{display_phrase()}”, or press the chat button." if prefs.get("mic")
                                                 else "Press the chat button, or turn the mic on below."))
             # The little Mint flies in on the left (_place_face); the words sit beside it and wipe in.
             tx = left + FACE * PANE_FACE + 14
@@ -2604,6 +2605,12 @@ class Notch:
     def clicked(self) -> None:
         """A click on the notch (not on one of its buttons) opens the full notch, or folds it back; with the
         chat open it closes the chat. The chat has its own button."""
+        try:
+            from mint.ui import onboarding
+            if onboarding.resume_if_unfinished():
+                return                      # setup closed half-way: a click on Mint brings it back
+        except Exception:
+            pass
         if getattr(getattr(self.hud, "chat", None), "is_open", False):
             self._chat()
             return

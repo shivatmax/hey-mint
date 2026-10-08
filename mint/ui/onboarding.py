@@ -18,7 +18,7 @@ Nine pages in one window, each fading and springing in:
                teach the wake word this user's voice (wake_train, about a minute and a half, in the
                background). The voice lock is not part of onboarding: Settings ▸ Voice, if wanted.
   shortcuts    the four keys, as keycaps; click one and press new keys (settings_window.record_keys).
-  tour         ten things Mint does, each with its clip from the guide, playing one after another.
+  tour         what Mint does, each as a little live demo drawn here (no clips), one after another.
   done         you're set; three first things to try (a click sends it to Mint).
 
 Esc, Skip or the close button ends it at any page; prefs "onboarded" then keeps it from showing
@@ -67,7 +67,7 @@ ROLES = ("Developer", "Designer", "Founder", "Student", "Writer", "Marketer", "R
 VOICES = ("Zephyr", "Aoede", "Kore", "Puck", "Charon", "Sulafat")
 
 PERMISSIONS = (
-    ("microphone", "mic.fill", PINK, "Microphone", "So I can hear “Hey Mint” and everything you ask.", True),
+    ("microphone", "mic.fill", PINK, "Microphone", "So I can hear my wake word and everything you ask.", True),
     ("accessibility", "hand.point.up.left.fill", BLUE, "Accessibility", "To click, type, scroll and arrange windows for you.", False),
     ("screen", "rectangle.dashed.badge.record", VIOLET, "Screen Recording", "To see what's on your screen when you ask about it.", False),
     ("input", "keyboard.fill", ORANGE, "Input Monitoring", "For the dictation key, and when you teach me a task.", False),
@@ -78,43 +78,101 @@ PANES = {"microphone": "Privacy_Microphone", "accessibility": "Privacy_Accessibi
          "input": "Privacy_ListenEvent", "calendar": "Privacy_Calendars", "reminders": "Privacy_Reminders"}
 
 SHORTCUTS = (
-    ("talk", "waveform", "Talk to Mint", "Start talking without saying “Hey Mint”.", False),
+    ("talk", "waveform", "Talk to Mint", "Start talking without the wake word.", False),
     ("dictate", "mic.fill", "Dictate anywhere", "Hold, talk, let go: clean text lands at your cursor. Tap twice for hands-free.", True),
     ("toggle", "bubble.left.and.bubble.right.fill", "Open the chat", "Type to me instead of talking.", False),
     ("clipboard", "doc.on.clipboard.fill", "Open the clipboard", "Everything you copied, and every screenshot.", False),
 )
 
+# What I can do: (symbol, colour, title, text, things to say, (you say, Mint answers, what happens)). Each one is
+# shown as a little live demo drawn here - the words typed in, Mint's answer, its steps ticking off - so the tour
+# needs no clips (it works offline and always looks sharp).
 TOUR = (
-    ("doing", "cursorarrow.click.2", "Talk, and it's done",
+    ("cursorarrow.click.2", BLUE, "Talk, and it's done",
      "Ask in plain words. I open apps, click, type and fill things in while you watch, and stop the moment you say “stop”.",
-     ("reply to Nina's email", "open my last invoice")),
-    ("notch-meet", "video.fill", "Your Mac, from anywhere",
-     "Start a Google Meet from your phone, Telegram or email: I share the screen and you talk to me while I work.",
-     ("start a Google Meet", "end the call")),
-    ("notch-jobs", "square.stack.3d.down.right", "Several things at once",
+     ("reply to Sam's email", "open my last invoice"),
+     ("Reply to Sam: Thursday at 3 works.", "On it - writing the reply in Mail.",
+      ("Opened Mail and found Sam's email", "Wrote: “Thursday at 3 works for me.”", "Ready to send - just say “send”"))),
+    ("globe", SKY, "Web tasks in seconds",
+     "Flights, forms, prices, a page to dig through - done in a browser tab in seconds, with what the page shows at the end.",
+     ("find a flight to Goa next Friday", "fill in this form"),
+     ("Find the cheapest flight to Goa next Friday.", "Searching in a background tab.",
+      ("Opened Google Flights", "Friday, 1 adult, economy", "Cheapest: 6:40 am nonstop, ₹4,320"))),
+    ("paperplane.fill", (0.16, 0.62, 0.93), "Telegram, from your phone",
+     "Message me on Telegram from anywhere: ask for a file, a summary, or to start something on your Mac. I answer there.",
+     ("send me the sales report", "is my Mac awake?"),
+     ("Send me yesterday's sales report.", "Found it in Documents - sending it to you.",
+      ("Found Sales report.pdf", "Sent to you on Telegram"))),
+    ("video.fill", ORANGE, "Google Meet with me",
+     "Start a Google Meet from your phone, Telegram or email: I join, share the screen, and you talk to me while I work.",
+     ("start a Google Meet", "end the call"),
+     ("Start a Google Meet and share my screen.", "Starting the call - the link is on your phone.",
+      ("Meet started", "Screen shared", "Listening in the call"))),
+    ("envelope.fill", PINK, "Email, handled",
+     "I read and sort your mail and draft the replies. You can email me a task from anywhere, and I write back when it's done.",
+     ("anything important in my inbox?", "draft a reply"),
+     ("Anything important in my inbox?", "Three need you - and one bill is due Friday.",
+      ("Read 24 new emails", "3 need a reply, 1 bill due Friday", "Drafts ready - nothing sent"))),
+    ("arrow.down.circle.fill", (1.0, 0.36, 0.33), "Downloads from YouTube",
+     "Say or paste a link: I save the video in the best quality - from YouTube and about 1,800 other sites - into Downloads.",
+     ("download this video", "save it in 4K"),
+     ("Download this YouTube video.", "Downloading - I'll tell you when it's ready.",
+      ("Found it: 1080p, 12 min", "Downloading… 100%", "Saved to Downloads"))),
+    ("square.stack.3d.down.right", VIOLET, "Several things at once",
      "Long jobs run in the background while we keep talking. Each one tells you when it's done.",
-     ("research standing desks and put it in a note", "also tidy my Downloads")),
-    ("notch-agents", "chevron.left.forwardslash.chevron.right", "Claude Code in the notch",
+     ("research standing desks", "also tidy my Downloads"),
+     ("Research standing desks - and tidy my Downloads.", "Both started. Keep talking, I'll report back.",
+      ("Research: 6 sources read", "Downloads: 41 files sorted", "Both done"))),
+    ("person.3.fill", (0.24, 0.72, 0.62), "A team of agents",
+     "For bigger jobs I hand parts to helper agents - Astra researches, Sage writes, another checks - and bring it together.",
+     ("ask Astra to research this", "write a brief from it"),
+     ("Write me a one-page brief on electric scooters.", "Astra researches, then I write it up.",
+      ("Astra: 9 sources, the key numbers", "One-page brief written", "Saved to Notes"))),
+    ("chevron.left.forwardslash.chevron.right", INK, "Claude Code in the notch",
      "Claude Code and Codex, live: every step, the diff and the tests. Allow or Deny from the notch or your phone.",
-     ("what is Claude Code doing?", "tell Claude to push")),
-    ("notch-guard", "checkmark.shield", "Nothing deleted without your yes",
+     ("what is Claude Code doing?", "tell Claude to push"),
+     ("What is Claude Code doing?", "Fixing the invoice tests - it's on try 2.",
+      ("Edited invoice.ts", "npm test: 48 passed", "Waiting for your OK to push"))),
+    ("checkmark.shield", OK, "Nothing deleted without your yes",
      "Before anything is deleted, overwritten or changed, I show exactly what and wait for your answer.",
-     ("delete last year's invoices",)),
-    ("island-schedule", "calendar", "Your day at a glance",
+     ("delete last year's invoices",),
+     ("Delete last year's invoices.", "That's 38 files, 210 MB. Move them to the Trash?",
+      ("Listed all 38 files", "Waiting for your yes"))),
+    ("calendar", BLUE, "Your day at a glance",
      "Your next meetings, reminders and what's playing, right at the notch.",
-     ("what's on my calendar today?", "put lunch with Sam on Friday")),
-    ("island-meeting", "record.circle", "Meeting notes",
+     ("what's on my calendar today?", "put lunch with Sam on Friday"),
+     ("What's on my calendar today?", "Three meetings - the design review at 11 is the big one.",
+      ("11:00  Design review", "13:00  Lunch with Sam", "16:30  Ship the beta build"))),
+    ("record.circle", (1.0, 0.36, 0.33), "Meeting notes",
      "On a call I turn into a recorder. When it ends you get the notes, the decisions and who does what.",
-     ("record this meeting",)),
-    ("dictation", "mic.fill", "Dictate anywhere",
+     ("record this meeting",),
+     ("Record this meeting.", "Recording. You'll get the notes when it ends.",
+      ("42 minutes recorded", "3 decisions, 5 to-dos with names", "Notes saved"))),
+    ("mic.fill", PINK, "Dictate anywhere",
      "Hold the dictate key, talk, let go. Clean, punctuated text lands wherever your cursor is.",
-     ("um, looks good, no wait, ship it Thursday",)),
-    ("clipboard-window", "doc.on.clipboard", "A clipboard that remembers",
+     ("um, looks good, no wait, ship it Thursday",),
+     ("um, looks good, no wait… ship it Thursday", "Typed where your cursor is:",
+      ("“Looks good - ship it Thursday.”",))),
+    ("doc.on.clipboard", VIOLET, "A clipboard that remembers",
      "Everything you copy and every screenshot, kept. Pick several and paste them in order.",
-     ("open my clipboard",)),
-    ("convert", "doc.richtext", "Documents",
+     ("open my clipboard",),
+     ("Open my clipboard.", "Here's everything you copied today.",
+      ("12 things, 4 screenshots", "Pick several, paste them in order"))),
+    ("doc.richtext", ORANGE, "Documents",
      "Copy the text off anything, turn a table into Excel, or a PDF into a Word document in another language.",
-     ("make an Excel of this table",)),
+     ("make an Excel of this table",),
+     ("Make an Excel of this table.", "Done - it's in Downloads.",
+      ("Read the table on screen", "12 rows, 5 columns", "Table.xlsx saved"))),
+    ("music.note", GREEN, "Music",
+     "Say a song, an artist or a mood: I play it on Spotify or Music, and the player sits right at the notch.",
+     ("play something calm", "next song"),
+     ("Play something calm for focus.", "Playing Deep Focus.",
+      ("Spotify: Deep Focus", "The player is in the notch"))),
+    ("photo.fill", (0.95, 0.45, 0.75), "Pictures from words",
+     "Describe a picture and I make it: an icon idea, an illustration, an image for a slide.",
+     ("make a cute mint-green robot icon",),
+     ("Make a cute mint-green robot icon.", "Here are a few - pick the one you like.",
+      ("4 pictures made", "Saved to Pictures"))),
 )
 
 TRY = (
@@ -150,6 +208,19 @@ def _accent():
 
 def _mint():
     return tuple(gfx.accent())
+
+
+def _mix(a, b, t: float) -> tuple:
+    """a, moved a fraction t of the way to b."""
+    return tuple(x + (y - x) * t for x, y in zip(a, b))
+
+
+def _reduce_motion() -> bool:
+    try:
+        from mint.ui import kinetics
+        return kinetics.reduce_motion()
+    except Exception:
+        return False
 
 
 def _glass(view, radius: float, tint=None):
@@ -326,7 +397,7 @@ class _OnbWindow(AppKit.NSWindow):
             objc.super(_OnbWindow, self).keyDown_(event)
 
     def cancelOperation_(self, sender):
-        self.owner.skip()
+        self.close()                                  # Esc: a pause (see Onboarding.closed), not Skip
 
 
 class _OnbFlipped(AppKit.NSView):
@@ -435,6 +506,7 @@ class Onboarding:
         self.player_end = None
         self.tour_index = 0
         self.tour_auto = True
+        self.tour_only = False           # just "What I can do" (Settings, the menu): no setup around it
         self.recording = None
         self._ticks = 0
         self._store = None
@@ -557,10 +629,13 @@ class Onboarding:
             x += width + 6
         Quartz.CATransaction.commit()
         name = PAGES[page]
-        self.skip_button.setHidden_(name == "done")
-        self.back_button.setHidden_(page <= 1)
+        self.skip_button.setHidden_(name == "done" or self.tour_only)
+        self.back_button.setHidden_(page <= 1 or self.tour_only)
         self.next_button.setHidden_(name in ("welcome", "done"))
-        label = {"permissions": "Continue", "tour": "Finish tour"}.get(name, "Continue")
+        if self.tour_only:
+            for segment in self.segments:
+                segment.setOpacity_(0.0)
+        label = {"permissions": "Continue", "tour": "Done" if self.tour_only else "Finish tour"}.get(name, "Continue")
         if name == "connect" and not self._has_key():
             label = "Skip for now"
         if name == "jev" and not os.environ.get(JEV_ENV):
@@ -931,8 +1006,8 @@ class Onboarding:
                                  "Saved ✓ - paste a new key to replace it" if self._has_key()
                                  else "Paste your Gemini API key")
         items.append(box)
-        items.append(self._pill(page, "Paste", 470, y + 4, 104, 46, self._paste_key, primary=True,
-                                symbol="doc.on.clipboard", size=14))
+        items.append(self._pill(page, "Connect", 470, y + 4, 104, 46, self._submit_key, primary=True,
+                                symbol="arrow.right", size=14, trailing=True))
         self.key_status = self._label(page, "", 80, y + 60, 494, size=13, weight=AppKit.NSFontWeightMedium,
                                       lines=2)
         items.append(self.key_status)
@@ -986,8 +1061,8 @@ class Onboarding:
         box = self._secret_field(page, "jev_key", 80, y + 4, 380,
                                  "Saved ✓ - paste a new key to replace it" if has else "Paste your TypeSafe API key")
         items.append(box)
-        items.append(self._pill(page, "Paste", 470, y + 4, 104, 46, self._paste_jev, primary=True,
-                                symbol="doc.on.clipboard", size=14))
+        items.append(self._pill(page, "Save", 470, y + 4, 104, 46, self._submit_jev, primary=True,
+                                symbol="arrow.right", size=14, trailing=True))
         self.jev_status = self._label(page, "", 80, y + 60, 494, size=13, weight=AppKit.NSFontWeightMedium, lines=2)
         items.append(self.jev_status)
         if has:
@@ -1013,6 +1088,15 @@ class Onboarding:
     def _open_typesafe(self) -> None:
         AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(TYPESAFE_KEYS))
         self._jev_said("info", "TypeSafe's console is open in your browser. Create a key, copy it, then press Paste.")
+
+    def _submit_jev(self) -> None:
+        """The button by the field: check the key typed or pasted in it; an empty field takes the clipboard."""
+        field = self.fields.get("jev_key")
+        text = "".join(str(field.stringValue() if field is not None else "").split())
+        if text:
+            self._check_jev(text)
+        else:
+            self._paste_jev()
 
     def _paste_jev(self) -> None:
         text = AppKit.NSPasteboard.generalPasteboard().stringForType_(AppKit.NSPasteboardTypeString) or ""
@@ -1100,6 +1184,15 @@ class Onboarding:
     def _open_studio(self) -> None:
         AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(STUDIO))
         self._key_said("info", "AI Studio is open in your browser. Create a key, copy it, then press Paste.")
+
+    def _submit_key(self) -> None:
+        """The button by the field: check the key typed or pasted in it; an empty field takes the clipboard."""
+        field = self.fields.get("gemini_key")
+        text = "".join(str(field.stringValue() if field is not None else "").split())
+        if text:
+            self._check_key(text)
+        else:
+            self._paste_key()
 
     def _paste_key(self) -> None:
         text = AppKit.NSPasteboard.generalPasteboard().stringForType_(AppKit.NSPasteboardTypeString) or ""
@@ -1280,8 +1373,11 @@ class Onboarding:
         self.hear_teach = self._pill(page, "Teach it my voice · 15 s", 80, teach_y, 250, 40, self._hear_teach,
                                      primary=False, symbol="person.wave.2", size=14)
         items.append(self.hear_teach)
-        self.hear_teach_state = self._label(page, f"Optional: four takes of “{phrase}” so it is surer of your "
-                                                  "voice and accent. Learns in the background.",
+        custom = me.lower() != "mint"
+        self.hear_teach_state = self._label(page, (f"Recommended for a new name: “{phrase}” was learned from the Mac's "
+                                                   "own voices - four takes of yours make it sure of you. "
+                                                   if custom else f"Optional: four takes of “{phrase}” so it is surer "
+                                                   "of your voice and accent. ") + "Learns in the background.",
                                             346, teach_y + 2, W - 160 - 270, size=13, rgb=DIM, lines=2)
         items.append(self.hear_teach_state)
         items.append(self._label(page, "Only your voice (the voice lock) is optional too - Settings ▸ Voice & "
@@ -1600,7 +1696,7 @@ class Onboarding:
         # The list fits between the heading and Back, however many features there are.
         step = min(38.0, (H - 96 - 78) / len(TOUR))
         tall = min(34.0, step - 3)
-        for i, (_clip, symbol, title, _text, _say) in enumerate(TOUR):
+        for i, (symbol, _rgb, title, _text, _say, _demo) in enumerate(TOUR):
             row = _OnbClick.alloc().initWithFrame_(AppKit.NSMakeRect(28, 96 + i * step, 256, tall))
             row.setWantsLayer_(True)
             row.layer().setCornerRadius_(10)
@@ -1615,33 +1711,28 @@ class Onboarding:
             page.addSubview_(row)
             self.tour_items.append(row)
             items.append((row, 0.0, 1.0))
-        # The clip, and what it shows.
+        # The demo stage: a little live scene per feature (_show_feature draws it).
         frame = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(316, 70, 624, 366))
         frame.setWantsLayer_(True)
         frame.layer().setCornerRadius_(18)
         frame.layer().setMasksToBounds_(True)
-        frame.layer().setBackgroundColor_(_cg((0.97, 0.97, 1.0)))
+        frame.layer().setBackgroundColor_(_cg((0.97, 0.98, 1.0)))
         frame.layer().setBorderColor_(_cg(WHITE, 0.95))
         frame.layer().setBorderWidth_(3)
+        self.stage_tint = Quartz.CAGradientLayer.layer()
+        self.stage_tint.setFrame_(frame.bounds())
+        self.stage_tint.setStartPoint_(Quartz.CGPointMake(0, 0))
+        self.stage_tint.setEndPoint_(Quartz.CGPointMake(1, 1))
+        frame.layer().addSublayer_(self.stage_tint)
         page.addSubview_(frame)
-        self.poster = AppKit.NSImageView.alloc().initWithFrame_(frame.bounds())
-        self.poster.setImageScaling_(AppKit.NSImageScaleProportionallyUpOrDown)
-        frame.addSubview_(self.poster)
-        video = AppKit.NSView.alloc().initWithFrame_(frame.bounds())
-        video.setWantsLayer_(True)
-        frame.addSubview_(video)
-        import AVFoundation
-        self.player = AVFoundation.AVPlayer.alloc().init()
-        self.player.setMuted_(True)
-        player_layer = AVFoundation.AVPlayerLayer.playerLayerWithPlayer_(self.player)
-        player_layer.setFrame_(video.bounds())
-        player_layer.setVideoGravity_(AVFoundation.AVLayerVideoGravityResizeAspect)
-        video.layer().addSublayer_(player_layer)
+        self.stage = _OnbFlipped.alloc().initWithFrame_(frame.bounds())
+        self.stage.setWantsLayer_(True)
+        frame.addSubview_(self.stage)
         self.video_frame = frame
-        self.counter = self._pill(frame, "", 14, 14, 64, 26, lambda: None, primary=False, size=11)
+        self.counter = self._pill(frame, "", 624 - 78, 16, 62, 26, lambda: None, primary=False, size=11)
         self.counter.glass.removeFromSuperview()
         self.counter.glass = None
-        self.counter.layer().setBackgroundColor_(_cg(INK, 0.62))
+        self.counter.layer().setBackgroundColor_(_cg(INK, 0.55))
         self.counter.label.setTextColor_(_ns(WHITE))
         self.counter.on_click, self.counter.on_hover = None, None
         items.append((frame, 0.08, 0.97))
@@ -1651,47 +1742,30 @@ class Onboarding:
         page.addSubview_(self.feature_say)
         items += [self.feature_title, self.feature_text, self.feature_say]
         self.tour_auto = True
+        self.tour_token = 0
         self._show_feature(0)
         return items
 
     def _show_feature(self, index: int, by_hand: bool = False) -> None:
-        import AVFoundation
         if by_hand:
             self.tour_auto = False
         index %= len(TOUR)
         self.tour_index = index
-        clip, _symbol, title, text, say = TOUR[index]
-        mint = _accent()
+        self.tour_token = getattr(self, "tour_token", 0) + 1
+        symbol, rgb, title, text, say, demo = TOUR[index]
         for i, row in enumerate(self.tour_items):
             on = i == index
             row.chosen = on
             row.layer().setBackgroundColor_(_cg(WHITE, 0.7) if on else _cg(WHITE, 0.0))
             row.text.setTextColor_(_ns(INK if on else DIM))
             row.text.setFont_(_font(13, AppKit.NSFontWeightSemibold if on else AppKit.NSFontWeightMedium))
-            row.icon.setContentTintColor_(_ns(SKY if on else DIM))
+            row.icon.setContentTintColor_(_ns(rgb if on else DIM))
         fade = Quartz.CATransition.animation()
         fade.setType_(Quartz.kCATransitionFade)
-        fade.setDuration_(0.35)
+        fade.setDuration_(0.3)
         self.video_frame.layer().addAnimation_forKey_(fade, "swap")
-        url = _media(clip, "jpg")
-        self.poster.setImage_(None)
-        if url.isFileURL():
-            self.poster.setImage_(AppKit.NSImage.alloc().initWithContentsOfURL_(url))
-        else:
-            def fetch(u=url, want=index):
-                image = AppKit.NSImage.alloc().initWithContentsOfURL_(u)
-                if image is not None:
-                    AppHelper.callAfter(lambda: self.tour_index == want and self.poster.setImage_(image))
-            threading.Thread(target=fetch, daemon=True, name="tour-poster").start()
-        item = AVFoundation.AVPlayerItem.playerItemWithURL_(_media(clip, "mp4"))
-        center = AppKit.NSNotificationCenter.defaultCenter()
-        if self.player_end is not None:
-            center.removeObserver_(self.player_end)
-        self.player_end = center.addObserverForName_object_queue_usingBlock_(
-            AVFoundation.AVPlayerItemDidPlayToEndTimeNotification, item, AppKit.NSOperationQueue.mainQueue(),
-            lambda note: self._clip_ended())
-        self.player.replaceCurrentItemWithPlayerItem_(item)
-        self.player.play()
+        self.stage_tint.setColors_([_cg(_mix(rgb, WHITE, 0.82)), _cg(_mix(rgb, WHITE, 0.93)), _cg((0.98, 0.98, 1.0))])
+        ends = self._demo(symbol, rgb, title, demo)
         self.counter.label.setStringValue_(f"{index + 1} of {len(TOUR)}")
         self._center(self.counter)
         self.feature_title.setStringValue_(title)
@@ -1703,6 +1777,8 @@ class Onboarding:
             words = f"“{phrase}”"
             width = int(AppKit.NSAttributedString.alloc().initWithString_attributes_(
                 words, {AppKit.NSFontAttributeName: _font(13, AppKit.NSFontWeightMedium)}).size().width) + 28
+            if x + width > 624:
+                break
             chip = self._pill(self.feature_say, words, x, 0, width, 30, lambda: None, primary=False, size=13)
             chip.on_click, chip.on_hover = None, None
             chip.label.setTextColor_(_ns(DEEP))
@@ -1710,15 +1786,98 @@ class Onboarding:
             x += width + 8
         for view in (self.feature_title, self.feature_text):
             _enter(view, 0.0, rise=8)
+        token = self.tour_token
+        AppHelper.callLater(ends + 2.8, lambda: self._demo_ended(token))
 
-    def _clip_ended(self) -> None:
-        if self.view is None or PAGES[self.page] != "tour":
+    def _demo(self, symbol, rgb, title, demo) -> float:
+        """Draw one feature's scene on the stage: what you say (typed in, on the right), Mint's answer (on the left,
+        by its face), then its steps ticking off one by one. Returns when the last step lands (seconds)."""
+        you, answer, steps = demo
+        stage = self.stage
+        for view in list(stage.subviews()):
+            view.removeFromSuperview()
+        sw = stage.frame().size.width
+        quick = _reduce_motion()
+        # Header: the feature's tile and name.
+        tile = self._tile(stage, symbol, rgb, 22, 18, size=34)
+        name = self._label(stage, title, 66, 24, 380, size=14, weight=AppKit.NSFontWeightSemibold, rgb=INK)
+        _enter(tile, 0.0, rise=0, scale=0.7)
+        _enter(name, 0.05, rise=6)
+        # You: a blue bubble on the right.
+        font = _font(14, AppKit.NSFontWeightMedium)
+        text_w = min(380.0, AppKit.NSAttributedString.alloc().initWithString_attributes_(
+            you, {AppKit.NSFontAttributeName: font}).size().width + 4)
+        lines = 1 if text_w < 380 else 2
+        bw, bh = text_w + 32, 22 * lines + 18
+        bubble = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(sw - bw - 24, 72, bw, bh))
+        bubble.setWantsLayer_(True)
+        bubble.layer().setBackgroundColor_(_cg(SKY))
+        bubble.layer().setCornerRadius_(min(18, bh / 2))
+        bubble.layer().setShadowColor_(_cg(SKY))
+        bubble.layer().setShadowOpacity_(0.25)
+        bubble.layer().setShadowRadius_(10)
+        bubble.layer().setShadowOffset_(Quartz.CGSizeMake(0, -3))
+        self._label(bubble, you, 16, 9, text_w, size=14, weight=AppKit.NSFontWeightMedium, rgb=WHITE, lines=lines)
+        stage.addSubview_(bubble)
+        t = 0.25
+        _enter(bubble, t, rise=12, scale=0.92)
+        # Mint: its face and a glass bubble on the left.
+        y = 72 + bh + 18
+        face = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(24, y + 2, 34, 34))
+        face.setWantsLayer_(True)
+        ball = Quartz.CAGradientLayer.layer()
+        ball.setFrame_(Quartz.CGRectMake(0, 0, 34, 34))
+        ball.setCornerRadius_(17)
+        ball.setColors_([_cg(_mix(_mint(), WHITE, 0.25)), _cg(_mint())])
+        face.layer().addSublayer_(ball)
+        for ex in (12, 22):
+            eye = Quartz.CALayer.layer()
+            eye.setFrame_(Quartz.CGRectMake(ex - 2, 12, 4, 8))
+            eye.setCornerRadius_(2)
+            eye.setBackgroundColor_(_cg(INK))
+            face.layer().addSublayer_(eye)
+        stage.addSubview_(face)
+        a_w = min(420.0, AppKit.NSAttributedString.alloc().initWithString_attributes_(
+            answer, {AppKit.NSFontAttributeName: font}).size().width + 4)
+        a_lines = 1 if a_w < 420 else 2
+        reply = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(68, y, a_w + 32, 22 * a_lines + 18))
+        reply.setWantsLayer_(True)
+        reply.layer().setBackgroundColor_(_cg(WHITE, 0.92))
+        reply.layer().setCornerRadius_(min(18, (22 * a_lines + 18) / 2))
+        reply.layer().setBorderColor_(_cg(rgb, 0.18))
+        reply.layer().setBorderWidth_(1)
+        self._label(reply, answer, 16, 9, a_w, size=14, weight=AppKit.NSFontWeightMedium, rgb=INK, lines=a_lines)
+        stage.addSubview_(reply)
+        t = 0.25 if quick else 1.05
+        _enter(face, t, rise=0, scale=0.6)
+        _enter(reply, t + 0.08, rise=10, scale=0.94)
+        # The steps, ticking off.
+        y += 22 * a_lines + 18 + 18
+        last = t
+        for n, step in enumerate(steps):
+            row = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(68, y + n * 34, sw - 68 - 24, 28))
+            row.setWantsLayer_(True)
+            row.layer().setBackgroundColor_(_cg(WHITE, 0.55))
+            row.layer().setCornerRadius_(14)
+            final = n == len(steps) - 1
+            mark = AppKit.NSImageView.alloc().initWithFrame_(AppKit.NSMakeRect(8, 6, 16, 16))
+            mark.setImage_(gfx.symbol("checkmark.circle.fill", 14))
+            mark.setContentTintColor_(_ns(OK if final else rgb))
+            row.addSubview_(mark)
+            self._label(row, step, 32, 5, sw - 68 - 24 - 44, size=13,
+                        weight=AppKit.NSFontWeightSemibold if final else AppKit.NSFontWeightRegular,
+                        rgb=INK if final else DIM)
+            stage.addSubview_(row)
+            last = t + 0.75 + n * (0.12 if quick else 0.6)
+            _enter(row, last, rise=8)
+        return last + 0.45
+
+    def _demo_ended(self, token: int) -> None:
+        """The scene has played: on to the next feature while the tour runs by itself."""
+        if self.view is None or PAGES[self.page] != "tour" or token != getattr(self, "tour_token", None):
             return
         if self.tour_auto and self.tour_index < len(TOUR) - 1:
             self._show_feature(self.tour_index + 1)
-        else:
-            self.player.seekToTime_(_zero())
-            self.player.play()
 
     # done
 
@@ -1875,15 +2034,33 @@ class Onboarding:
                 self.player_end = None
 
     def next(self) -> None:
+        if self.tour_only:
+            self._close_tour()
+            return
         if self.page < len(PAGES) - 1:
             self._go(self.page + 1)
 
     def back(self) -> None:
-        if self.page > 1:
+        if self.page > 1 and not self.tour_only:
             self._go(self.page - 1)
 
     def skip(self) -> None:
+        if self.tour_only:
+            self._close_tour()
+            return
         self.finish()
+
+    def _close_tour(self) -> None:
+        """Done with "What I can do" on its own: just fades out - setup's own state is left as it was."""
+        if self.window is None or not self.window.isVisible():
+            return
+        self._leave()
+        self.view = None
+        AppKit.NSAnimationContext.beginGrouping()
+        AppKit.NSAnimationContext.currentContext().setDuration_(0.3)
+        self.window.animator().setAlphaValue_(0.0)
+        AppKit.NSAnimationContext.endGrouping()
+        AppHelper.callLater(0.32, self.window.orderOut_, None)
 
     def finish(self) -> None:
         if self.window is None or not self.window.isVisible():
@@ -1904,11 +2081,14 @@ class Onboarding:
             pass
 
     def closed(self) -> None:
-        """The window's close button: the same as Skip."""
+        """The window's close button (or ⌘W): a pause, not an end. Setup opens again where it was left - at the
+        next launch, or when the app icon is clicked. (8 Oct: closing it mid-way marked setup done and clicking
+        Hey Mint afterwards did nothing.) Only "Skip setup" and the last page end it."""
         if self.view is not None:
             self._leave()
+            if not self.tour_only:
+                prefs.set("onboarding_page", int(self.page))
             self.view = None
-            prefs.set("onboarded", True)
 
     # --- events -------------------------------------------------------------------------------------------
 
@@ -1966,10 +2146,16 @@ class Onboarding:
 
     # --- showing --------------------------------------------------------------------------------------------
 
-    def show(self, page: int = 0) -> None:
-        """Main thread."""
+    def show(self, page: int = 0, tour_only: bool = False) -> None:
+        """Main thread. tour_only: only the "What I can do" page, whenever the user wants it again."""
         if self.window is None:
             self._build()
+        if self.window.isVisible() and self.view is not None and not self.tour_only and tour_only:
+            self._go(PAGES.index("tour"))       # setup is open: just go to its tour page
+            self.window.makeKeyAndOrderFront_(None)
+            return
+        self.tour_only = tour_only
+        self.window.setTitle_(f"What {prefs.name()} can do" if tour_only else f"Welcome to {prefs.name()}")
         self.orbs = []
         if self.view is not None:
             self.view.removeFromSuperview()
@@ -1996,5 +2182,33 @@ def show(page: int = 0) -> None:
     AppHelper.callAfter(onboarding.show, page)
 
 
+def show_tour() -> None:
+    """From any thread: "What I can do" on its own - the feature clips from setup, without the setup."""
+    AppHelper.callAfter(onboarding.show, PAGES.index("tour"), True)
+
+
 def needed() -> bool:
     return not prefs.get("onboarded")
+
+
+def resume_if_unfinished() -> bool:
+    """A click on Mint (the orb, the notch) while setup isn't finished and its window is closed: setup again,
+    where it was left. True if it opened (the click then does nothing else)."""
+    if not needed():
+        return False
+    window = getattr(onboarding, "window", None)
+    if window is not None and window.isVisible():
+        window.makeKeyAndOrderFront_(None)
+        AppKit.NSApp.activateIgnoringOtherApps_(True)
+        return True
+    resume()
+    return True
+
+
+def resume() -> None:
+    """From any thread: setup again, at the page it was closed on."""
+    try:
+        page = int(prefs.get("onboarding_page") or 0)
+    except (TypeError, ValueError):
+        page = 0
+    show(max(0, min(page, len(PAGES) - 1)))

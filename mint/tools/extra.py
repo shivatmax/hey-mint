@@ -292,7 +292,7 @@ def declarations() -> list[types.FunctionDeclaration]:
             "the orb', 'floating mode'. The change plays right away as an animation (the orb flies into "
             "the notch, or drops out of it): say one short playful sentence. 'hide' = Mint goes out of sight until it is needed "
             "(in the notch the little Mint and its icons go, the notch stays; the orb fades away) ('hide yourself', "
-            "'go away from the screen', 'disappear'); it comes back by itself on 'Hey Mint' or with ⌃⌥H. "
+            "'go away from the screen', 'disappear'); it comes back by itself on its wake word or with ⌃⌥H. "
             "'show' = back.",
             {"mode": {**STRING, "enum": ["orb", "notch", "hide", "show"]}}, ["mode"]),
         _fn("notch_files",
@@ -619,7 +619,7 @@ def _display_mode(args: dict) -> str:
                 else:
                     hud.set_hidden(True)
             AppHelper.callLater(1.5, hide)
-            return ("Hiding in a moment: say one very short sentence (\"Out of sight.\"). It comes back on Hey Mint "
+            return ("Hiding in a moment: say one very short sentence (\"Out of sight.\"). It comes back on its wake word "
                     "or ⌃⌥H.")
         AppHelper.callAfter(lambda: hud.set_hidden(False))
         return "Back on screen."

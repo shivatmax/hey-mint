@@ -135,6 +135,12 @@ class MintWake:
                     break
         if not models:
             raise RuntimeError("no usable wake word model (models/hey_mint.json is missing or broken)")
+        # Settings ▸ Voice & wake word ▸ Sensitivity: "high" lowers every bar - for a voice or accent the
+        # models (built from the Mac's own voices, or the user's few takes) catch only now and then.
+        from mint.core import prefs
+        shift = {"high": -0.15, "low": 0.05}.get(str(prefs.get("wake_sensitivity") or "normal"), 0.0)
+        for model in models:
+            model.threshold = min(0.97, max(0.5, model.threshold + shift))
         self._models = models
         first = models[0]
         # The first phrase's numbers, as before (enroll and the benches score with _probability).
@@ -177,7 +183,9 @@ class MintWake:
     def heard(self, pcm: bytes) -> bool:
         now = time.monotonic()
         fired = None
+        self.last_peak = 0.0                     # the best score in this chunk (near misses, session.py)
         for scores in self._windows(pcm):
+            self.last_peak = max(self.last_peak, *scores)
             for model, p in zip(self._models, scores):
                 model.run = model.run + 1 if p >= model.threshold else 0
                 if model.run >= model.need and now - self._last_fire >= self.refractory and fired is None:
@@ -262,6 +270,16 @@ def phrases() -> list[str]:
             seen.add(slug(phrase))
             out.append(phrase)
     return out
+
+
+def display_phrase() -> str:
+    """The wake phrase to show the user ("Hey Alex" once the assistant is called Alex) - never a fixed "Hey Mint"
+    (8 Oct: renamed to Alex in onboarding, the notch and the chat still said "Say Hey Mint")."""
+    try:
+        return active_phrases()[0]
+    except Exception:
+        from mint.core import prefs
+        return f"Hey {prefs.name()}"
 
 
 def active_phrases() -> list[str]:

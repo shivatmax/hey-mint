@@ -79,7 +79,8 @@ OPEN_TO = [("auto", "Auto"), ("home", "Home"), ("search", "Search"), ("shelf", "
 MOTION = [("full", "Full (playful)"), ("calm", "Calm"), ("minimal", "Minimal (fades only)")]
 AGENT_MODES = [("quiet", "Pop-ups only"), ("auto", "Live while they work"), ("on", "Always (Agents tab)"),
                ("off", "Off")]
-FOLLOW_UP = [(0, "No - always say Hey Mint"), (4, "4 seconds"), (6, "6 seconds"), (8, "8 seconds"),
+WAKE_SENSITIVITY = [("normal", "Normal"), ("high", "High - catches more"), ("low", "Low - fewer false starts")]
+FOLLOW_UP = [(0, "No - always say the wake word"), (4, "4 seconds"), (6, "6 seconds"), (8, "8 seconds"),
              (12, "12 seconds")]
 GUARD_LEVELS = [("all", "Deleting, changes and system commands"), ("delete", "Only deleting and system commands"),
                 ("off", "Never ask")]
@@ -421,6 +422,15 @@ class SettingsWindow:
         card.addSubview_(scroll)
         page.end()
 
+        page.section(f"Getting to know {name}")
+        self._row_buttons(page, f"What {name} can do",
+                          [("Show me", 110, self._show_tour)],
+                          "The \"What I can do\" page from setup on its own: each thing it can do, with what to "
+                          "say. Setup itself isn't touched.")
+        self._row_buttons(page, "The whole setup again", [("Welcome tour…", 130, self._show_setup)],
+                          "Name, voice, permissions, shortcuts and the clips - your answers are kept.")
+        page.end()
+
         page.section("Behaviour")
         card, top, x, h = page.row(f"Start {name} when I log in", control_w=38)
         self._switch(card, x, top + (h - 22) / 2, facts["login"],
@@ -430,7 +440,8 @@ class SettingsWindow:
         self._row_switch(page, "share_visible", "Visible in screen sharing",
                          "Shows in Meet, Zoom and screenshots. Off hides Mint from them (the eye button does the same).")
         self._row_popup(page, "follow_up_seconds", "Keep listening after a reply", FOLLOW_UP,
-                        "Then it waits for “Hey Mint” again. Talk not meant for Mint never keeps it open.", w=230)
+                        f"Then it waits for “{__import__('mint.voice.wake', fromlist=['x']).display_phrase()}” again. Talk not meant for Mint never keeps it "
+                        "open.", w=230)
         self._row_popup(page, "guard", "Ask before deleting or changing", GUARD_LEVELS,
                         "Mint (and its helpers, and Claude Code when connected) explains and waits for your yes - "
                         "at the Mac or on Telegram.", w=230)
@@ -620,6 +631,9 @@ class SettingsWindow:
                     state["busy"] = False
             threading.Thread(target=run, daemon=True, name="wake-test").start()
 
+        self._row_popup(page, "wake_sensitivity", "Sensitivity", WAKE_SENSITIVITY, w=220,
+                        hint="Misses you often (the microphone test shows the score): choose High. Wakes on its "
+                             "own: choose Low.")
         self._row_buttons(page, "Your voice (optional)", [("Record 4 takes", 130, record)],
                           hint="Makes it surer for your voice and accent. Takes about 15 seconds.")
         card, top, x, h = page.row("", height=ROW, control_w=0)
@@ -885,6 +899,14 @@ class SettingsWindow:
                         "Claude's from the Claude app (it notes them while it's open), Codex's from its logs. "
                         "Ask: \"how much Claude do I have left?\"", w=250)
         page.end()
+
+    def _show_tour(self) -> None:
+        from mint.ui import onboarding
+        onboarding.show_tour()
+
+    def _show_setup(self) -> None:
+        from mint.ui import onboarding
+        onboarding.show()
 
     def _toggle_looks_more(self) -> None:
         self._looks_more = not getattr(self, "_looks_more", False)

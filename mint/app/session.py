@@ -533,6 +533,8 @@ class Mint:
     def _audio_reconfigured(self, audio) -> None:
         """The engine was rebuilt (devices, echo mode, or it had stopped)."""
         self._voice_allowance(audio)
+        if not audio.playing:
+            audio.muted = False                # a fresh engine, nothing playing: the mic is open
         if not self._forced_half_duplex:
             # Without echo cancellation on speakers, the mic must close while
             # Mint talks or it hears itself; with headphones it need not.
@@ -728,7 +730,9 @@ class Mint:
                 await self._pending_wake_audio(pcm)
                 return
             self._preroll.add(pcm)
-            if self._wake.heard(pcm) and self._wake_is_user():
+            fired = self._wake.heard(pcm)
+            self._near_miss(fired)
+            if fired and self._wake_is_user():
                 await self.wake_up("wake word")
             return
 
@@ -1053,6 +1057,21 @@ class Mint:
             log.info("wake phrase cut: %.2f s dropped, %.2f s kept", cut / 32000, (len(pcm) - cut) / 32000)
         return pcm[cut:]
 
+    def _near_miss(self, fired: bool) -> None:
+        """Something close to the wake word that did not wake Mint: one log line per attempt, with its score -
+        so "I said Hey Alex ten times and nothing" can be told from "it never heard me" (8 Oct)."""
+        peak = float(getattr(self._wake, "last_peak", 0.0) or 0.0)
+        best = getattr(self, "_near_best", 0.0)
+        if fired:
+            self._near_best = 0.0
+        elif peak > 0.35:
+            self._near_best = max(best, peak)
+        elif best and peak < 0.15:
+            self._near_best = 0.0
+            from mint.voice.wake import display_phrase
+            need = float(getattr(self._wake, "threshold", 0.85) or 0.85)
+            self._print(f"[heard something like “{display_phrase()}” - score {best:.2f}, needs {need:.2f}]")
+
     @staticmethod
     def _quiet_asleep_wanted(lock_on: bool | None = None) -> bool:
         """The plain microphone while waiting for the wake word: the user's choice (quiet_while_waiting),
@@ -1280,8 +1299,20 @@ class Mint:
         """Fall asleep once the listening window has passed (listening.Window): a few seconds after
         Mint is done, unless work is in progress, Mint is speaking, or the user's words are still
         being judged. Talk that was not for Mint does not keep it open."""
+        muted_since = 0.0
         while True:
             await asyncio.sleep(0.5)
+            # The mic closes while Mint speaks (no echo cancellation) and opens when playback drains. A rebuild of
+            # the audio engine mid-reply dropped the rest of the reply without a "drained", and the mic stayed
+            # closed for good: 8 Oct, Mint deaf after its first answer, the mic test "No sound at all".
+            if getattr(self.audio, "muted", False) and not self.audio.playing and self.audio_in.empty():
+                muted_since = muted_since or time.monotonic()
+                if time.monotonic() - muted_since > 1.5:
+                    self.audio.muted = False
+                    muted_since = 0.0
+                    self._print("[the microphone was left closed after Mint spoke - open again]")
+            else:
+                muted_since = 0.0
             if self.asleep or self.paused or not self.hands_free:
                 continue
             now = time.monotonic()
@@ -2304,8 +2335,7 @@ class Mint:
         """Playback drained: reopen the mic and reset the idle clock."""
         if self.paused:
             self._audio_rest_later()
-        if self.half_duplex:
-            self.audio.muted = False
+        self.audio.muted = False              # (whatever the mode is now: a rebuild may have changed it)
         self._last_voice = time.monotonic()
         if not self._turn_open:
             self._window.finished(self._last_voice)   # Mint is done: the follow-up window starts
@@ -2940,7 +2970,8 @@ class Mint:
                     attempt = 0
                     typing = " Type to send text; Ctrl-C to stop." if sys.stdin and sys.stdin.isatty() else ""
                     if self.hands_free:
-                        word = self._wake_word.replace("_", " ")
+                        from mint.voice.wake import display_phrase
+                        word = display_phrase() if type(self._wake).__name__ == "MintWake" else self._wake_word.replace("_", " ")
                         print(f'\nMint is running (connected to {config.MODEL}). '
                               f'Say "{word}".{typing}\n', flush=True)
                     else:
