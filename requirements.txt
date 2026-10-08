@@ -15,4 +15,4 @@ kaldi-native-fbank>=1.20
 yt-dlp[default,deno,curl-cffi]>=2026.8.19   # + yt-dlp-ejs, pycryptodomex (AES HLS), Deno (YouTube's player), curl_cffi (sites that check the browser)
 imageio-ffmpeg>=0.6             # a static ffmpeg in the app: joins picture + sound, HLS to .mp4
 openpyxl>=3.1
-anthropic>=1.9
+anthropic>=1.11.0
