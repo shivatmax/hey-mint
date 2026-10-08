@@ -1036,7 +1036,7 @@ def hard_accountant_ok(ctx: Ctx):
 
 def _task_rows() -> list[tuple[str, str, str, int]]:
     return [("MintBench: renew the domain", "Sam", "open", 1), ("MintBench: send the Q3 deck", " sam", "Open ", 2),
-            ("MintBench: book the venue", "Priya", "open", 1), ("MintBench: pay the invoice", "Sam", "done", 1),
+            ("MintBench: book the venue", "Nina", "open", 1), ("MintBench: pay the invoice", "Sam", "done", 1),
             ("MintBench: order toner", "SAM", "OPEN", 3), ("MintBench: renew the domain", "Sam", "open", 1)]
 
 

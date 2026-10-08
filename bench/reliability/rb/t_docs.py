@@ -10,10 +10,10 @@ from .registry import Ctx, check, cleanup, fail, ok, setup
 
 MEETING = """Weekly sync - notes (typed quickly, sorry)
 
-Attendees: Priya, Tom, Lena, Omar, and Grace (guest from finance).
+Attendees: Nina, Tom, Lena, Omar, and Grace (guest from finance).
 
 1. Budget. Grace walked us through the Q4 numbers. We are 6% over on contractors.
-   ACTION: Priya to send the revised budget to finance by Friday.
+   ACTION: Nina to send the revised budget to finance by Friday.
 2. Offsite. Everyone prefers the lake venue over the city hotel.
    Tom will book the venue for the offsite in November.
 3. Hiring. Two roles are open. Discussion about whether to use an agency (no decision).
@@ -35,7 +35,7 @@ def docs_action_items_ok(ctx: Ctx):
     if not path.exists():
         return fail("no Docs/action-items.md")
     bullets = [line for line in path.read_text().splitlines() if re.match(r"^\s*([-*+]|\d+[.)])\s+", line)]
-    want = {"Priya": "budget", "Tom": "venue", "Lena": "hiring", "Omar": "login"}
+    want = {"Nina": "budget", "Tom": "venue", "Lena": "hiring", "Omar": "login"}
     missing = [f"{who}/{what}" for who, what in want.items()
                if not any(who in b and what in b.lower() for b in bullets)]
     if missing:

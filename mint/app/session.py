@@ -215,7 +215,7 @@ class Mint:
                                     input_uid=str(_prefs.get("input_device") or ""),
                                     output_uid=str(_prefs.get("output_device") or ""),
                                     defer=_ear.defer_audio(),
-                                    quiet_asleep=_prefs.get("quiet_while_waiting") is not False)
+                                    quiet_asleep=self._quiet_asleep_wanted())
             echo_cancelled = self.audio.full_duplex
             self.audio.on_reconfigure = self._audio_reconfigured
             self._voice_allowance(self.audio)
@@ -226,7 +226,13 @@ class Mint:
             echo_cancelled = False
         if half_duplex is None:
             half_duplex = not echo_cancelled
-        self._mic_lent_to = ""                 # a call or meeting app has the mic
+        self._mic_lent_to = ""                 # a call or meeting app has the mic (Mint stepped aside entirely)
+        self._in_call = ""                     # a call app has the mic and Mint still listens for the wake word
+        self._call_silence = 0.0               # seconds of digital silence from the mic during a call
+        self._call_silence_told = False
+        self._wake_refused_at = 0.0            # the voice check last turned a wake word away (see _wake_is_user)
+        self._mic_probes: list = []            # callbacks fed every microphone frame (the mic test, mictest.py)
+        self._mic_testing = False              # a mic test is running: Mint hears but does not act
         self._barge_frames = 0
         self._noise_floor = 0.005
         # Spoken replies. Off = silent: replies appear in the HUD, not the speaker.
@@ -386,6 +392,15 @@ class Mint:
                 finally:
                     self._recalibrating = False
             threading.Thread(target=recalibrate, daemon=True, name="voiceprint-rebuild").start()
+        # The voiceprint was recorded through echo cancellation; the plain microphone
+        # (used while waiting, so other apps' sound is not ducked) hears a voice so
+        # differently that the user's own "Hey Mint" scored 0.0-0.25 against a 0.5
+        # bar (7-8 Oct log) and was ignored as "another voice". With the lock on,
+        # Mint listens through the microphone it was trained on.
+        set_mode = getattr(self.audio, "set_mode", None)
+        if set_mode is not None:
+            set_mode(quiet_asleep=self._quiet_asleep_wanted(on),
+                     reason="voice lock: the microphone it was trained on" if on else "voice lock off")
         if on and self._gate is None:
             self._gate = voicelock.Gate(lock)
             # Load the model now, off the audio path (~0.1 s, +90 MB).
@@ -536,13 +551,17 @@ class Mint:
             output_uid=str(prefs.get("output_device") or "")), daemon=True).start()
 
     async def _mic_share_watch(self) -> None:
-        """Step aside while a call or meeting app has the microphone.
+        """A call or meeting app has the microphone.
 
         Two apps capturing at once - and Mint's echo canceller next to a call's
         own - is what made calls and meetings misbehave. Every 1.5 s this asks
         CoreAudio which apps are capturing (listeners on that do not fire on
-        current macOS); when a call app is, Mint stops talking and lets go of
-        the mic and speaker entirely, and takes them back 3 s after it stops."""
+        current macOS). When a call app is: by default (listen_in_calls) Mint
+        drops its echo canceller and keeps listening for the wake word on the
+        plain microphone - before 8 Oct it let go of the mic entirely, so "Hey
+        Mint" in a Google Meet was never heard. With listen_in_calls off it
+        steps aside completely, as before. Either way it takes the usual
+        microphone back 3 s after the call app stops capturing."""
         from mint.voice import devices as audio_devices
         from mint.core import prefs
         if not hasattr(self.audio, "suspend"):
@@ -553,30 +572,76 @@ class Mint:
             if self.meet is not None:
                 continue                          # Mint's own Google Meet call: its audio is Mint's already
             if not prefs.get("share_mic"):
-                if self._mic_lent_to:
-                    self._take_mic_back()
+                if self._mic_lent_to or self._in_call:
+                    self._call_over()
                 continue
             try:
                 users = await asyncio.to_thread(audio_devices.mic_users)
             except Exception:
                 continue
             callers = [u for u in users if _is_call_app(u["bundle"], prefs.get("share_mic_apps") or [])]
-            if callers and not self._mic_lent_to:
-                name = callers[0]["name"]
-                self._mic_lent_to = name
+            if callers and not (self._mic_lent_to or self._in_call):
+                name = _app_label(callers[0])
                 self._flush_playback()
                 if self._gate is not None:
                     self._gate.cancel()
-                await asyncio.to_thread(self.audio.suspend, name)
-                self._print(f"[{name} is using the microphone - Mint steps aside until it's done]")
+                if prefs.get("listen_in_calls") is not False and hasattr(self.audio, "set_mode"):
+                    self._in_call = name
+                    self._call_silence, self._call_silence_told = 0.0, False
+                    if not self.asleep and not self._busy:
+                        self.go_to_sleep(f"a {name} call started")
+                    self.audio.set_mode(in_call=True, reason=f"{name} is in a call: the plain microphone")
+                    self._print(f"[{name} is using the microphone (a call?) - Mint keeps listening for "
+                                f"“Hey {prefs.name()}” only, without echo cancellation]")
+                    self._state(self._idle_state(), f"In a call - say “Hey {prefs.name()}”")
+                else:
+                    self._mic_lent_to = name
+                    await asyncio.to_thread(self.audio.suspend, name)
+                    self._print(f"[{name} is using the microphone - Mint steps aside until it's done]")
+                    self._state("paused", f"{name} is using the mic")
                 self._offer_meeting_notes(name)
-                self._state("paused", f"{name} is using the mic")
                 free_since = 0.0
-            elif not callers and self._mic_lent_to:
+            elif callers:
+                free_since = 0.0
+            elif self._mic_lent_to or self._in_call:
                 free_since = free_since or time.monotonic()
                 if time.monotonic() - free_since >= 3.0:
-                    self._take_mic_back()
+                    self._call_over()
                     free_since = 0.0
+
+    def _call_over(self) -> None:
+        """The call app let go of the microphone (or sharing was switched off): the usual microphone again."""
+        if self._in_call:
+            name, self._in_call = self._in_call, ""
+            try:
+                from mint.tools import meetings
+                meetings.call_ended()
+            except Exception:
+                pass
+            set_mode = getattr(self.audio, "set_mode", None)
+            if set_mode is not None:
+                set_mode(in_call=False, reason="the call is over")
+            self._print(f"[{name} is done with the microphone - Mint is back to its usual microphone]")
+            self._state(self._idle_state())
+        if self._mic_lent_to:
+            self._take_mic_back()
+
+    def _call_mic_check(self, pcm: bytes) -> None:
+        """During a call: a call app that takes the microphone for itself leaves everyone else digital
+        silence. Say so once, rather than look deaf."""
+        if not getattr(self, "_in_call", ""):
+            return
+        if any(pcm):
+            self._call_silence = 0.0
+            if self._call_silence_told:
+                self._call_silence_told = False
+                self._print("[the microphone is back during the call - listening for the wake word]")
+            return
+        self._call_silence += len(pcm) / 32000
+        if self._call_silence > 4.0 and not self._call_silence_told:
+            self._call_silence_told = True
+            self._print(f"[{self._in_call} has the microphone to itself - Mint can't hear until the call ends]")
+            self._state(self._idle_state(), f"{self._in_call} has the mic to itself")
 
     def _offer_meeting_notes(self, app: str) -> None:
         """A call started: the orb turns into the recorder (island.py) - Settings > Storage & Privacy
@@ -624,8 +689,16 @@ class Mint:
     # --- microphone routing ----------------------------------------------------
 
     async def _on_audio(self, pcm: bytes, from_ear: bool = False) -> None:
+        for probe in list(getattr(self, "_mic_probes", ())):
+            try:
+                probe(pcm)                        # the mic test hears exactly what Mint hears
+            except Exception:
+                log.debug("mic probe failed", exc_info=True)
+        if getattr(self, "_mic_testing", False):
+            return                                # the mic test is listening; the user is not talking to Mint
         if self.meet is not None:
             return                                # on a Google Meet call, the call is the microphone (_on_meet_audio)
+        self._call_mic_check(pcm)
         if self._ear_feeding and not from_ear:
             # Mint Ear is still handing over what it heard while this app
             # started; our own microphone takes over once that has caught up.
@@ -967,6 +1040,7 @@ class Mint:
         if (event and (event.startswith("closed") or event == "end")) or time.monotonic() - self._pending_wake > 4.0:
             self._pending_wake = 0.0
             self._gate.cancel()
+            self._wake_refused_at = time.monotonic()          # a second "Hey Mint" soon after gets in
             self._print(f"[Hey Mint in another voice - ignored] (voice {self._gate.last_score:.2f})")
 
     def _after_wake_phrase(self, pcm: bytes) -> bytes:
@@ -979,6 +1053,16 @@ class Mint:
             log.info("wake phrase cut: %.2f s dropped, %.2f s kept", cut / 32000, (len(pcm) - cut) / 32000)
         return pcm[cut:]
 
+    @staticmethod
+    def _quiet_asleep_wanted(lock_on: bool | None = None) -> bool:
+        """The plain microphone while waiting for the wake word: the user's choice (quiet_while_waiting),
+        unless the voice lock is on - it needs the echo-cancelled microphone its voiceprint was recorded with."""
+        from mint.core import prefs
+        from mint.voice import voicelock
+        if lock_on is None:
+            lock_on = bool(prefs.get("voice_lock")) and voicelock.lock.enrolled
+        return prefs.get("quiet_while_waiting") is not False and not lock_on
+
     def _wake_is_user(self) -> bool:
         """With the voice lock on, only the user's "Hey Mint" wakes Mint.
 
@@ -987,6 +1071,11 @@ class Mint:
         Slack" gives it plenty); see the pending-wake branch in _on_audio."""
         if self._gate is None:
             return True
+        if self._in_call:
+            # During a call the mic is the plain one (no echo cancellation beside the call's), which the voiceprint
+            # was not recorded with: the wake word alone wakes Mint, and the user is right there.
+            self._print(f"[Hey Mint during the {self._in_call} call - voice check skipped]")
+            return True
         from mint.voice import voicelock
         audio = voicelock.voiced(voicelock.to_float(self._preroll.peek()),
                                  floor=self._gate.speech_threshold())
@@ -994,6 +1083,14 @@ class Mint:
         mic = ", plain mic" if voicelock.capture_shift else ""       # to tune voicelock.PLAIN_MIC from real wakes
         if verdict == "yes":
             log.info("wake word voice check: phrase %.2f voice %.2f%s", phrase, voice, mic)
+            return True
+        now = time.monotonic()
+        if verdict != "yes" and now - self._wake_refused_at < 15 and phrase > 0.05:
+            # The same "Hey Mint" again within seconds, after the voice check refused it: someone is trying
+            # to reach Mint and being ignored. An impostor rarely repeats the wake word; the user locked out
+            # of their own assistant is worse (7-8 Oct: dozens of refusals in a row). Let the second one in.
+            self._wake_refused_at = 0.0
+            self._print(f"[Hey Mint again - letting you in (phrase {phrase:.2f}, voice {voice:.2f}{mic})]")
             return True
         if verdict == "maybe":
             self._pending_wake = time.monotonic()
@@ -1005,6 +1102,7 @@ class Mint:
             self._print(f"[Hey Mint - checking the voice (phrase {phrase:.2f}, voice {voice:.2f}{mic})]")
             return False
         self._print(f"[Hey Mint in another voice - ignored] (phrase {phrase:.2f}, voice {voice:.2f}{mic})")
+        self._wake_refused_at = now
         self._preroll.drain()
         return False
 
@@ -3257,6 +3355,24 @@ CALL_APPS = [
     "com.obsproject.obs-studio", "com.apple.QuickTimePlayerX", "com.apple.VoiceMemos",
     "com.logmein.GoToMeeting", "com.ringcentral",
 ]
+
+
+def _app_label(user: dict) -> str:
+    """The app a capturing process belongs to, as the user knows it: Chrome's helper is "Google Chrome"
+    (it used to say "helper is using the microphone")."""
+    bundle = str(user.get("bundle") or "")
+    for prefix in CALL_APPS:
+        if bundle.lower().startswith(prefix.lower()):
+            try:
+                import AppKit
+                url = AppKit.NSWorkspace.sharedWorkspace().URLForApplicationWithBundleIdentifier_(prefix)
+                if url is not None:
+                    return str(url.lastPathComponent()).removesuffix(".app")
+            except Exception:
+                pass
+            break
+    name = str(user.get("name") or "")
+    return name if name and name.lower() not in ("helper", "plugin") else (bundle or "another app")
 
 
 def _is_call_app(bundle: str, extra: list) -> bool:

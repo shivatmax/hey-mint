@@ -806,7 +806,7 @@ LIBRARY: list[Connector] = [
       check=_microsoft_check, do_connect=_accounts_connect("Microsoft Exchange or Outlook.com"), group="Accounts"),
     # Apple apps
     L("mail", "Mail", "envelope", "Read, sum up and triage your inbox; draft replies you send yourself.",
-      ("anything important in my email?", "draft a reply to Priya saying yes"), ("builtin", "scripting"),
+      ("anything important in my email?", "draft a reply to Nina saying yes"), ("builtin", "scripting"),
       ("com.apple.mail",), uses=("mail", "list_emails", "read_email", "compose_email"),
       do_test=_script_test('tell application "Mail" to get name of every account',
                            lambda s: f"Mail accounts: {s or 'none'}"), group="Apple"),
@@ -886,7 +886,7 @@ LIBRARY: list[Connector] = [
       uses=("make_image",), check=_playground_check, do_connect=_playground_connect, group="Apple"),
     # Chat and meetings
     L("slack", "Slack", "number", "Open workspaces, channels and DMs by name; read what's new on screen.",
-      ("open the on-call channel", "go to my DM with Priya"), ("url", "browser"), ("com.tinyspeck.slackmacgap",),
+      ("open the on-call channel", "go to my DM with Nina"), ("url", "browser"), ("com.tinyspeck.slackmacgap",),
       uses=("open_slack",), check=_slack_check, site="https://slack.com/downloads/mac", group="Chat"),
     L("whatsapp", "WhatsApp", "phone.bubble", "Open a chat and write a message for you to send; read what's on "
       "screen. Mint never presses Send unless you asked in that request.", ("open WhatsApp with Mum",),

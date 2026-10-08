@@ -18,7 +18,7 @@
 <body data-hello="Click a ▶ example and I&#x27;ll act it out." data-page="docs" data-doc="settings" data-root="../">
 <header class="top"><div class="top-in"><a class="brand" href="../"><span class="dot"></span>Hey Mint</a>
 <nav aria-label="Site"><a href="../docs" class="on">Docs</a><a href="https://github.com/shivatmax/hey-mint">GitHub</a><a class="btn primary small" href="https://github.com/shivatmax/hey-mint/releases/latest">Download</a></nav></div></header>
-<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings" class="cur" aria-current="page">Settings and updates</a><a href="configuration">Configuration</a><a href="troubleshooting">Troubleshooting</a><a href="architecture">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#settings">Settings</a><a href="#updates">Updates</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 9 of 12</div><h1>Settings and updates</h1><p>Every page of Settings, and how Hey Mint updates itself safely.</p></div><section id="settings" data-group="Settings">
+<div class="docs"><aside class="side"><input type="search" id="find" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"><div class="hits" id="hits"></div><nav class="pages" aria-label="Docs pages"><h4>Docs</h4><a href="../docs">Overview</a><a href="start">Get started</a><a href="using">Using Mint</a><a href="remote">From anywhere</a><a href="agents">Agents</a><a href="learning">Memory and learning</a><a href="personality">Personality and voices</a><a href="voice">Your voice</a><a href="safety">Safety and privacy</a><a href="settings" class="cur" aria-current="page">Settings and updates</a><a href="configuration">Configuration</a><a href="troubleshooting">Troubleshooting</a><a href="architecture">Architecture</a></nav><details class="onpage" open><summary>On this page</summary><nav aria-label="Sections on this page"><a href="#settings">Settings</a><a href="#appearance">Appearance &amp; Sound</a><a href="#updates">Updates</a></nav></details></aside><article><div class="doc-head"><div class="eyebrow">Docs · 9 of 12</div><h1>Settings and updates</h1><p>Every page of Settings, and how Hey Mint updates itself safely.</p></div><section id="settings" data-group="Settings">
   <h2>Settings</h2>
   <p class="lead">Open Settings from the menu bar icon (<kbd>⌘,</kbd>), or just ask Mint to change something. Pages sit in a sidebar, like System Settings.</p>
   <figure class="clip"><div class="frame" style="--w:560px"><video src="../media/settings.mp4" poster="../media/settings.jpg" width="1100" height="804" style="--ar:1100/804" preload="none" muted loop playsinline aria-label="Settings: every page, from General to Usage and Updates."></video></div><figcaption>Settings: every page, from General to Usage and Updates.</figcaption></figure>
@@ -28,7 +28,7 @@
     <tr><td>Voice &amp; wake word</td><td>The wake word, training your voice, the voice lock and its strictness</td></tr>
     <tr><td>Speaking</td><td>Which of the 30 voices, speaking style, the language Mint answers in, captions</td></tr>
     <tr><td>Audio</td><td>Microphone, speaker, echo cancellation, stepping aside for calls</td></tr>
-    <tr><td>Appearance &amp; Sound</td><td>Where Mint lives, theme, animation level, effects, sounds and volume</td></tr>
+    <tr><td>Appearance &amp; Sound</td><td>Where Mint lives (orb or notch), theme, what the open notch shows first, the menu bar face; how much it moves (Full, Calm, Minimal) and each effect on its own switch; sounds, their volume and which ones play; the notch's parts and Claude mode. <a href="#appearance">More</a></td></tr>
     <tr><td>Shortcuts</td><td>Keys for the chat, talking, dictation and the clipboard</td></tr>
     <tr><td>Accounts &amp; keys</td><td>Your Gemini key (required), OpenAI and TypeSafe keys (optional), and Google through Internet Accounts</td></tr>
     <tr><td>Skills &amp; Memory</td><td>What Mint has learned, and the window to edit it</td></tr>
@@ -39,6 +39,31 @@
   <p><strong>Usage.</strong> Every request is counted per model: requests, input and output tokens. Only counts, never what was said. Free Gemini keys cost nothing; they have daily limits, and this page shows how close you are.</p>
   <p><strong>Google.</strong> Add your Google account in System Settings ▸ Internet Accounts (Accounts &amp; keys has a button). Gmail lands in Mail and your Google calendars in Calendar, and Mint works with both on your Mac, with no sign-in to Mint and no server in between.</p>
   <p>Mint is invisible in screen shares by default; “be visible” shows it in a Google Meet or Zoom share.</p>
+</section>
+
+<section id="appearance" data-group="Settings">
+  <h2>Appearance &amp; Sound</h2>
+  <p class="lead">The few things most people change, on one short page. Everything else waits behind <em>More options</em>.</p>
+  <figure class="clip"><div class="frame" style="--w:560px"><video src="../media/settings-look.mp4" poster="../media/settings-look.jpg" width="1440" height="1048" style="--ar:1440/1048" preload="none" muted loop playsinline aria-label="Settings ▸ Appearance &amp;amp; Sound: View, Animation (Full, Calm, Minimal), Sounds with the volume slider, and More."></video></div><figcaption>Settings ▸ Appearance &amp; Sound: View, Animation (Full, Calm, Minimal), Sounds with the volume slider, and More.</figcaption></figure>
+  <ul class="plain">
+    <li><b>View:</b> where Mint lives (a floating orb or the notch), the theme, where the orb sits, and how much it moves. To hide Mint, use the menu bar or <kbd>⌃⌥H</kbd>: it comes out for “Hey Mint” and hides again when it goes back to sleep.</li>
+    <li><b>Sounds:</b> the little sounds - <strong>off until you turn them on</strong> - and their volume.</li>
+    <li><b>Claude Code and Codex:</b> pop up when one asks you something, pop up when one finishes, and how much of your usage limits is used. See <a href="agents#claude-mode">Claude mode</a>.</li>
+    <li><b>More options:</b> the face on the orb and in the menu bar, what the open notch shows first, each effect on its own switch (expressions, the <a href="start#orb">status badge</a>, action flourishes, critter helpers, on-screen effects, the <a href="using#doing">glow round its window</a>, <a href="personality#personality">poke to play</a>, the <a href="start#notch-scenes">morning hello</a>, little trips), which sounds play, the mini music player, the <a href="start#notch">notch</a>'s parts and the rest of <a href="agents#claude-mode">Claude mode</a> (Live, the agents bar, Telegram, checks, hooks).</li>
+  </ul>
+  <h3>How much it moves</h3>
+  <div class="table"><table><tr><th>Animation</th><th>What you get</th></tr>
+    <tr><td>Full (playful)</td><td>Everything: bouncy springs, hops, sparkles, idle tricks</td></tr>
+    <tr><td>Calm</td><td>Gentle: things settle without bouncing, idle tricks are rarer and quieter (a wink or a glance), no little trips or confetti; hearts and notes fade in place instead of floating up</td></tr>
+    <tr><td>Minimal (fades only)</td><td>Short fades instead of movement: no travel, bounce or particles; a poke gets a blink</td></tr></table></div>
+  <p>When <b>Reduce motion</b> is on in macOS (System Settings ▸ Accessibility ▸ Display), Mint always behaves as Minimal, whatever this says.</p>
+  <h3>The little sounds</h3>
+  <p>Mint makes its own soft, short sounds - no sound files, just a few tones made on your Mac.</p>
+  <div class="table"><table><tr><th>Group</th><th>When you hear it</th></tr>
+    <tr><td>Notch opening and closing</td><td>The notch opens or folds (also when you press <kbd>Esc</kbd> on it)</td></tr>
+    <tr><td>Tasks</td><td>A coding agent finishes or fails, an error card, a long job reaching 100%, a request sent from the notch, a file dropped, a tap on Retry or on an agent's chip</td></tr>
+    <tr><td>Play</td><td>Pokes, getting dizzy, and the morning hello</td></tr></table></div>
+  <p><strong>Never in the way.</strong> Sounds stay quiet while you dictate, while Mint listens to you, while you're on a call (a call app has the mic, or a Google Meet with Mint is on) and while a meeting is being recorded, so a chime never lands in your microphone or a recording. Only the notch opening and closing and the morning hello play while Mint listens.</p>
 </section>
 
 <section id="updates" data-group="Settings">

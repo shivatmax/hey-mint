@@ -217,6 +217,37 @@ def get(name: str) -> dict | None:
     return next((a for a in agents if wanted and wanted in a["name"].lower()), None)
 
 
+def unusable(agent: dict) -> str:
+    """Why this agent can't take work now ('' when it can): turned off in Settings, or Codex not on this Mac."""
+    if agent.get("off"):
+        return f"{agent['name']} is turned off (Settings ▸ Models & agents)."
+    if agent.get("runner") == "codex":
+        try:
+            from mint.agents import codex
+            return codex.problem()
+        except Exception as error:
+            return f"Codex can't be checked here ({error})."
+    return ""
+
+
+def active() -> list[dict]:
+    """The agents that can take work: on, and (Codex) installed."""
+    return [a for a in load() if not unusable(a)]
+
+
+def set_on(name: str, on: bool) -> dict | None:
+    """Turn an agent on or off (kept in agents.json; off agents are left out of the roster and refuse work)."""
+    agent = get(name)
+    if agent is None:
+        return None
+    agent = dict(agent)
+    if on:
+        agent.pop("off", None)
+    else:
+        agent["off"] = True
+    return save(agent)
+
+
 def save(agent: dict) -> dict:
     agent = _normal(dict(agent, models_v2=True))
     agents = [a for a in load() if a["name"].lower() != agent["name"].lower()]

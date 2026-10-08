@@ -26,6 +26,7 @@ from mint.app import demo
 from mint.ui.activity import phrase
 from mint.ui import motion as _motion
 _motion.Motion.start = lambda self: None          # no idle tricks in the middle of a scene
+ui.Presence.register_shortcuts = lambda self: None   # the real Mint owns the keys (dictation's Right Option too)
 
 RAW = Path("/tmp/mint-guide-scenes")
 RAW.mkdir(exist_ok=True)
@@ -43,6 +44,7 @@ class Recording:
         self.name, self.seconds = name, seconds
 
     def __enter__(self):
+        self.t0 = time.time()
         if PEEK:
             self.stop = threading.Event()
             self.thread = threading.Thread(target=_peek_shots, args=(self.name, self.stop), daemon=True)
@@ -58,18 +60,19 @@ class Recording:
         if PEEK:
             self.stop.set()
             self.thread.join()
-            print(f"  [peek] {self.name}", flush=True)
+            print(f"  [peek] {self.name} (took {time.time() - self.t0:.1f} s; recorded {self.seconds} s)", flush=True)
             return
         self.proc.wait()
         time.sleep(0.5)
         print(f"  [scene] {self.name}", flush=True)
 
 
-PEEK = bool(os.environ.get("PEEK"))      # testing: window-only stills of this process's notch, no recording
+PEEK = bool(os.environ.get("PEEK"))      # testing: window-only stills of this process's windows, no recording
 
 
 def _peek_shots(name, stop):
-    """Every second, a still of this process's own notch window only (nothing else on screen)."""
+    """Every second, stills of this process's own windows only (nothing else on screen): the notch in notch mode;
+    in orb mode the orb and any other window of ours at least 60 pt wide (a card, Settings, the window glow)."""
     import Quartz
     out = RAW / "peek"
     out.mkdir(exist_ok=True)
@@ -77,10 +80,18 @@ def _peek_shots(name, stop):
         old.unlink()
     i = 0
     while not stop.wait(1.0):
+        k = 0
         for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, 0):
-            if w.get("kCGWindowOwnerPID") == os.getpid() and w.get("kCGWindowLayer") == 27:
-                subprocess.run(["screencapture", "-x", "-o", "-l", str(w["kCGWindowNumber"]),
-                                str(out / f"{name}-{i:02d}.png")])
+            if w.get("kCGWindowOwnerPID") != os.getpid():
+                continue
+            if NOTCH and w.get("kCGWindowLayer") != 27:
+                continue
+            if not NOTCH and w["kCGWindowBounds"]["Width"] < 60:
+                continue                              # the menu bar item
+            subprocess.run(["screencapture", "-x", "-o", "-l", str(w["kCGWindowNumber"]),
+                            str(out / f"{name}-{i:02d}{'' if NOTCH else f'-{k}'}.png")])
+            k += 1
+            if NOTCH:
                 break
         i += 1
 
@@ -433,7 +444,7 @@ def island_teach(p):
     F["teach"] = dict(F["teach"], keys=12); time.sleep(0.8)
     _glide((l["deadline"][0] + 200, l["deadline"][1] + 40)); time.sleep(0.6)
     F["teach"] = {"saving": True}; time.sleep(1.8)
-    F["teach"] = {"saved": "Share the launch plan with Priya"}; time.sleep(2.6)
+    F["teach"] = {"saved": "Share the launch plan with Nina"}; time.sleep(2.6)
     F["teach"] = {}; time.sleep(1.4)
     ms.main_sync(cursor.removeFromSuperlayer)
 
@@ -457,6 +468,36 @@ def island_video(p):
     F["vid"] = {}; time.sleep(6.0)
 
 
+@scene("island-download", 16)
+def island_download(p):
+    """"Download the video on this page": Mint finds the page's HLS stream and the island shows the download."""
+    from mint.tools import video_download as vd
+    title = "Launch film - The new studio"
+    time.sleep(0.8)
+    say(p, "user_said", "download the video on this page", gap=0.12)
+    p.set_state("thinking")
+    state = {"step": "Finding the video", "started": time.time(), "title": ""}
+    with vd._lock:
+        vd._jobs["demo"] = state
+    time.sleep(2.2)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Found the video on the page. Downloading it in 1080p.", gap=0.1)
+    p.set_state("awake")
+    state.update(step="Found an HLS stream", title=title)
+    time.sleep(1.2)
+    for pct in range(0, 101, 4):
+        state.update(step=f"Downloading {pct}% (6.2 MB/s)", percent=pct)
+        time.sleep(0.22)
+    state.update(step="Putting it together", percent=100)
+    time.sleep(1.2)
+    with vd._lock:
+        vd._jobs.pop("demo", None)
+    p.set_state("speaking")
+    say(p, "assistant_said", "Saved “Launch film” to Downloads: 1080p, 2 minutes 31, 84 MB.", gap=0.1)
+    p.set_state("awake")
+    time.sleep(2.5)
+
+
 @scene("island-schedule", 10)
 def island_schedule(p):
     import datetime as dt
@@ -468,7 +509,7 @@ def island_schedule(p):
     card = {"day": f"{now:%A}", "date": f"{now:%-d %B}",
             "weather": {"temp": 27, "desc": "Partly cloudy", "symbol": "cloud.sun.fill", "range": "23–31°"},
             "events": [ev(-2.5, -2, "Standup", (0.2, 0.6, 1.0)), ev(-0.4, 0.6, "Design review", (0.3, 0.85, 0.45)),
-                       ev(2.1, 3, "1:1 with Priya", (1.0, 0.6, 0.1)), ev(5, 6, "Gym", (0.8, 0.4, 1.0))],
+                       ev(2.1, 3, "1:1 with Nina", (1.0, 0.6, 0.1)), ev(5, 6, "Gym", (0.8, 0.4, 1.0))],
             "reminders": ["Send the invoice", "Book flights"],
             "news": ["Rate cut hopes lift markets", "New transit line opens this weekend"]}
     time.sleep(1.2)
@@ -496,7 +537,7 @@ def island_tutor(p):
     l = ms.labels
     F["tutor"] = {"planning": "share the plan"}; time.sleep(1.8)
     for i, (key, say_) in enumerate((("title", "Click the title to open the plan"),
-                                     ("owner", "Click Priya's line to mention her"),
+                                     ("owner", "Click Nina's line to mention her"),
                                      ("field", "Type a note in the comment box"))):
         F["tutor"] = {"task": "share the plan", "index": i, "total": 3, "say": say_}
         marks.show([l[key]], "arrow", "", 3.0); time.sleep(2.6)
@@ -526,7 +567,7 @@ def island_cards(p):
     time.sleep(1.0)
     isl.show_card({"title": "Unread emails", "subtitle": "Inbox", "number": 12, "unit": "unread emails",
                    "icon": "envelope.fill", "tint": "blue", "more": 9,
-                   "items": [{"title": "Priya Sharma", "detail": "Launch plan: final review", "trailing": "9:41am",
+                   "items": [{"title": "Nina Sharma", "detail": "Launch plan: final review", "trailing": "9:41am",
                               "icon": "person.crop.circle.fill"},
                              {"title": "GitHub", "detail": "[hey-mint] CI passed", "trailing": "8:02am",
                               "icon": "checkmark.seal.fill"},
@@ -850,6 +891,189 @@ def image_card_scene(p):
                                                                             None)
 
 
+# --- The character system (orb mode): the status badge, poke play, the window glow, Appearance & Sound -------
+
+def _orb_pointer(at=None):
+    """The HUD's hover and the eyes follow a scripted pointer (F["mouse"], Cocoa points), not the real one."""
+    import AppKit
+    from mint.ui import emotes
+    from mint.ui import hud as hud_mod
+
+    class _Event:
+        def mouseLocation(self):
+            return AppKit.NSMakePoint(*F["mouse"])
+
+        def pressedMouseButtons(self):
+            return 0
+
+        def __getattr__(self, name):
+            return getattr(AppKit.NSEvent, name)
+
+    class _AppKitProxy:
+        NSEvent = _Event()
+
+        def __getattr__(self, name):
+            return getattr(AppKit, name)
+    F["mouse"] = at or (ms.SW * 0.55, ms.SH * 0.62)
+    hud_mod.AppKit = emotes.AppKit = _AppKitProxy()
+
+
+@scene("badge", 17)
+def badge_scene(p):
+    """The status badge: a mic while it listens, dots while it thinks and works (the lower half tinted to match),
+    the word when you point at it, a green dot when done, a red one on an error."""
+    _orb_pointer()
+    orb = p.hud.orb
+    cx, cy = p.hud.orb_center()
+    p.set_state("awake"); time.sleep(2.0)
+    p.set_state("thinking"); time.sleep(1.8)
+    p.set_state("working", "Sorting your Downloads"); time.sleep(1.4)
+    F["mouse"] = (cx + 4, cy + 2)                    # pointing at Mint: the badge says it in a word
+    time.sleep(2.4)
+    F["mouse"] = (cx - 260, cy + 180)
+    time.sleep(1.0)
+    ms.main_sync(lambda: orb.finish_badge(True)); time.sleep(2.6)
+    p.set_state("working", "Opening the report"); time.sleep(1.2)
+    ms.main_sync(lambda: orb.finish_badge(False)); time.sleep(3.2)
+    p.set_state("awake"); time.sleep(0.8)
+
+
+@scene("poke", 15)
+def poke_scene(p):
+    """Poke Mint: a slap; three quick ones make it dizzy; keep going and it gets annoyed."""
+    from mint.ui.effects import fx
+    _orb_pointer()
+    orb = p.hud.orb
+    cx, cy = p.hud.orb_center()
+    p.set_state("awake")
+    F["mouse"] = (cx + 46, cy + 30)                  # just beside it: the eyes on the pointer, no hover pill
+    time.sleep(1.4)
+
+    def poke(dx=6, dy=3):
+        fx.click(cx + dx, ms.SH - (cy + dy))         # a little ripple where the click lands
+        ms.main_sync(lambda: orb.poke(dx, dy))
+    poke(); time.sleep(2.4)
+    for _ in range(3):
+        poke(-5, 2); time.sleep(0.22)
+    time.sleep(3.2)
+    orb._pokes = []
+    for _ in range(6):
+        poke(4, -3); time.sleep(0.42)
+    time.sleep(3.4)
+
+
+def _glow_card():
+    """The demo document as "the window Mint works in": window_glow sees one made-up window (the card) instead of
+    the real screen's windows, and the glow floats over the backdrop."""
+    from mint.ui import window_glow as G
+    l = ms.labels
+    rect = (ms.SW * 0.16, ms.SH * 0.18, ms.SW * 0.44, ms.SH * 0.62)      # the card (Quartz), as make_shots draws it
+    if "title" in l:
+        rect = (l["title"][0] - 40, ms.SH - ms.SH * 0.2 - ms.SH * 0.62, ms.SW * 0.44, ms.SH * 0.62)
+    fake = 990001
+    G.resolve = lambda pid=None, window_id=None, point=None: (fake, rect) if (
+        window_id == fake or point is None or (rect[0] <= point[0] <= rect[0] + rect[2]
+                                               and rect[1] <= point[1] <= rect[1] + rect[3])) else None
+    G._one = lambda wid: {"kCGWindowIsOnscreen": True, "kCGWindowNumber": wid,
+                          "kCGWindowBounds": {"X": rect[0], "Y": rect[1], "Width": rect[2], "Height": rect[3]}}
+    G.RADIUS = 14.0                                   # the card's own corners
+    import AppKit
+    from mint.ui import sharing
+    sharing._desired = lambda: AppKit.NSWindowSharingReadOnly     # in the recording (Mint's own setting may hide it)
+    G._glow.above = False                             # over the backdrop (a floating window), not a real window
+    return rect
+
+
+@scene("glow", 13)
+def glow_scene(p):
+    """Mint working in the document: its window glows (Apple Intelligence colours) while it clicks and types, and
+    the glow fades once it's done."""
+    from mint.ui.effects import fx
+    rect = _glow_card()
+    l = ms.labels
+    p2 = l.get("p2", (rect[0] + 40, rect[1] + 300, 420, 20))
+    field = l.get("field", (rect[0] + 40, rect[1] + rect[3] - 80, rect[2] - 80, 44))
+    time.sleep(0.6)
+    say(p, "user_said", "click Design review, then type looks good to me", gap=0.08)
+    time.sleep(0.3); p.set_state("thinking"); time.sleep(0.6)
+    p.set_state("working", phrase("click_text", {"text": "Design review"}))
+    p.activity_start("click_text", {"text": "Design review"})
+    fx.click(p2[0] + 150, p2[1] + 10, "Design review")
+    from mint.ui import window_glow
+    window_glow.glow(point=(p2[0] + 150, p2[1] + 10), seconds=6.5)     # lit while it works (each step pings it)
+    time.sleep(1.4)
+    p.activity_end("click_text", True); time.sleep(0.5)
+    p.set_state("working", phrase("type_text", {"text": "Looks good to me"}))
+    p.activity_start("type_text", {"text": "Looks good to me"})
+    fx.click(field[0] + 60, field[1] + field[3] / 2)
+    fx.highlight(*field, seconds=2.0, label="Typing"); time.sleep(2.2)
+    p.activity_end("type_text", True); time.sleep(0.6)
+    p.set_state("speaking"); say(p, "assistant_said", "Clicked it and typed your note.", gap=0.1)
+    time.sleep(1.2); p.set_state("awake")
+    time.sleep(3.0)                                   # the glow fades out after the last ping
+
+
+@scene("settings-look", 14)
+def settings_look_scene(p):
+    """Settings ▸ Appearance & Sound: View, Animation (how much it moves) and Sounds, scrolled through."""
+    import AppKit
+    from mint.ui import settings as SW
+    sw = ms.main_sync(lambda: SW.SettingsWindow({"train_voice": lambda: None, "forget_voice": lambda: None,
+                                                "audio_status": lambda: "Built-in microphone"}))
+
+    def front(self):
+        self.window.setLevel_(AppKit.NSFloatingWindowLevel + 1)       # over the backdrop
+        # Low on the screen, clear of where the real Mint's notch could open (encode_scenes' probe at (1000, 120)
+        # then still sees the backdrop, so a notch showing there rejects the clip).
+        self.window.setFrameOrigin_(AppKit.NSMakePoint((ms.SW - self.window.frame().size.width) / 2, 70))
+        self.window.orderFrontRegardless()
+    SW.SettingsWindow._front = front
+
+    def doc_card(hidden):                             # the backdrop's document card would peek out round it
+        for w in AppKit.NSApp().windows():
+            if w.frame().size.width >= ms.SW - 1 and w.level() == AppKit.NSFloatingWindowLevel:
+                for view in list(w.contentView().subviews() or [])[:1]:
+                    view.setHidden_(hidden)
+    ms.main_sync(lambda: doc_card(True))
+    ms.main_sync(lambda: sw.show("looks"))
+    time.sleep(1.0)
+    ms.main_sync(sw.refresh)                         # its facts arrive on a thread
+    f = ms.main_sync(sw.window.frame)
+    print("  settings frame (quartz)", f.origin.x, ms.SH - f.origin.y - f.size.height, f.size.width, f.size.height,
+          flush=True)
+    time.sleep(2.2)
+
+    def scroll_view():
+        def walk(v):
+            for s in v.subviews() or []:
+                if isinstance(s, AppKit.NSScrollView) and s.frame().origin.x > 100:
+                    return s
+                found = walk(s)
+                if found is not None:
+                    return found
+            return None
+        return walk(sw.window.contentView())
+    scroll = ms.main_sync(scroll_view)
+    clip = scroll.contentView()
+    # Down to Animation, then to Sounds (volume, the groups, "Hear them"), gently, with a rest on each.
+    try:
+        bottom = scroll.documentView().frame().size.height - clip.bounds().size.height
+    except Exception:
+        bottom = 1200.0
+    for stop, rest in ((min(bottom, 440.0), 2.6), (min(bottom, 960.0), 3.2)):
+        start = ms.main_sync(lambda: clip.bounds().origin.y)
+        steps = 48
+        for i in range(1, steps + 1):
+            t = i / steps
+            y = start + (stop - start) * (t * t * (3 - 2 * t))
+            AppHelper.callAfter(lambda y=y: (clip.scrollToPoint_((0, y)), scroll.reflectScrolledClipView_(clip)))
+            time.sleep(1 / 60)
+        time.sleep(rest)
+    ms.main_sync(lambda: sw.window.orderOut_(None))
+    ms.main_sync(lambda: doc_card(False))
+    time.sleep(0.6)
+
+
 # --- Notch mode (mint/ui/notch.py): Mint in the camera notch. A run of its own (NOTCH=1): the HUD is
 # built once, as the orb or as the notch.
 
@@ -1008,7 +1232,7 @@ def _notch_fakes():
     blue, orange, green, red = (0.04, 0.52, 1.0), (1.0, 0.58, 0.0), (0.2, 0.78, 0.35), (1, 0.23, 0.19)
     base = now.replace(minute=0)
     week = {today: [ev(1, "Design review", base - dt.timedelta(minutes=15), base + dt.timedelta(minutes=45), blue, "Room 4"),
-                    ev(2, "Lunch with Priya", base + dt.timedelta(hours=2), base + dt.timedelta(hours=3), orange),
+                    ev(2, "Lunch with Nina", base + dt.timedelta(hours=2), base + dt.timedelta(hours=3), orange),
                     ev(3, "Ship the beta build", base + dt.timedelta(hours=4), base + dt.timedelta(hours=5), green, "Zoom")],
             today + dt.timedelta(days=1): [ev(4, "Dentist", at(today + dt.timedelta(days=1), 9, 30),
                                               at(today + dt.timedelta(days=1), 10, 15), red, "12 High St")]}
@@ -1082,11 +1306,15 @@ def notch_search_scene(p):
 def notch_switch(p):
     """Live switching: out of the notch as the orb (drop, bounce home), then back in (the flight)."""
     from mint.ui import notch
+    for cover in REAL_COVER:                          # the orb flies through the top of the screen: no cover there
+        ms.main_sync(lambda c=cover: c.orderOut_(None))
     time.sleep(1.2)
     AppHelper.callAfter(notch.leave, True)
     time.sleep(4.2)
     AppHelper.callAfter(notch.enter, True)
     time.sleep(4.6)
+    for cover in REAL_COVER:
+        ms.main_sync(lambda c=cover: c.orderFrontRegardless())
 
 
 def _agents_demo():
@@ -1109,6 +1337,9 @@ def _agents_demo():
 
     def put(items):
         shown["items"] = list(items)
+        # As the real watcher does: notch_agents.ordered() caches against this, so without it a change made
+        # within the same second never reached the pane, the wing or the bar.
+        agent_watch.watcher._gen = (getattr(agent_watch.watcher, "_gen", 0) or 0) + 1
         AppHelper.callAfter(notch_agents._changed)
 
     def emit(kind, session):
@@ -1378,15 +1609,233 @@ def notch_meet_scene(p):
     meet_call._call = None
 
 
+# --- The notch's own scenes (notch_fx, notch_composer) and its outline -------------------------------------------
+
+def _notch_rest():
+    """Each scene starts from a closed, quiet notch (the one before may have left it open or an alert queued)."""
+    from mint.ui import notch
+    n = notch.notch
+    put, emit = AGENTS
+    put([])
+    F["mouse"] = (n.cx, n.top - 400)
+
+    def calm():
+        n.st.alerts = []
+        n.st.close(time.monotonic())
+        if n._scene is not None:
+            n._hide_scene()
+    ms.main_sync(calm)
+    time.sleep(1.2)
+
+@scene("notch-greet", 10)
+def notch_greet(p):
+    """The first wake of the day: sparkles, a warm glow, Mint drops in and waves."""
+    _notch_rest()
+    from mint.ui import notch_fx
+    p.set_state("sleeping"); time.sleep(1.6)
+    notch_fx.GREETED.unlink(missing_ok=True)          # (the scene's own file: "not greeted yet today")
+    p.set_state("awake"); time.sleep(4.8)
+    p.set_state("sleeping"); time.sleep(1.2)
+
+
+@scene("notch-error", 16)
+def notch_error(p):
+    """A step fails: once the turn settles, the error card - what went wrong, and Retry, which sends the request
+    again."""
+    _notch_rest()
+    from mint.ui import notch
+    p.set_state("sleeping"); time.sleep(1.0)
+    say(p, "user_said", "open the quarterly report", gap=0.1)
+    p.set_state("thinking"); time.sleep(0.9)
+    p.set_state("working", phrase("open_app", {"name": "Reports"}))
+    p.activity_start("open_app", {"name": "Reports"}); time.sleep(1.4)
+    p.activity_end("open_app", False); time.sleep(0.3)
+    p.set_state("awake"); time.sleep(3.6)
+    ctl = notch.notch._scene_ctl("error")
+    p.hud.fire = lambda *a: print("  [retry sent]", a[:2], flush=True)
+    if ctl is not None:
+        ms.main_sync(ctl.retry)
+    time.sleep(0.8)
+    p.set_state("working", phrase("open_app", {"name": "Numbers"}))
+    p.activity_start("open_app", {"name": "Numbers"}); time.sleep(1.4)
+    p.activity_end("open_app", True); time.sleep(0.4)
+    p.set_state("speaking"); say(p, "assistant_said", "Opened it in Numbers this time.", gap=0.1)
+    time.sleep(1.4); p.set_state("sleeping"); time.sleep(1.4)
+
+
+@scene("notch-drop", 12)
+def notch_drop(p):
+    """A file dragged to the notch: the drop zone (Mint turns into a folder), "Got it", then the shelf."""
+    _notch_rest()
+    import AppKit
+    from mint.ui import notch
+    n = notch.notch
+    time.sleep(1.2)
+    ctl = ms.main_sync(n._drop_zone)
+    ms.main_sync(lambda: setattr(n, "drag_until", time.monotonic() + 6.0))
+    time.sleep(1.8)
+    if ctl is not None:
+        ms.main_sync(lambda: ctl.hover(True))
+    time.sleep(1.6)
+    board = AppKit.NSPasteboard.pasteboardWithUniqueName()
+    board.clearContents()
+    board.writeObjects_([AppKit.NSURL.fileURLWithPath_(str(_shelf_files()[1]))])
+    ms.main_sync(lambda: n.dropped(board))
+    F["mouse"] = (n.cx + 60, n.top - 60)               # the pointer stays on it a moment: the shelf
+    time.sleep(3.6)
+    F["mouse"] = (n.cx, n.top - 400)
+    board.releaseGlobally()
+    time.sleep(1.8)
+
+
+@scene("notch-progress", 17)
+def notch_progress(p):
+    """A long job: Mint rides the progress bar as its thumb, then a happy finish. (A quick one never opens it.)"""
+    _notch_rest()
+    time.sleep(1.0)
+    say(p, "user_said", "download the Figma installer", gap=0.1)
+    p.set_state("thinking"); time.sleep(0.6)
+    p.set_state("working", "Downloading Figma")
+    p.activity_start("download_file", {"url": "figma.com/download"})
+    for i in range(0, 41):
+        p.progress(i, 40, "Downloading Figma-installer.dmg"); time.sleep(0.2)
+    p.activity_end("download_file", True); time.sleep(1.4)
+    p.set_state("speaking"); say(p, "assistant_said", "It's in your Downloads.", gap=0.1)
+    time.sleep(1.2); p.set_state("sleeping"); time.sleep(1.6)
+
+
+@scene("notch-compose", 15)
+def notch_compose(p):
+    """The "+" in the open notch: type a request right there, Enter sends it, and the notch shows Mint at work."""
+    _notch_rest()
+    import AppKit
+    from mint.ui import notch
+    from mint.ui import notch_composer
+    if PEEK:
+        notch_composer.Composer.focus = lambda self, panel=None: None     # testing: never take the keyboard
+    n = notch.notch
+    p.hud.fire = lambda *a: print("  [sent]", a[:2], flush=True)
+    time.sleep(1.0)
+    F["mouse"] = (n.cx - 40, n.top - 12)
+    time.sleep(1.6)                                    # rests on it: the notch opens
+    ms.main_sync(n.compose)
+    time.sleep(1.0)
+    ctl = n._scene_ctl("composer")
+    text = "remind me to call the dentist at 5"
+    for i in range(1, len(text) + 1):
+        ms.main_sync(lambda t=text[:i]: ctl.set_text(t))
+        time.sleep(0.05)
+    time.sleep(0.6)
+    enter = AppKit.NSEvent.keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
+        AppKit.NSEventTypeKeyDown, (0, 0), 0, 0, 0, None, "\r", "\r", False, 36)
+    ms.main_sync(lambda: ctl.textview.keyDown_(enter))
+    say(p, "user_said", text, gap=0.02)
+    p.set_state("thinking"); time.sleep(1.0)
+    p.set_state("working", phrase("create_reminder", {"title": "Call the dentist"}))
+    p.activity_start("create_reminder", {"title": "Call the dentist"}); time.sleep(1.4)
+    p.activity_end("create_reminder", True)
+    p.set_state("speaking"); say(p, "assistant_said", "Done. I'll remind you at 5 pm.", gap=0.1)
+    time.sleep(1.6)
+    F["mouse"] = (n.cx, n.top - 400)
+    p.set_state("sleeping"); time.sleep(2.0)
+
+
+@scene("notch-rim", 20)
+def notch_rim(p):
+    """The notch's outline says the state: a light sweeping while busy, amber when something needs you, a green
+    flash when done, a red shake on an error."""
+    _notch_rest()
+    from mint.tools.agent_watch import Session, Step
+    put, emit = AGENTS
+    time.sleep(1.0)
+    p.set_state("working", "Tidying Downloads")
+    p.activity_start("move_files", {"to": "Documents"}); time.sleep(3.4)       # busy: the sweep
+    p.activity_end("move_files", True)
+    p.set_state("sleeping"); time.sleep(0.8)
+    now = time.time()
+    s = Session(key="claude:rim", app="claude", id="rim", cwd="/srv/code/korus", where="cli", state="waiting",
+                since=now, updated=now, turn_started=now - 40, prompt="Run the tests and fix what fails")
+    s.steps = [Step(id="r1", verb="Run", target="npm test", status="run", started=now,
+                    detail={"kind": "bash", "cmd": "npm test", "out": [], "ok": None})]
+    s.turn_steps = 1
+    s.approval = {"id": "r-a1", "tool": "Bash", "verb": "Run", "target": "Run the tests",
+                  "detail": {"kind": "bash", "cmd": "npm test"}, "always": True}
+    put([s]); emit("waiting", s)
+    time.sleep(3.4)                                     # needs you: the amber ring
+    s.approval, s.state = None, "working"
+    put([s]); time.sleep(1.0)
+    s.state, s.since = "done", time.time()
+    s.steps[0].status = "ok"
+    s.summary = "All 48 tests pass."
+    put([s]); emit("finished", s)
+    time.sleep(3.0)                                     # done: the green flash
+    f = Session(key="codex:rim", app="codex", id="rim2", cwd="/srv/code/atlas", where="cli", state="failed",
+                since=time.time(), updated=time.time(), turn_started=time.time() - 30,
+                prompt="Deploy the preview", summary="The build failed: missing env var API_URL.")
+    put([s, f]); emit("failed", f)
+    time.sleep(3.6)                                     # an error: red, and a shake
+    put([]); time.sleep(1.2)
+
+
+@scene("notch-pals", 19)
+def notch_pals(p):
+    """Coding agents get faces: the closed notch shows them as a little cluster and a compact bar with the lead's
+    current step; open, a focus card with its steps, chips for the others - click one to focus it."""
+    _notch_rest()
+    from mint.ui import notch
+    from mint.ui import notch_agents
+    from mint.tools.agent_watch import Session, Step
+    put, emit = AGENTS
+    n = notch.notch
+    now = time.time()
+
+    def sess(i, app, project, verb, target, state="working"):
+        s = Session(key=f"{app}:p{i}", app=app, id=f"p{i}", cwd=f"/srv/code/{project}", where="cli", state=state,
+                    since=now, updated=now - i, turn_started=now - 70 - 20 * i, prompt=["Round totals to the cent",
+                    "Rename the API client", "Write the release notes", "Add dark mode to settings"][i])
+        s.steps = [Step(id=f"p{i}-1", verb=verb, target=target, status="run", started=now)]
+        s.turn_steps = 3 + i
+        return s
+    items = [sess(0, "claude", "korus", "Edit", "invoice.ts"), sess(1, "codex", "atlas", "Edit", "client.ts"),
+             sess(2, "claude", "lumen", "Write", "RELEASE_NOTES.md"),
+             sess(3, "codex", "orbit", "Run", "npm run build", "thinking")]
+    p.set_state("sleeping")
+    time.sleep(0.8)
+    put(items[:1]); time.sleep(1.6)
+    put(items); time.sleep(5.0)                         # the 2x2 cluster; the bar's lead changes every 4 s
+    F["mouse"] = (n.cx + 120, n.top - 120)
+    AppHelper.callAfter(n._agents_open)
+    time.sleep(2.8)                                     # the focus card and the chips
+    pane = notch_agents._panes[0] if notch_agents._panes else None
+    if pane is not None:
+        AppHelper.callAfter(pane.focus_chip, items[1].key)
+    time.sleep(2.6)
+    if pane is not None:
+        AppHelper.callAfter(pane.focus_chip, items[2].key)
+    time.sleep(2.2)
+    F["mouse"] = (n.cx, n.top - 400)
+    put([]); time.sleep(1.4)
+
+
 def _notch_demo():
     """The demo Mint in the notch, without touching the real Mint: the setting is answered here,
     never saved, and the demo never restarts itself (that restart would stop the shared engine)."""
     from mint.ui import notch
+    from mint.ui import notch_fx
     from mint.core import prefs
-    real_get, real_set = prefs.get, prefs.set
+    real_get = prefs.get
     prefs.get = lambda key: NOTCH_PREFS[key] if key in NOTCH_PREFS else real_get(key)
-    prefs.set = lambda key, value: None if key in NOTCH_PREFS else real_set(key, value)
+    prefs.set = lambda key, value: NOTCH_PREFS.__setitem__(key, value)      # never saved
+    prefs.toggle = lambda key: NOTCH_PREFS.__setitem__(key, not bool(prefs.get(key))) or NOTCH_PREFS[key]
+    # The morning hello is remembered in a file of the scene's own (the real one would stop the user's own
+    # hello for the day); it says "greeted today" unless the notch-greet scene clears it.
+    import datetime as _dt
+    notch_fx.GREETED = RAW / "greeted.txt"
+    notch_fx.GREETED.write_text(_dt.date.today().strftime(notch_fx.GREETED_FMT) + "\n")
     notch._watching[0] = True
+    # Scenes are recorded while the user is away from the Mac; the notch holds news ("done", "failed") back while
+    # its user is away - the demo's user is right there.
+    notch._idle_seconds = lambda: 0.0
     _notch_fakes()
     # The recording makes Mint visible to capture; the eye button shows what a user sees (hidden).
     import AppKit
@@ -1446,17 +1895,57 @@ def _menu_bar_cover():
     return w
 
 
+REAL_COVER = []
+
+
+def _real_notch_cover():
+    """The real Mint may be in the notch too, visible to capture (its "Visible in screen sharing" setting), with
+    the user's own agents and words in it: a strip of the backdrop over the top of the screen, above every window
+    there (main menu + 4), hides it; the demo's notch goes above that (main menu + 5)."""
+    import AppKit
+    import Quartz
+    from mint.ui import gfx
+    frame = AppKit.NSScreen.screens()[0].frame()
+    SW, SH, tall, bar = frame.size.width, frame.size.height, 320, 30
+    w = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        AppKit.NSMakeRect(0, SH - tall, SW, tall), AppKit.NSWindowStyleMaskBorderless, AppKit.NSBackingStoreBuffered,
+        False)
+    w.setLevel_(Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 4)
+    w.setHasShadow_(False)
+    w.setIgnoresMouseEvents_(True)
+    w.setSharingType_(AppKit.NSWindowSharingReadOnly)
+    w.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                             | AppKit.NSWindowCollectionBehaviorStationary)
+    v = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, SW, tall))
+    v.setWantsLayer_(True)
+    g = Quartz.CAGradientLayer.layer()               # the backdrop's own gradient, lined up
+    g.setFrame_(Quartz.CGRectMake(0, tall - SH, SW, SH))
+    g.setColors_([gfx.cg((0.86, 0.92, 0.95)), gfx.cg((0.91, 0.89, 0.98)), gfx.cg((0.97, 0.90, 0.93))])
+    g.setStartPoint_(Quartz.CGPointMake(0, 0)); g.setEndPoint_(Quartz.CGPointMake(1, 1))
+    v.layer().addSublayer_(g)
+    tint = Quartz.CALayer.layer()                    # the demo menu bar, as _menu_bar_cover draws it
+    tint.setFrame_(Quartz.CGRectMake(0, tall - bar, SW, bar))
+    tint.setBackgroundColor_(gfx.cg((1, 1, 1), 0.35))
+    v.layer().addSublayer_(tint)
+    w.setContentView_(v)
+    w.orderFrontRegardless()
+    REAL_COVER.append(w)
+    return w
+
+
 def tour(p):
     try:
         time.sleep(1.8)
         p.set_state("awake"); time.sleep(1.2)
         _fakes()
         steps = (notch_talk, notch_hover, notch_home, notch_music, notch_words, notch_search_scene,
-                 notch_agents_scene, notch_checks_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
-                     island_teach, island_video, island_schedule, island_area, island_tutor,
+                 notch_agents_scene, notch_checks_scene, notch_jobs_scene, notch_guard_scene, notch_meet_scene, notch_switch,
+                 notch_greet, notch_error, notch_drop, notch_progress, notch_compose, notch_rim, notch_pals) if NOTCH else (talk, doing, work, marks_scene, show, tricks, faces, moods, agent, chat, island_meeting,
+                     island_teach, island_video, island_download, island_schedule, island_area, island_tutor,
                      island_trackers, island_cards, translate_scene,
                      dictation_scene, drop_scene, convert_scene, video_edit_scene,
-                     clipboard_scene, clipboard_window_scene, image_card_scene)
+                     clipboard_scene, clipboard_window_scene, image_card_scene,
+                     badge_scene, poke_scene, glow_scene, settings_look_scene)
         for step in steps:
             step(p)
         print("  [done]", flush=True)
@@ -1470,10 +1959,14 @@ def tour(p):
 def _demo_prefs():
     """The demo's orb sits bottom-right, without touching the real Mint's settings (the same file)."""
     from mint.core import prefs
-    real_get, real_set = prefs.get, prefs.set
-    fixed = {"position": "bottom-right", "origin": None, "meeting_offer": True, "face": True, "notch_mode": False}
+    real_get = prefs.get
+    fixed = {"position": "bottom-right", "origin": None, "meeting_offer": True, "face": True, "notch_mode": False,
+             "ui_sounds": False, "wander": False, "motion": "full", "status_badge": True, "poke_play": True,
+             "window_glow": True}
     prefs.get = lambda key: fixed[key] if key in fixed else real_get(key)
-    prefs.set = lambda key, value: None if key in fixed else real_set(key, value)
+    prefs.set = lambda key, value: fixed.__setitem__(key, value)            # never saved: the real settings file
+    prefs.toggle = lambda key: fixed.__setitem__(key, not bool(prefs.get(key))) or fixed[key]
+    prefs.check_file = lambda: None
 
 
 def main():
@@ -1490,6 +1983,10 @@ def main():
         if NOTCH and back is not None:
             back.contentView().subviews()[0].setHidden_(True)      # no document card under the notch
             _menu_bar_cover()
+            _real_notch_cover()
+            from mint.ui import notch
+            import Quartz
+            notch.LEVEL = Quartz.CGWindowLevelForKey(Quartz.kCGMainMenuWindowLevelKey) + 5   # over the cover
         presence.build()
         threading.Thread(target=tour, args=(presence,), daemon=True).start()
     ui.run_cocoa(build)

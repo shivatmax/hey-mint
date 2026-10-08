@@ -353,7 +353,7 @@ password, key or card number, is never kept, and Mint never pastes into a passwo
 | "what's on today?", "what's on this week?" | `calendar_events` |
 | "remind me to call Sam at five" | `create_reminder` |
 | "make a note: …" | `create_note` |
-| "draft an email to priya@… saying …" | `compose_email` (draft only; never sends) |
+| "draft an email to nina@… saying …" | `compose_email` (draft only; never sends) |
 | "what are my latest emails?", "read the second one" | `list_emails`, `read_email` |
 | "volume 30", "pause the music", "next track" | `set_volume`, `media_key` |
 | "lock the screen", "dark mode on", "mute" | `system_action` |

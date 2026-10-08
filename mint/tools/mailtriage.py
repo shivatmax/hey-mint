@@ -1,6 +1,6 @@
 """Mail triage and replies in the user's own style - drafts only, never sent.
 
-"what needs my attention in my inbox?", "triage my email", "draft a reply to Priya's email
+"what needs my attention in my inbox?", "triage my email", "draft a reply to Nina's email
 saying I'll send it Friday", "reply to the second one, say yes".
 
 Works through the Mail app (so any account added to it - Gmail, iCloud, Outlook - without
@@ -169,7 +169,7 @@ def draft_reply(number: int, instruction: str = "") -> str:
 
 
 PROMPT = """Email: "what needs my attention in my inbox?", "triage my email" -> mail action=triage (sorted: \
-needs a reply, to do, FYI, newsletters). "Draft a reply to #2 saying …", "reply to Priya's email" -> mail \
+needs a reply, to do, FYI, newsletters). "Draft a reply to #2 saying …", "reply to Nina's email" -> mail \
 action=draft_reply with the number from triage/list_emails and what to say. Replies are drafts in the user's \
 own style; Mint never sends email. A NEW email "in the Mail app" -> compose_email: when the user names the Mail \
 app it makes a real draft there (recipient, subject, body; saved in Drafts), never sent."""

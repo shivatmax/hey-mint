@@ -44,6 +44,23 @@ log = logging.getLogger("mint.tools.agent_watch")
 
 CLAUDE_DIR = os.path.expanduser("~/.claude/projects")
 CODEX_DIR = os.path.expanduser("~/.codex/sessions")
+CODEX_APPS = ("/Applications/Codex.app", os.path.expanduser("~/Applications/Codex.app"))
+_installed = {"at": -1e9, "apps": {}}
+
+
+def installed() -> dict:
+    """{"claude": bool, "codex": bool}: is Claude Code / Codex on this Mac at all (it has a sessions folder - the
+    Claude app's Code tab and the CLI both write one - or its command or app is there)? Checked once a minute."""
+    now = time.monotonic()
+    if now - _installed["at"] > 60:
+        import shutil
+        _installed["at"] = now
+        _installed["apps"] = {
+            "claude": os.path.isdir(os.path.dirname(CLAUDE_DIR)) and os.path.isdir(CLAUDE_DIR)
+            or bool(shutil.which("claude")),
+            "codex": os.path.isdir(os.path.dirname(CODEX_DIR)) or bool(shutil.which("codex"))
+            or any(os.path.isdir(p) for p in CODEX_APPS)}
+    return dict(_installed["apps"])
 POLL = 0.6               # seconds between looks at the files already followed
 SCAN = 4.0               # seconds between looks for new session files
 FRESH = 20 * 60          # a file written within this long is followed
@@ -820,7 +837,15 @@ class Watcher:
                               "always": bool(payload.get("permission_suggestions")),
                               "tool_use_id": payload.get("tool_use_id")}
                 self._dirty = True
-                if s.state == "waiting":
+                if tool == "AskUserQuestion":            # a question: answerable from the notch (agent_hooks.answer)
+                    qs = args.get("questions") or []
+                    q = qs[0] if qs and isinstance(qs[0], dict) else {}
+                    s.question = {"text": _clip(q.get("question") or "Claude has a question.", 240),
+                                  "options": [_clip(o.get("label") or "", 40) for o in (q.get("options") or [])
+                                              if isinstance(o, dict)][:4], "step": payload.get("tool_use_id") or ""}
+                    if s.state != "asking":
+                        self._set_state(s, "asking", now)
+                elif s.state == "waiting":
                     self._events.append(("waiting", copy.deepcopy(s)))   # a second request while waiting
                 else:
                     self._set_state(s, "waiting", now)
@@ -857,9 +882,12 @@ class Watcher:
             s = self._sessions.get(session_key)
             if s is None or not s.approval or s.approval.get("id") != approval_id:
                 return
+            asked = s.approval.get("tool") == "AskUserQuestion"
             s.approval = None
-            if s.state == "waiting":
-                self._set_state(s, "working" if decision in ("allow", "always") else "thinking", time.time())
+            if asked and decision:
+                s.question = None                    # answered (or turned down) from the notch
+            if s.state == "waiting" or asked and decision and s.state == "asking":
+                self._set_state(s, "working" if decision in ("allow", "always", "answer") else "thinking", time.time())
             self._dirty = True
         self._wake.set()
 
@@ -1124,15 +1152,55 @@ def _claude_context(s: Session) -> float | None:
     return max(0.0, min(1.0, s.context_tokens / float(size))) if size and s.context_tokens else None
 
 
+# The Claude app (Claude Code in its Code tab, and chat) samples the plan's usage about every 15 minutes while it
+# runs: {"samples": [{"t": ms, "org": ..., "u": {"fh": 5-hour %, "sd": 7-day %}}]}. A status line never runs there.
+CLAUDE_APP_USAGE = os.path.expanduser("~/Library/Application Support/Claude/plan-usage-history.json")
+_app_usage = {"mtime": 0.0, "data": {}}
+
+
+def _claude_app_usage() -> dict:
+    """Claude's limits from the Claude app's own samples ({} when it isn't installed or has none). A 5-hour figure
+    older than 5 hours says nothing about now, so it is left out; a sample older than a week is ignored."""
+    try:
+        mtime = os.path.getmtime(CLAUDE_APP_USAGE)
+    except OSError:
+        return {}
+    if mtime != _app_usage["mtime"]:
+        data = {}
+        try:
+            with open(CLAUDE_APP_USAGE, encoding="utf-8") as fh:
+                samples = (json.load(fh) or {}).get("samples") or []
+            last = max((x for x in samples if isinstance(x, dict) and isinstance(x.get("u"), dict)),
+                       key=lambda x: float(x.get("t") or 0), default=None)
+            if last is not None:
+                data = {"at": float(last.get("t") or 0) / 1000, **{k: last["u"].get(k) for k in ("fh", "sd")}}
+        except (OSError, ValueError, TypeError, AttributeError):
+            data = {}
+        _app_usage.update(mtime=mtime, data=data)
+    data, now = _app_usage["data"], time.time()
+    if not data or now - data["at"] > 7 * 86400:
+        return {}
+    out = {"at": data["at"], "source": "app"}
+    if isinstance(data.get("fh"), (int, float)) and now - data["at"] < 5 * 3600:
+        out["5h"] = float(data["fh"])
+    if isinstance(data.get("sd"), (int, float)):
+        out["week"] = float(data["sd"])
+    return out if ("5h" in out or "week" in out) else {}
+
+
 def limits() -> dict:
     """Usage limits, percent used: {"codex": {...}, "claude": {...}} with "5h", "week", "5h_resets", "week_resets"
-    (epoch seconds) and "at". Codex's come from its logs; Claude's only from a status line (agent_hooks)."""
+    (epoch seconds) and "at". Codex's come from its logs; Claude's from a status line (agent_hooks) or the Claude
+    app's own usage samples, whichever is newer."""
     out = {k: dict(v) for k, v in LIMITS.items()}
     saved = _claude_saved()
     rl = saved.get("rate_limits") or {}
     if rl:
         out["claude"] = _limit_pair(rl.get("five_hour"), rl.get("seven_day"), "used_percentage",
                                     float(saved.get("updatedAt") or 0) / 1000)
+    app = _claude_app_usage()
+    if app and app["at"] > float((out.get("claude") or {}).get("at") or 0):
+        out["claude"] = app
     return out
 
 

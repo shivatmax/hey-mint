@@ -109,7 +109,7 @@ def test_core_text_whole_lines_profile_and_accounts_beat_vocab(bank):
                mk(45, "The user's team uses a weekly planning doc.", "work", updated=_ago(120), created=_ago(120)),
                mk(46, "Worked with Mint on the launch video.", "work", kind="episode",
                   day=time.strftime("%Y-%m-%d")),
-               mk(47, "The user's old manager was Priya.", "people", superseded_by="m48"),
+               mk(47, "The user's old manager was Nina.", "people", superseded_by="m48"),
                mk(48, "The user's manager is Rahul.", "people", origin="user"),
                mk(49, "The user is on leave this week.", "schedule", expires=time.time() - 60),
                mk(50, "The user likes a stale thing.", "misc", archived=True)]
@@ -130,7 +130,7 @@ def test_core_text_whole_lines_profile_and_accounts_beat_vocab(bank):
                     f"cut or invented line: {line!r}"
         assert "[m40]" in core and "[m41]" in core and "[m44]" in core, "profile/core lines first"
         assert "[m42]" in core and "[m43]" in core, "pinned accounts beat vocabulary"
-        assert "Priya" not in core and "on leave" not in core and "stale thing" not in core
+        assert "Nina" not in core and "on leave" not in core and "stale thing" not in core
     small = membank.core_text(700)
     assert "thing number" not in small.split("Lately")[0] or small.count("thing number") < 3
     assert "more saved facts" in small and "recall" in small
@@ -221,9 +221,9 @@ def test_search_meaning_finds_what_words_miss(bank, monkeypatch):
 def test_near_duplicates_are_confirmed_not_added(bank, monkeypatch):
     asked = []
     monkeypatch.setattr(llm, "ask_json", lambda prompt, *a, **k: asked.append(prompt) or None)
-    first = membank.add("The user's manager is Priya.", "people", origin="auto")
+    first = membank.add("The user's manager is Nina.", "people", origin="auto")
     assert first.startswith("Remembered [m1]")
-    again = membank.add("the users manager is priya", origin="user")
+    again = membank.add("the users manager is nina", origin="user")
     assert again.startswith("Already known [m1]") and "confirmed 1x" in again
     membank.add("The user goes hiking in the Alps mountains with friends every weekend.", "schedule")
     near = membank.add("The user goes hiking in the Alps mountains with friends every single weekend.")
@@ -235,15 +235,15 @@ def test_near_duplicates_are_confirmed_not_added(bank, monkeypatch):
 
 
 def test_supersede_keeps_history_and_hides_the_old(bank, monkeypatch):
-    membank.add("The user's manager at Acme is Priya.", "people")
+    membank.add("The user's manager at Acme is Nina.", "people")
     result = membank.add("The user's manager at Acme is Rahul.", supersedes="m1")
     assert "[m2]" in result and "replaces m1" in result
     old, new = membank.all_blocks()
-    assert old["superseded_by"] == "m2" and old["text"].endswith("Priya.")
-    assert new["history"][-1]["text"] == "The user's manager at Acme is Priya."
-    assert "Priya" not in membank.core_text()
+    assert old["superseded_by"] == "m2" and old["text"].endswith("Nina.")
+    assert new["history"][-1]["text"] == "The user's manager at Acme is Nina."
+    assert "Nina" not in membank.core_text()
     assert [b["id"] for b in membank.search("manager at Acme", deep=True)] == ["m2"]
-    assert "before: 'The user's manager at Acme is Priya.'" in membank.recall("who is my manager")
+    assert "before: 'The user's manager at Acme is Nina.'" in membank.recall("who is my manager")
     # A similar note: ONE LLM call decides, here that it supersedes m2.
     prompts = []
 

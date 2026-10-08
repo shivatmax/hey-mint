@@ -43,6 +43,7 @@ D = 44             # orb diameter
 EDGE = 46          # orb centre distance from the screen edges
 BUBBLE_MAX = 290
 IDLE_HIDE = 6.0    # the bubble fades after this long with nothing new
+REHIDE_AFTER = 3.0  # a hidden Mint that came out for "Hey Mint" goes back this long after it falls asleep
 WORD_IN = 0.34     # a caption word takes this long to rise into place
 STAGGER = 0.055
 
@@ -226,6 +227,7 @@ class HUD:
         self._interactive = False
         self._action_seq = 0
         self.hidden = False                  # "Hide" (notch row, menu, ⌃⌥H): nothing of Mint shows until it is needed
+        self._peeking = False                # hidden, but out for the moment (woken, a reply): hides again asleep
         self.fire = None                     # set by Presence: fire(action, *args)
         self.menu_factory = None             # set by Presence: -> NSMenu
 
@@ -457,11 +459,13 @@ class HUD:
         if self.fire is not None:
             self.fire(action, *args)
 
-    def set_hidden(self, on: bool) -> None:
+    def set_hidden(self, on: bool, peek: bool = False) -> None:
         """Hide Mint or bring it back. Main thread. In the notch only the little Mint and the icons beside the camera go
         (the notch still opens on hover or a tap); the orb fades away. It comes back by itself when it has something to
-        say or do ("Hey Mint", a reply, news), or with the Show button / ⌃⌥H."""
+        say or do ("Hey Mint", a reply, news) - peek=True: only for that, it hides again when it goes back to sleep -
+        or for good with the Show button / ⌃⌥H."""
         on = bool(on)
+        self._peeking = bool(peek and not on)
         if on == self.hidden:
             return
         self.hidden = on
@@ -482,8 +486,13 @@ class HUD:
         from mint.core import hotkeys
         key = (prefs.get("shortcuts") or {}).get("hide") or ""
         back = f", {hotkeys.display(key)}" if key else ""
-        print(f"  [{'hidden - Hey Mint, the Show button' + back + ' bring Mint back' if on else 'shown'}]",
+        print(f"  [{'hidden - Hey Mint, the Show button' + back + ' bring Mint back' if on else 'shown for now' if peek else 'shown'}]",
               flush=True)
+
+    def _hide_again(self) -> None:
+        """REHIDE_AFTER after Mint fell asleep from a peek: hidden again, unless it woke meanwhile or the user showed it."""
+        if getattr(self, "_peeking", False) and not self.hidden and self._state == "sleeping":
+            self.set_hidden(True)
 
     def toggle_hidden(self) -> None:
         AppHelper.callAfter(lambda: self.set_hidden(not self.hidden))
@@ -493,7 +502,9 @@ class HUD:
             previous = self._state
             woke = state == "awake" and previous in ("sleeping", "paused", "starting", "offline")
             if self.hidden and (woke or (state in ("thinking", "working", "speaking") and previous != state)):
-                self.set_hidden(False)           # woken, or it has something to say or do: back in sight
+                self.set_hidden(False, peek=True)    # woken, or it has something to say or do: back in sight, for now
+            elif state == "sleeping" and getattr(self, "_peeking", False) and not self.hidden:
+                AppHelper.callLater(REHIDE_AFTER, self._hide_again)     # done: back out of sight, as the user left it
             self._state = state
             self._touch()
             if self._built:

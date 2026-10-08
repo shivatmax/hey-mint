@@ -56,7 +56,7 @@ EVENTS = (("PermissionRequest", WAIT + 10), ("Notification", 5), ("UserPromptSub
 # PreToolUse: the guard looks at shell commands; edits are checked for another agent on the same file (agent_checks).
 MATCHERS = {"PreToolUse": "Bash|Edit|Write|MultiEdit|NotebookEdit"}
 
-_pending: dict = {}           # approval id -> {"conn", "session", "suggestions", "created"}
+_pending: dict = {}           # approval id -> {"conn", "session", "suggestions", "created", "tool", "input"}
 _lock = threading.Lock()
 _started = False
 
@@ -219,7 +219,9 @@ def main():
     except Exception:
         return
     decision = answer.get("decision")
-    if decision in ("allow", "always"):
+    if decision == "answer" and isinstance(answer.get("updated_input"), dict):
+        out = {"behavior": "allow", "updatedInput": answer["updated_input"]}     # a question answered
+    elif decision in ("allow", "always"):
         out = {"behavior": "allow"}
         rule = answer.get("rule")
         if decision == "always" and rule:
@@ -347,7 +349,8 @@ def _client(conn) -> None:
             _finish(old, None)
         with _lock:
             _pending[ident] = {"conn": conn, "session": "claude:" + str(payload.get("session_id") or ""),
-                               "suggestions": suggestions, "created": time.time()}
+                               "suggestions": suggestions, "created": time.time(),
+                               "tool": payload.get("tool_name"), "input": payload.get("tool_input") or {}}
         print(f"  [agents: Claude Code asks to use {payload.get('tool_name')}]", flush=True)
         agent_watch.ingest_hook(payload)
         return                                   # held open until a click, Claude Code's own answer, or WAIT
@@ -380,10 +383,40 @@ def decide(session_key: str, decision: str) -> bool:
     if decision not in ("allow", "always", "deny"):
         return False
     with _lock:
-        ident = next((i for i, item in _pending.items() if item["session"] == session_key), None)
+        ident = next((i for i, item in _pending.items() if item["session"] == session_key
+                      and not (item.get("tool") == "AskUserQuestion" and decision != "deny")), None)
+    if ident is None:
+        return False                             # (a question's "Allow" without an answer would deny it: answer())
+    return _finish(ident, decision)
+
+
+def answer(session_key: str, label: str) -> bool:
+    """A click on one of a question's options (Claude Code's AskUserQuestion): the answer goes back through the
+    held PermissionRequest as the tool's input with "answers" filled in, as Claude Code's own picker does."""
+    with _lock:
+        ident, item = next(((i, it) for i, it in _pending.items() if it["session"] == session_key
+                            and it.get("tool") == "AskUserQuestion"), (None, None))
     if ident is None:
         return False
-    return _finish(ident, decision)
+    if label not in answerable(session_key):
+        return False
+    args = dict(item.get("input") or {})
+    args["answers"] = {str(args["questions"][0].get("question") or ""): label}
+    return _finish(ident, "answer", args)
+
+
+def answerable(session_key: str) -> list[str]:
+    """The options a held question can be answered with from the notch ([] = answer it in its window): one
+    question, one choice. Several questions or a multi-choice one still go to the window."""
+    with _lock:
+        item = next((it for it in _pending.values() if it["session"] == session_key
+                     and it.get("tool") == "AskUserQuestion"), None)
+    if item is None:
+        return []
+    questions = [q for q in ((item.get("input") or {}).get("questions") or []) if isinstance(q, dict)]
+    if len(questions) != 1 or questions[0].get("multiSelect"):
+        return []
+    return [str(o.get("label")) for o in questions[0].get("options") or [] if isinstance(o, dict) and o.get("label")][:4]
 
 
 def rule_for(session_key: str) -> str:
@@ -400,7 +433,7 @@ def pending(session_key: str) -> bool:
         return any(item["session"] == session_key for item in _pending.values())
 
 
-def _finish(ident: str, decision: str | None) -> bool:
+def _finish(ident: str, decision: str | None, updated_input: dict | None = None) -> bool:
     with _lock:
         item = _pending.pop(ident, None)
     if item is None:
@@ -410,6 +443,8 @@ def _finish(ident: str, decision: str | None) -> bool:
         answer = {"decision": decision}
         if decision == "always" and item["suggestions"]:
             answer["rule"] = item["suggestions"][0]
+        if updated_input is not None:
+            answer["updated_input"] = updated_input
         try:
             item["conn"].sendall((json.dumps(answer) + "\n").encode())
             sent = True

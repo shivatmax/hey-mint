@@ -71,7 +71,9 @@
     <tr id="set-input-device"><td><code>input_device</code></td><td><i>empty</i></td><td>The microphone, as a Core Audio device ID. Empty = follow the system's choice.</td></tr>
     <tr id="set-output-device"><td><code>output_device</code></td><td><i>empty</i></td><td>The speaker, as a Core Audio device ID. Empty = follow the system's choice.</td></tr>
     <tr id="set-echo-cancellation"><td><code>echo_cancellation</code></td><td><code>auto</code></td><td><code>auto</code> (off with headphones), <code>on</code> or <code>off</code>.</td></tr>
+    <tr id="set-quiet-while-waiting"><td><code>quiet_while_waiting</code></td><td>on</td><td>While Mint only waits for “Hey Mint”, it uses the plain microphone, so your videos and music keep their volume; echo cancellation comes on once you're talking to it. Off = on the Mac's speakers, echo cancellation runs all the time (and macOS turns other apps down while it does).</td></tr>
     <tr id="set-share-mic"><td><code>share_mic</code></td><td>on</td><td>Step aside while a call or meeting app uses the microphone.</td></tr>
+    <tr id="set-listen-in-calls"><td><code>listen_in_calls</code></td><td>on</td><td>During a call, keep listening for the wake word on the plain microphone, so “Hey Mint” still works in a Google Meet. Off: Mint lets go of the microphone entirely.</td></tr>
     <tr id="set-share-mic-apps"><td><code>share_mic_apps</code></td><td><i>empty</i></td><td>More apps to step aside for, by bundle ID (like <code>com.example.app</code>).</td></tr>
   </table></div>
 </section>
@@ -89,9 +91,9 @@
     <tr id="set-auto-emotions"><td><code>auto_emotions</code></td><td>on</td><td>The orb shows feelings on its own in conversation.</td></tr>
     <tr id="set-status-badge"><td><code>status_badge</code></td><td>on</td><td>A little badge on Mint's face: dots while it works, red on an error, green when done.</td></tr>
     <tr id="set-poke-play"><td><code>poke_play</code></td><td>on</td><td>Mint reacts when you poke it: three quick pokes make it dizzy, and more make it annoyed.</td></tr>
-    <tr id="set-greeting"><td><code>greeting</code></td><td>on</td><td>A sparkly hello when Mint wakes up for the day.</td></tr>
+    <tr id="set-greeting"><td><code>greeting</code></td><td>on</td><td>A sparkly hello in the notch the first time Mint wakes up each day (notch mode).</td></tr>
     <tr id="set-window-glow"><td><code>window_glow</code></td><td>on</td><td>A glowing border around the window Mint is working in.</td></tr>
-    <tr id="set-ui-sounds"><td><code>ui_sounds</code></td><td>on</td><td>Soft sounds for open, done, error and pokes.</td></tr>
+    <tr id="set-ui-sounds"><td><code>ui_sounds</code></td><td>off</td><td>Soft sounds for open, done, error and pokes. Off until you turn it on.</td></tr>
     <tr id="set-sound-volume"><td><code>sound_volume</code></td><td><code>0.7</code></td><td>How loud those sounds are, from <code>0</code> to <code>1</code>.</td></tr>
     <tr id="set-sounds-notch"><td><code>sounds_notch</code></td><td>on</td><td>Sounds for the notch opening and closing.</td></tr>
     <tr id="set-sounds-tasks"><td><code>sounds_tasks</code></td><td>on</td><td>Sounds for a task done or failed, a message sent, a file dropped.</td></tr>
@@ -143,7 +145,7 @@
 <section id="config-agents" data-group="Configuration">
   <h2>Claude mode and agents</h2>
   <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
-    <tr id="set-agent-mode"><td><code>agent_mode</code></td><td><code>auto</code></td><td><a href="agents#claude-mode">Claude mode</a>, Claude Code and Codex sessions in the notch: <code>auto</code> (whenever a session is running), <code>on</code> (always) or <code>off</code>.</td></tr>
+    <tr id="set-agent-mode"><td><code>agent_mode</code></td><td><code>quiet</code></td><td><a href="agents#claude-mode">Claude mode</a>, Claude Code and Codex in the notch: <code>quiet</code> (a pop-up only when one asks you something or finishes), <code>auto</code> (also live while they work), <code>on</code> (the Agents tab always) or <code>off</code>. Until you choose, it is off on a Mac without Claude Code or Codex.</td></tr>
     <tr id="set-agent-approvals"><td><code>agent_approvals</code></td><td>on</td><td>An agent's permission request or question opens the notch on it.</td></tr>
     <tr id="set-agent-open-on-done"><td><code>agent_open_on_done</code></td><td>on</td><td>A finished agent's summary shows in the notch for a few seconds.</td></tr>
     <tr id="set-agent-compact"><td><code>agent_compact</code></td><td>off</td><td>The Agents tab is minimized to one line.</td></tr>

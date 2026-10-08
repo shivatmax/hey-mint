@@ -32,7 +32,8 @@ dependencies = [
   "pyobjc-framework-EventKit>=10.0",
   "pyobjc-framework-Vision>=10.0",
   "pyobjc-framework-AVFoundation>=10.0",
-  "yt-dlp>=2026.8.19",
+  "yt-dlp[default,deno,curl-cffi]>=2026.8.19",
+  "imageio-ffmpeg>=0.6",
   "openpyxl>=3.1",
 ]
 

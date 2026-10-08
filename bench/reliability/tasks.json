@@ -1580,7 +1580,7 @@
     "book the venue",
     "pay the invoice"
    ],
-   "note": "Owner and status in mixed case with spaces; one task is Priya's, one is done, one row is duplicated."
+   "note": "Owner and status in mixed case with spaces; one task is Nina's, one is done, one row is duplicated."
   },
   {
    "id": "hard-rates-convert",

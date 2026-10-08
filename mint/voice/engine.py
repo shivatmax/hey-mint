@@ -84,6 +84,7 @@ class VoiceAudio:
         self.resting = False                   # the mic is off (Mint paused): no engine running for nothing
         self.conversation = False              # in a conversation: echo cancellation may run (converse())
         self.quiet_asleep = quiet_asleep       # asleep: the plain mic (False: echo cancellation all the time)
+        self.in_call = False                   # a call app has the mic: the plain mic only, never voice processing
         self._relax_after_play = False         # go back to the plain mic once Mint has finished speaking
         self._switching = False                # a mode switch is scheduled: a reply waits for it
         self._restarting = False               # a rebuild is under way (it takes ~2 s with voice processing)
@@ -186,9 +187,27 @@ class VoiceAudio:
 
     def _wants_echo_cancel(self) -> bool:
         """Voice processing for this build: speakers (or forced on), and only in a conversation - asleep it would
-        duck every other app's sound and change what the microphone hears, for nothing (nobody to cancel)."""
+        duck every other app's sound and change what the microphone hears, for nothing (nobody to cancel).
+        Never during a call: a second echo canceller beside the call's own is what made calls misbehave."""
+        if getattr(self, "in_call", False):
+            return False
         return (self.conversation or not self.quiet_asleep) and \
             (self.echo_mode == "on" or (self.echo_mode == "auto" and not self.private_output))
+
+    def set_mode(self, quiet_asleep: bool | None = None, in_call: bool | None = None, reason: str = "") -> None:
+        """Any thread, never blocks: change what decides voice processing, and rebuild if that changes it.
+        quiet_asleep False: echo cancellation even while waiting for the wake word (the voice lock needs the
+        microphone it was trained on). in_call: a call app has the mic - the plain mic only."""
+        with self._build_lock:
+            if quiet_asleep is not None:
+                self.quiet_asleep = quiet_asleep
+            if in_call is not None:
+                self.in_call = in_call
+            if self._closed or self.suspended or self.resting or self._deferred:
+                return                         # the next build reads the new mode
+            if self._wants_echo_cancel() == self.echo_cancelled:
+                return
+        self._switch_later(reason or "the microphone mode changed")
 
     @property
     def plain_on_speakers(self) -> bool:

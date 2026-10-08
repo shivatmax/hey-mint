@@ -63,7 +63,7 @@ _KIND = {
     "watch_video": "look", "automation": "timer", "recall_history": "search",
     "edit_selection": "write", "make_spreadsheet": "file", "tidy": "file", "memory_used": "search",
     "teach": "look", "tutor": "look", "briefing": "calendar", "shortcut": "open", "find_screenshot": "search",
-    "translate_screen": "look", "mail": "mail", "mac": "system", "screen_record": "shot", "track": "timer", "show_card": "look", "dictation": "write", "edit_video": "file", "video_info": "look", "ocr_copy": "clip", "data_to_sheet": "file", "convert_document": "file",
+    "translate_screen": "look", "mail": "mail", "mac": "system", "screen_record": "shot", "track": "timer", "show_card": "look", "dictation": "write", "edit_video": "file", "video_info": "look", "download_video": "file", "ocr_copy": "clip", "data_to_sheet": "file", "convert_document": "file",
 }
 
 # Apps opened by a dedicated tool, by bundle id, for their icons.
@@ -266,6 +266,9 @@ def phrase(name: str, args: dict) -> str:
             what = _site(src) if src.startswith("http") else (src.rsplit("/", 1)[-1] or "the video")
             return (f"Frame at {a['at']}" if a.get("at") else
                     f"Watching {_quote(what, 34)}" if not a.get("question") else f"About the video · {_quote(a['question'], 30)}")
+        case "download_video":
+            src = str(a.get("url") or "")
+            return f"Downloading the video from {_site(src)}" if src.startswith("http") else "Downloading the video"
         case "read_url":
             return f"Reading {_site(str(a.get('url', '')))}"
         case "browser":

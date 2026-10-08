@@ -53,7 +53,9 @@
     {{setting input_device | The microphone, as a Core Audio device ID. Empty = follow the system's choice.}}
     {{setting output_device | The speaker, as a Core Audio device ID. Empty = follow the system's choice.}}
     {{setting echo_cancellation | <code>auto</code> (off with headphones), <code>on</code> or <code>off</code>.}}
+    {{setting quiet_while_waiting | While Mint only waits for “Hey Mint”, it uses the plain microphone, so your videos and music keep their volume; echo cancellation comes on once you're talking to it. Off = on the Mac's speakers, echo cancellation runs all the time (and macOS turns other apps down while it does).}}
     {{setting share_mic | Step aside while a call or meeting app uses the microphone.}}
+    {{setting listen_in_calls | During a call, keep listening for the wake word on the plain microphone, so “Hey Mint” still works in a Google Meet. Off: Mint lets go of the microphone entirely.}}
     {{setting share_mic_apps | More apps to step aside for, by bundle ID (like <code>com.example.app</code>).}}
   </table></div>
 </section>
@@ -71,9 +73,9 @@
     {{setting auto_emotions | The orb shows feelings on its own in conversation.}}
     {{setting status_badge | A little badge on Mint's face: dots while it works, red on an error, green when done.}}
     {{setting poke_play | Mint reacts when you poke it: three quick pokes make it dizzy, and more make it annoyed.}}
-    {{setting greeting | A sparkly hello when Mint wakes up for the day.}}
+    {{setting greeting | A sparkly hello in the notch the first time Mint wakes up each day (notch mode).}}
     {{setting window_glow | A glowing border around the window Mint is working in.}}
-    {{setting ui_sounds | Soft sounds for open, done, error and pokes.}}
+    {{setting ui_sounds | Soft sounds for open, done, error and pokes. Off until you turn it on.}}
     {{setting sound_volume | How loud those sounds are, from <code>0</code> to <code>1</code>.}}
     {{setting sounds_notch | Sounds for the notch opening and closing.}}
     {{setting sounds_tasks | Sounds for a task done or failed, a message sent, a file dropped.}}
@@ -125,7 +127,7 @@
 <section id="config-agents" data-group="Configuration">
   <h2>Claude mode and agents</h2>
   <div class="table"><table><tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
-    {{setting agent_mode | <a href="#claude-mode">Claude mode</a>, Claude Code and Codex sessions in the notch: <code>auto</code> (whenever a session is running), <code>on</code> (always) or <code>off</code>.}}
+    {{setting agent_mode | <a href="#claude-mode">Claude mode</a>, Claude Code and Codex in the notch: <code>quiet</code> (a pop-up only when one asks you something or finishes), <code>auto</code> (also live while they work), <code>on</code> (the Agents tab always) or <code>off</code>. Until you choose, it is off on a Mac without Claude Code or Codex.}}
     {{setting agent_approvals | An agent's permission request or question opens the notch on it.}}
     {{setting agent_open_on_done | A finished agent's summary shows in the notch for a few seconds.}}
     {{setting agent_compact | The Agents tab is minimized to one line.}}

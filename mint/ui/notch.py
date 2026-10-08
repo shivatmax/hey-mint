@@ -458,7 +458,6 @@ class Notch:
                                 ("bubble.left.and.bubble.right.fill", "Open the chat", self._chat),
                                 ("moon.zzz.fill", "Sleep", lambda: self.hud._fire("sleep")),
                                 ("eye.slash", "Visible in screen sharing", self._eye),
-                                ("sparkles", "Claude mode: your coding agents", self._agents_open),
                                 ("arrow.up.to.line", "Hide Mint: the notch stays, the little Mint and its icons go (⌃⌥H)",
                                  lambda: self.hud.set_hidden(not self.hud.hidden)),
                                 ("slider.horizontal.3", "Settings", self._menu_from_button)):
@@ -853,6 +852,7 @@ class Notch:
 
         def send(text):
             self.hud._fire("submit", text)
+            self.tab = "home"                 # the working card (Mint's pane), whichever tab "+" was pressed on
             AppHelper.callLater(0.3, lambda: self._hide_scene("composer", holder.get("ctl")))
 
         def cancel():
@@ -1379,7 +1379,11 @@ class Notch:
     def _agents_mod(self):
         if prefs.get("agent_mode") == "off":
             return None
-        return self._mod("notch_agents")
+        mod = self._mod("notch_agents")
+        try:
+            return None if mod is None or mod.mode() == "off" else mod   # (no Claude Code or Codex on this Mac)
+        except Exception:
+            return mod
 
     def _agents_ok(self) -> bool:
         mod = self._agents_mod()
@@ -1411,7 +1415,7 @@ class Notch:
                     self.st.alert(f"{news}:{key}:{getattr(session, 'since', now)}", news, now, session=key)
             elif kind == "started":
                 self.st.resolve(now, session=key)        # it moved on: its old news isn't worth showing
-                if getattr(self, "orb", None) is not None and self.mode in ("compact", "plain"):
+                if getattr(self, "orb", None) is not None and self.mode in ("compact", "plain") and mod.live():
                     self.orb.hop()
         try:
             mod.on_event(event)
@@ -1497,7 +1501,7 @@ class Notch:
             self._conceal(view)
 
     def _agents_open(self) -> None:
-        """The small row's sparkles button (or "Claude mode" by voice): the full notch, on the Agents tab. Asked by
+        """"Claude mode" (by voice, or the menu): the full notch, on the Agents tab. Asked by
         voice the pointer is elsewhere: it folds 8 s later unless the pointer comes (notch_state)."""
         self.tab = "agents"
         self._agents_asked = True
@@ -1678,7 +1682,7 @@ class Notch:
             # A fresh open starts at home (a drag, results or an agent pick the tab); in Claude mode, on the
             # agents while one is at work.
             mod = self._agents_mod() if agents_ok else None
-            claude = mod is not None and (prefs.get("agent_mode") == "on" or mod.busy())
+            claude = mod is not None and (mod.mode() == "on" or mod.live() and mod.busy())
             self.tab = "agents" if claude else "home"
             first = prefs.get("notch_open_to")          # Settings ▸ Appearance & Sound: the tab it opens to
             if first in ("home", "search", "shelf", "agents") and {
@@ -2057,17 +2061,11 @@ class Notch:
         self._paint_buttons()
 
     def _row(self) -> list:
-        """The small row's buttons that apply now (the Claude mode button only while there are agents)."""
-        agents = self._agents_ok()
-        if agents and not getattr(self, "_agents_seen", False):
-            self._agents_seen = True
-            for symbol, button in self.buttons:      # the new button pops in with the others next time
-                if symbol == "sparkles":
-                    button.setAlphaValue_(0.0)
+        """The small row's buttons that apply now (Stop only while something is going on). Claude mode isn't
+        here: it's a tab of the full notch, and "Claude mode" by voice."""
         busy = getattr(self.hud, "_state", "") in ("thinking", "working", "speaking") or \
             getattr(self.hud, "_activity", None) is not None
-        return [(sym, b) for sym, b in self.buttons
-                if (sym != "sparkles" or agents) and (sym != "stop.fill" or busy)]
+        return [(sym, b) for sym, b in self.buttons if sym != "stop.fill" or busy]
 
     def _fresh(self) -> bool:
         """The shape just started to open: content arrives staggered behind it (else at once, e.g. a tab change)."""
@@ -2330,6 +2328,8 @@ class Notch:
         if not self._agents_hooked or prefs.get("notch_agents_bar") is False:
             return None
         mod = self._agents_mod()
+        if mod is not None and hasattr(mod, "live") and not mod.live():
+            return None                                  # pop-ups only: no live bar while they work
         try:
             return mod.compact() if mod is not None and hasattr(mod, "compact_view") else None
         except Exception:

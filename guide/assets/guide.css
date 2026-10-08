@@ -448,7 +448,7 @@ pre{background:var(--ink);color:#E9EDF5;padding:16px 18px;border-radius:14px;ove
 }
 q.inline{quotes:none;background:var(--caption);color:#F4F4F8;padding:2px 9px;border-radius:9px;font-size:.92em;white-space:nowrap}
 
-/* ---------- landing: the 1-minute film ---------- */
+/* ---------- landing: the launch film ---------- */
 .film-band{padding-top:40px;text-align:center}
 .film-band h2{margin-left:auto;margin-right:auto}
 .film{position:relative;max-width:1080px;margin:40px auto 0;aspect-ratio:16/9;border-radius:30px;overflow:hidden;background:#F5F8FC;

@@ -236,6 +236,18 @@ def _recap(session: str) -> str:
     return text + ". (Read from its log.)"
 
 
+def limits_line() -> str:
+    """One short line for the notch, the menu and Settings: "Claude 5h 3% · week 36%   Codex 5h 12%" (used), or ""."""
+    lim = agent_watch.limits()
+    parts = []
+    for app, name in (("claude", "Claude"), ("codex", "Codex")):
+        x = lim.get(app) or {}
+        bits = [f"{label} {round(x[k])}%" for k, label in (("5h", "5h"), ("week", "week")) if k in x]
+        if bits:
+            parts.append(f"{name} " + " · ".join(bits))
+    return "   ".join(parts)
+
+
 def _limits() -> str:
     lim = agent_watch.limits()
     parts = []
@@ -252,8 +264,9 @@ def _limits() -> str:
                 bits.append(f"{left}% of the {label} limit left{when}")
         parts.append(f"{name}: " + "; ".join(bits) + f" (as of {_ago(x.get('at') or 0)})")
     if "claude" not in lim:
-        parts.append("Claude's limits aren't known: Claude Code only gives them to a status line "
-                     "(Settings > Appearance & Sound > Claude mode > Show Claude's usage limits)")
+        parts.append("Claude's limits aren't known yet: the Claude app records them while it's open (or, for "
+                     "Claude Code in a terminal, Settings > Appearance & Sound > More options > Claude mode > "
+                     "Show Claude's usage limits)")
     return ". ".join(parts) + "." if parts else "No usage limits seen yet."
 
 

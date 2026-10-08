@@ -195,7 +195,7 @@ def declarations() -> list[types.FunctionDeclaration]:
             "are merged by themselves. When it changes an older memory, pass `supersedes` with that id. "
             "Write a fact about the user, not an order to yourself: 'User prefers short answers', not "
             "'Always answer briefly'. Never passwords, keys or card numbers.",
-            {"fact": {**STRING, "description": "One standalone sentence, e.g. 'The user's manager is Priya.'"},
+            {"fact": {**STRING, "description": "One standalone sentence, e.g. 'The user's manager is Nina.'"},
              "group": {**STRING, "description": "Optional section: core, people, work, accounts, schedule, preferences, places, vocabulary, misc."},
              "kind": {**STRING, "enum": ["profile", "fact", "episode"],
                       "description": "profile = how the user wants things done / a standing preference; fact = a lasting fact; episode = something that happened (dated today)."},
@@ -734,11 +734,12 @@ def prompt_text() -> str:
     from mint.tools import translate
     from mint.ui import tutor
     from mint.tools import video
+    from mint.tools import video_download
     from mint.tools import video_edit
     parts = [PROMPT, harness_tools.PROMPT, tasks.PROMPT, video.PROMPT, automations.PROMPT, journal.PROMPT,
              rewrite.PROMPT, sheets.PROMPT, tidy.PROMPT, teach.PROMPT, tutor.PROMPT,
              meetings.PROMPT, briefing.PROMPT, apple_shortcuts.PROMPT, screenshots.PROMPT,
-             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, notch_agents.PROMPT, meet_call.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
+             translate.PROMPT, mailtriage.PROMPT, macctl.PROMPT, screenrec.PROMPT, trackers.PROMPT, notifications.PROMPT, undo.PROMPT, calc.PROMPT, merge.PROMPT, imagegen.PROMPT, shortcut_maker.PROMPT, apple_apps.PROMPT, connector_maker.PROMPT, handoff.PROMPT, music.PROMPT, agentapps.PROMPT, notch_agents.PROMPT, meet_call.PROMPT, cards.PROMPT, dictation.PROMPT, video_edit.PROMPT, video_download.PROMPT, convert.PROMPT, FILE_CARE, EXPRESSIVE, SHOWING]
     from mint.tools import diet as tool_diet
     parts = tool_diet.prompt_parts(parts)     # rarely used tools' sections come with find_tools instead
     unfinished = tasks.prompt_text()

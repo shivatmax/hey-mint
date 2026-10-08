@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **A quieter Mint:** Claude Code and Codex no longer show while they work. Mint pops up only when one asks you
+  something or finishes (Settings ▸ Appearance & Sound ▸ Claude Code and Codex: two switches); the old live view is
+  "Live" under More options. Existing settings move to this once (an old "auto" becomes pop-ups only).
+- **Answer Claude's questions from the pop-up:** with Claude Code connected, a question with choices shows each choice
+  as a button; a click answers it through Claude Code's own hook and it carries on (several questions or several
+  picks still open its window). An "Allow" can no longer turn a question down by mistake.
+- **Hide stays hidden:** a hidden Mint that comes out for "Hey Mint" hides again a few seconds after it goes back to
+  sleep. The Show button or ⌃⌥H brings it back for good.
+- **Little sounds are off by default** (new installs; a choice you made stays). Appearance & Sound is one short page
+  now - view, sounds, coding agents - with everything else behind More options.
+- **Claude's usage limits, visible:** read from the Claude app's own usage samples (no status line needed), shown in
+  Settings, the menu bar menu and the empty Agents tab ("Claude 5h 3% · week 36%"), and spoken on "how much Claude
+  do I have left?".
+- **No Claude Code or Codex, no Claude mode:** on a Mac without either, Claude mode is off by itself - no Agents
+  tab, nothing watched, and Settings just says "Not on this Mac". Install one and the pop-ups turn on by themselves
+  (checked every 10 minutes); a mode you chose yourself always wins.
+- **Codex on or off:** a switch on Codex in Settings ▸ Models & agents. Off - or without the ChatGPT app on the Mac -
+  Mint never offers it, refuses work for it and gives building work to Luna.
+
+- **Download videos:** "download this video" saves it to Downloads - from a link (YouTube and ~1,800 sites via
+  yt-dlp, in the best quality QuickTime plays: H.264 + AAC up to 1080p, or real 4K / just the audio when asked), or
+  from any page: Mint opens it in its own background Chrome, starts the player muted and catches what it loads - HLS
+  and DASH streams, video files, players from Vimeo/Wistia/JW Player/Brightcove - then downloads the best with the
+  page's headers and cookies (in a private file, deleted after) and joins it into one .mp4 (a .webm is made
+  QuickTime-ready). "Show me how" also saves a .command with the address and download command. Signed-in videos use
+  your Chrome's sign-in when you've allowed Mint to use Chrome. DRM-protected streams (Netflix, Prime...) are refused.
+  Progress shows in the island; long downloads finish in the background. The app now ships Deno (YouTube's player),
+  a static ffmpeg (imageio-ffmpeg), pycryptodomex and curl_cffi (`mint/tools/video_download.py`).
+
 ## 0.6.1 (2026-10-07)
 
 - **A livelier Mint (character system):** a small status badge on Mint's face - dots while it works, red on an

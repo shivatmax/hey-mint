@@ -27,7 +27,7 @@ marks things on your screen, and hands long jobs to a family of background agent
 https://github.com/user-attachments/assets/165b3c07-b49e-4b4e-9660-080de831b36c
 
 <p align="center">
-  <sub>▶ <b>Meet Mint</b>, the launch film (1:43) · unmute for the voiceover · also on <a href="https://youtu.be/0FxY1O4VvE8">YouTube</a></sub>
+  <sub>▶ <b>Hey Mint</b>, the launch film (1:51) · unmute for the voiceover · also on <a href="https://youtu.be/dmxK-wFhuow">YouTube</a></sub>
 </p>
 
 <br>
@@ -99,6 +99,11 @@ as a card - and every card has a × to close it.
 | “make this more formal”, “put these invoices in a spreadsheet”, “clean up my Downloads” | Rewrites selected text in place, turns documents into an .xlsx, tidies folders with a preview and an undo |
 | “where were we?”, “what did we do yesterday?”, “what was I working on on Monday?” | Tasks that survive restarts and grow sub-steps, a journal of what happened when, and an opt-in activity timeline |
 | “become the notch”, “go out of my notch” | Notch mode: Mint lives in the camera notch as a Dynamic Island - words, tasks and cards grow out of it, the notch wraps whatever opens. Switching is live: the orb flies into the notch, or drops out and bounces home |
+| *look at the notch* | Its outline says the state (a light sweeping while busy, amber when an agent needs you, a green flash when done, a red shake on an error); alerts come one at a time (“+2 waiting”, Esc snoozes); it opens in one smooth move and folds 8 s after you leave, with a countdown line - sliding past never opens it |
+| *in notch mode* | Scenes: a sparkly hello on the first wake of the day, an error card with a Retry button, a drop zone where Mint turns into a folder, a progress bar with Mint's face as the thumb, and a “+” to type a request right in the notch |
+| *a Claude Code or Codex session* | Each agent gets its own critter face: a little cluster in the closed notch, a focus card with a rolling list of steps when open, coloured chips for the others (click one to focus it), new diff lines typing themselves in, and a compact bar under the notch with the lead agent's step |
+| *just watch, or poke it* | A status badge on Mint's face (dots while working, red on an error, green when done, the word when you point at it), eyes that change shape with the mood, and pokes: a slap, three quick ones for dizzy, keep going and it's annoyed. The menu bar icon is Mint's face too |
+| *Mint working in an app* | A soft Apple-Intelligence-coloured glow round the window it's working in; soft sounds made by Mint itself, quiet while you dictate or are on a call; Settings ▸ Appearance & Sound sets Full, Calm or Minimal motion (macOS Reduce motion means Minimal), each effect and each sound group |
 | “do a trick”, “show me a heart”, “put on a show” | Expressions, 60 fps tricks, and a critter family that performs |
 | *just talk* | Feelings from the moment: a sad face when you share bad news, a laugh at a joke, applause for good news, sunglasses when a task is done |
 
@@ -396,8 +401,6 @@ five minutes.
 
 What's planned next, roughly in order:
 
-- **A richer notch:** an alert queue (what needs you first, nothing lost while you're away) and a status ring on
-  the notch for busy, waiting, done and error.
 - **Mint's hooks as a Claude Code plugin,** installable with `/plugin`.
 - **A wider accuracy suite:** recorded examples for routing and the guard, next to the test-reading one.
 

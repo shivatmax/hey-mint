@@ -301,6 +301,14 @@ class Presence:
             self._row(menu, "Clipboard…" + (f"  {clip_key}" if clip_key else ""), "clipboard:open")
         except Exception:
             pass
+        try:
+            from mint.tools import agent_checks
+            usage = agent_checks.limits_line()          # Claude's / Codex's plan limits, percent used
+            if usage:
+                menu.addItem_(AppKit.NSMenuItem.separatorItem())
+                self._row(menu, "Usage used:  " + usage, enabled=False)
+        except Exception:
+            pass
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
         self._add_settings(menu)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())

@@ -58,10 +58,11 @@ BRIDGE = ("find_tools", "use_tool")
 # find_tools instead of riding along in every session). `prompts` are module names, or "extra_tools.NAME".
 FAMILIES: dict[str, dict] = {
     "video editing and watching videos": {
-        "tools": ("edit_video", "video_info", "watch_video"),
+        "tools": ("edit_video", "video_info", "watch_video", "download_video"),
         "words": "video clip movie mp4 mov trim cut join merge speed slow captions subtitles gif reels vertical "
-                 "compress mute audio extract rotate export youtube watch summarise transcript frame",
-        "prompts": ("video_edit", "video")},
+                 "compress mute audio extract rotate export youtube watch summarise transcript frame download "
+                 "save grab vimeo instagram tiktok reel embedded stream m3u8 hls",
+        "prompts": ("video_edit", "video", "video_download")},
     "documents, PDFs, OCR and conversions": {
         "tools": ("convert_document", "ocr_copy", "data_to_sheet", "create_pdf", "export_doc_pdf"),
         "words": "convert conversion pdf word docx document markdown html epub txt ocr scan text image copy "

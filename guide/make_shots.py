@@ -71,7 +71,7 @@ def backdrop():
              ("p1", "We ship the new voice experience to everyone next week.", 16, False),
              ("deadline", "The launch deadline is Friday, 3 October.", 16, True),
              ("p2", "Design review happens on Tuesday with the whole team.", 16, False),
-             ("owner", "Owner: Priya handles the release notes and the demo.", 16, False),
+             ("owner", "Owner: Nina handles the release notes and the demo.", 16, False),
              ("p3", "Budget for the launch event stays under $4,000.", 16, False),
              ("risk", "Biggest risk: the wake word on older Macs.", 16, False)]
     y = ch - 64

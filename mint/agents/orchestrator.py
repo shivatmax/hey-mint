@@ -150,6 +150,10 @@ def _list(args: dict) -> str:
     for a in registry.load():
         run = hub.find(a["name"])
         doing = f" - now {run.status}: {run.doing}" if run and run.active else ""
+        why = registry.unusable(a)
+        if why:
+            lines.append(f"{a['name']}: {a['role']} - not available: {why}")
+            continue
         backups = f", backups {', '.join(a['models'][1:])}" if a["models"][1:] else ""
         lines.append(f"{a['name']}: {a['role']} ({a['models'][0]}{backups}, thinks {a['thinking']}){doing}")
     return "\n".join(lines) or "No agents yet."
@@ -193,15 +197,17 @@ HANDLERS = {
 
 
 def prompt_text() -> str:
-    agents = registry.load()
+    agents = registry.active()
     roster = "; ".join(f"{a['name']} - {a['role']} ({a['models'][0]})" for a in agents)
+    builder = "Codex" if any(a.get("runner") == "codex" for a in agents) else "Luna"
     return (
         "You are the orchestrator of sub-agents that work in the background, each on its own model with "
         "backups (the user picks them in Settings ▸ Models & agents): " + roster + ". "
         "When the user names an agent ('ask Luna', 'give it to Sage'), use exactly that agent. "
-        "Otherwise, to BUILD something the user will open or run - a web page, an app, a script - give it to Codex "
-        "(it writes, runs and checks the code itself); put everything it should build from (e.g. research "
-        "you read) in context. When Codex finishes, show the result with preview_site and check it with "
+        "Otherwise, to BUILD something the user will open or run - a web page, an app, a script - give it to "
+        + builder + (" (it writes, runs and checks the code itself)" if builder == "Codex" else "") +
+        "; put everything it should build from (e.g. research "
+        "you read) in context. When " + builder + " finishes, show the result with preview_site and check it with "
         "look. Never make up material you were meant to get from somewhere else (ChatGPT's answer, a page, "
         "a file): if you could not read it, wait for it (wait_until_done), look, or tell the user - and hand "
         "on what you actually read (attach_window). "
@@ -212,7 +218,7 @@ def prompt_text() -> str:
         "level by difficulty (none / low / medium). Several independent pieces can run at once "
         "(delegate_tasks). Agents work as a TEAM: give a job to the ONE agent best placed to lead it, and it "
         "brings in teammates itself when their specialty helps (Sage writing a report asks Astra for the "
-        "research; Luna asks Codex to build the page) and reports back for all of them - so do not split a "
+        "research; Luna asks " + ("Codex" if builder == "Codex" else "for help") + " to build the page) and reports back for all of them - so do not split a "
         "job across agents yourself unless the parts are truly independent. If the user limits who may help "
         "('just Sage, no research'), pass helpers. agent_status shows who is helping whom; stop_agent on "
         "the lead stops its helpers. Messages starting '(A message from your sub-agent' are NOT the user: relay an "

@@ -47,6 +47,7 @@ import math
 import os
 import re
 import subprocess
+import threading
 import time
 import zlib
 
@@ -1303,6 +1304,9 @@ class AgentPane:
         self.btn_always = self._button(self.card, "Always allow", lambda: self._decide("always"))
         self.btn_allow = self._button(self.card, "Allow", lambda: self._decide("allow"), primary=True)
         self.btn_open = self._button(self.card, "Open", self._open)
+        # A question's options (Claude Code's AskUserQuestion, held by Mint's hook): a click answers it.
+        self.btn_opts = [self._button(self.card, "Option", lambda i=i: self._answer(i)) for i in range(4)]
+        self._opt_labels: list[str] = []
         self.btn_connect = self._button(self.card, "Connect Claude Code", _connect_hooks,
                                         tip="Answer Claude Code's permission requests from the notch")
         self.min_btn = self._button(self.card, "", self._toggle_size, symbol="arrow.down.right.and.arrow.up.left",
@@ -1322,6 +1326,9 @@ class AgentPane:
         self.mini_deny = self._button(v, "Deny", lambda: self._decide("deny"))
         self.mini_allow = self._button(v, "Allow", lambda: self._decide("allow"), primary=True)
         self.mini_open = self._button(v, "Open", self._open)
+        self.mini_opts = [self._button(v, "Option", lambda i=i: self._answer(i)) for i in range(4)]
+        for b in self.btn_opts + self.mini_opts:
+            b.setHidden_(True)
         self.mini_jump = self._button(v, "", self._open, symbol="arrow.up.forward.app", tip="Open this session's window")
         self.size_btn = self._button(v, "", self._toggle_size, symbol="arrow.up.left.and.arrow.down.right",
                                      tip="Show the whole session")
@@ -1416,6 +1423,9 @@ class AgentPane:
             self.card.setHidden_(True)
         for view in self._mini_views:
             view.setHidden_(not mini)
+        for b in self.mini_opts:
+            b.setHidden_(True)
+        self.mini_sig = None                       # the line puts its own buttons back
         self.mini_mark.setHidden_(not mini)
         self.dots.setHidden_(not mini)
         self.min_btn.setHidden_(mini or not self.resizable)
@@ -1553,17 +1563,18 @@ class AgentPane:
         """The mini pane's live line (and its actions or step dots)."""
         step = s.current
         a = s.approval
-        if a:
+        if a and not (a.get("tool") == "AskUserQuestion" and s.question):
             d = a.get("detail") or {}
             what = d.get("cmd") or a.get("target") or a.get("tool")
             sig = ("ok?", s.key, a.get("id"))
             mark, text, buttons = ("hand.raised.fill", STATE_RGB["waiting"]), \
                 [(f"wants to {a.get('verb', 'run').lower()}  ", _white(0.6), False), (str(what), _white(0.95), True)], \
                 [self.mini_deny, self.mini_allow]
-        elif s.state == "asking" and s.question:
-            sig = ("ask", s.key, s.question.get("text"))
+        elif s.question and (s.state == "asking" or a):
+            options = self._option_buttons(s, self.mini_opts, self.w * 0.6)
+            sig = ("ask", s.key, s.question.get("text"), tuple(self._opt_labels) if options else ())
             mark, text, buttons = ("questionmark.circle.fill", STATE_RGB["asking"]), \
-                [(s.question.get("text") or "", _white(0.92), False)], [self.mini_open]
+                [(s.question.get("text") or "", _white(0.92), False)], options or [self.mini_open]
         elif s.state in ("done", "failed", "idle") and (s.summary or not step):
             words = _plain(s.summary).split("\n")[0] if s.summary else ("It stopped." if s.state == "idle" else "Done.")
             sig = ("end", s.key, s.state, words)
@@ -1597,7 +1608,7 @@ class AgentPane:
         mono = _mono(11, AppKit.NSFontWeightMedium)
         self.mini_text.setAttributedStringValue_(_tail([(t, mono if code else font, ink, None)
                                                          for t, ink, code in text]))
-        for b in (self.mini_deny, self.mini_allow, self.mini_open):
+        for b in (self.mini_deny, self.mini_allow, self.mini_open, *self.mini_opts):
             b.setHidden_(b not in buttons)
         x = self.w - 8
         for b in reversed(buttons):
@@ -1874,7 +1885,12 @@ class AgentPane:
 
     def _empty(self) -> None:
         connected = _hooks_installed()
-        sig = ("empty", connected)
+        try:
+            from mint.tools import agent_checks
+            usage = agent_checks.limits_line()
+        except Exception:
+            usage = ""
+        sig = ("empty", connected, usage)
         if self.empty_sig == sig and self.sig == sig:
             return
         self.empty_sig = self.sig = sig
@@ -1901,7 +1917,10 @@ class AgentPane:
                                   + ("" if connected else " Connect Claude Code to answer its permission requests "
                                                          "from the notch."))
         self.body.setHidden_(False)
-        self.stats.setStringValue_("")
+        self.stats.setFrame_(AppKit.NSMakeRect(14, 12, self.cw - 28 - (0 if connected else 170), 15))
+        self.stats.setStringValue_(("Used: " + usage) if usage else "")
+        self.stats.setToolTip_("Plan usage limits used so far (5-hour window and the week), from the Claude app "
+                               "and Codex's logs" if usage else "")
         self._buttons([self.btn_connect] if not connected else [])
         self.open_btn.setHidden_(True)
         self._veil(None)
@@ -1949,7 +1968,10 @@ class AgentPane:
     def _detail(self, s) -> None:
         step = s.current
         approval = s.approval
-        if approval:
+        if approval and approval.get("tool") == "AskUserQuestion" and s.question:
+            approval = None                          # a question held by the hook: its options are the buttons
+            sig = ("ask", s.key, s.question.get("text"), s.approval.get("id"))
+        elif approval:
             sig = ("approval", s.key, approval.get("id"))
         elif s.state == "asking" and s.question:
             sig = ("ask", s.key, s.question.get("text"))
@@ -2126,10 +2148,53 @@ class AgentPane:
             text += "\n" + "   ".join(f"· {o}" for o in options)
         elif q.get("plan"):
             text += "\n" + q["plan"][:400]
+        shown = self._option_buttons(s, self.btn_opts, self.cw - 24)
+        if shown:
+            text = q.get("text") or ""                # the options are the buttons below
         self.body.setStringValue_(text)
-        self.stats.setStringValue_("Answer it in its window")
-        self._buttons([self.btn_open], right=True)
+        self.stats.setStringValue_("" if shown else "Answer it in its window")
+        self._buttons(shown or [self.btn_open], right=True)
         self._veil(STATE_RGB["asking"], 0.45)
+
+    def _option_buttons(self, s, buttons, room: float) -> list:
+        """The question's options on `buttons` when it can be answered from here and they fit in `room`; else []."""
+        try:
+            from mint.tools import agent_hooks
+            labels = agent_hooks.answerable(s.key)
+        except Exception:
+            labels = []
+        if not labels:
+            return []
+        each = (room - 8 * (len(labels) - 1)) / len(labels)
+        shown = []
+        for label, b in zip(labels, buttons):
+            title = label
+            while True:
+                self._paint_button(b, title, primary=not shown)
+                width = b.fittingSize().width + 22
+                if width <= each or len(title) <= 4:
+                    break
+                title = title.removesuffix("…")[:-1].rstrip() + "…"
+            if width > each:
+                return []                              # too many to read: answer it in its window
+            b.setFrameSize_(AppKit.NSMakeSize(width, 24))
+            b.setToolTip_(label)
+            shown.append(b)
+        self._opt_labels = labels[:len(shown)]
+        return shown
+
+    def _answer(self, i: int) -> None:
+        s = self._current()
+        if s is None or i >= len(self._opt_labels):
+            return
+        from mint.tools import agent_hooks
+        if agent_hooks.answer(s.key, self._opt_labels[i]):
+            if self._pal_face():
+                _hop(self.big, 8)
+            else:
+                self.orb.hop()
+        self.detail_sig = self.mini_sig = None
+        self.update()
 
     def _show_done(self, s) -> None:
         failed = s.state == "failed"
@@ -2301,7 +2366,7 @@ class AgentPane:
         AppHelper.callLater(seconds + 2.4, caret_off)
 
     def _buttons(self, shown, right=False) -> None:
-        for b in (self.btn_deny, self.btn_always, self.btn_allow, self.btn_open, self.btn_connect):
+        for b in (self.btn_deny, self.btn_always, self.btn_allow, self.btn_open, self.btn_connect, *self.btn_opts):
             b.setHidden_(b not in shown)
         x = self.cw - 12
         for b in reversed(shown):
@@ -2474,8 +2539,18 @@ def _plain(text: str) -> str:
     """Markdown to plain words for the card."""
     text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"[*_`#>]+", "", text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    # (Every "_" and "#" used to go: an agent's "missing API_URL" read "missing APIURL", test_invoice.py
+    # "testinvoice.py", "PR #42" "PR 42". Inline code stays as written; _emphasis_ and line-start # / > go.)
+    out = []
+    for part in re.split(r"(`[^`\n]+`)", text):
+        if len(part) > 1 and part[0] == part[-1] == "`":
+            out.append(part[1:-1])
+            continue
+        part = re.sub(r"\*+", "", part)
+        part = re.sub(r"(?<!\w)(_{1,2})(?=\S)(.+?)(?<=\S)\1(?!\w)", r"\2", part)
+        part = re.sub(r"^[ \t]*(?:#{1,6}|>+)[ \t]*", "", part, flags=re.M)
+        out.append(part.replace("`", ""))
+    return re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()
 
 
 # --- jumping to the session's window ----------------------------------------------------------------------
@@ -2652,7 +2727,11 @@ def _hook() -> None:
 
 def start() -> None:
     """Begin watching (Mint calls this at launch when Claude mode isn't off)."""
-    if prefs.get("agent_mode") == "off":
+    if mode() == "off":
+        if prefs.get("agent_mode") != "off":      # off only because neither is on this Mac yet: look again later
+            timer = threading.Timer(600, start)
+            timer.daemon = True
+            timer.start()
         return
     _hook()
 
@@ -2675,7 +2754,7 @@ def _changed() -> None:
 
 
 def _event(kind: str, session) -> None:
-    if prefs.get("agent_mode") == "off":
+    if mode() == "off":
         return
     if kind in ("waiting", "asking", "finished", "failed"):
         until = time.monotonic() + (120.0 if kind in ("waiting", "asking") else 9.0)
@@ -2689,7 +2768,8 @@ def _event(kind: str, session) -> None:
             fn(kind, session)
         except Exception:
             log.exception("agents event listener failed")
-    if _orb_mode() and kind in ("waiting", "asking", "finished", "failed"):
+    if _orb_mode() and kind in ("waiting", "asking", "finished", "failed") and prefs.get(
+            "agent_approvals" if kind in ("waiting", "asking") else "agent_open_on_done") is not False:
         card_show(session.key, linger=None if kind in ("waiting", "asking") else 6.0)
     if kind in ("waiting", "asking", "finished", "failed"):
         word = {"waiting": "needs your OK", "asking": "asks you something", "finished": "is done",
@@ -2706,14 +2786,38 @@ def view(width: float, height: float):
 
 
 def available() -> bool:
-    if prefs.get("agent_mode") == "off":
+    if mode() == "off":
         return False
     _hook()
-    return bool(agent_watch.sessions()) or prefs.get("agent_mode") == "on"
+    return bool(agent_watch.sessions()) or mode() == "on"
+
+
+def mode() -> str:
+    """Claude mode as it applies now: the setting, except that a Mac without Claude Code or Codex has it off until
+    one is installed (or the user turns it on) - no Agents tab, nothing watched."""
+    value = prefs.get("agent_mode")
+    if value != "off" and not prefs.is_set("agent_mode") and not any(agent_watch.installed().values()):
+        return "off"
+    return value
 
 
 def busy() -> bool:
     return any(s.busy or s.approval for s in agent_watch.sessions())
+
+
+def live() -> bool:
+    """Show the agents while they work (step by step beside the notch, the bar, the sweep)? Not in "quiet", the
+    default: then only a pop-up when one asks you something or finishes."""
+    return mode() in ("auto", "on")
+
+
+def _worth_showing(s, now: float, done_for: float, failed_for: float) -> bool:
+    state = "waiting" if s.approval else s.state
+    if s.approval or state in ("waiting", "asking"):
+        return prefs.get("agent_approvals") is not False or live()
+    if state == "done" and now - s.since < done_for or state == "failed" and now - s.since < failed_for:
+        return prefs.get("agent_open_on_done") is not False or live()
+    return bool(s.busy) and live()
 
 
 def needs_you() -> bool:
@@ -2722,15 +2826,14 @@ def needs_you() -> bool:
 
 def wing():
     """For the closed notch: the most pressing session's state, while any is busy or just finished."""
-    if prefs.get("agent_mode") == "off":
+    if mode() == "off":
         return None
     items = ordered()
     if not items:
         return None
     s = items[0]
     state = "waiting" if s.approval else s.state
-    recent = state in ("done", "failed") and time.time() - s.since < 8
-    if not (s.busy or s.approval or recent):
+    if not _worth_showing(s, time.time(), 8, 8):
         return None
     sp, hue = pal_of(s.key)
     return {"state": state, "app": s.app, "count": sum(1 for x in items if x.busy or x.approval), "key": s.key,
@@ -2739,8 +2842,9 @@ def wing():
 
 
 def on_event(fn) -> None:
-    _hook()
     _event_fns.append(fn)
+    if mode() != "off":                 # (off: nothing is watched; the listener waits for Claude mode to start)
+        _hook()
 
 
 def focus(key: str, until: float | None = None) -> None:
@@ -2778,16 +2882,10 @@ _usage_cache = {"at": 0.0, "data": {}}
 
 def _wing_items() -> list:
     """The sessions the closed notch shows: busy ones, and for a moment the ones that just finished."""
-    if prefs.get("agent_mode") == "off":
+    if mode() == "off":
         return []
     now = time.time()
-    out = []
-    for s in ordered():
-        state = "waiting" if s.approval else s.state
-        if s.busy or s.approval or (state == "done" and now - s.since < WING_DONE) or \
-                (state == "failed" and now - s.since < WING_FAILED):
-            out.append(s)
-    return out
+    return [s for s in ordered() if _worth_showing(s, now, WING_DONE, WING_FAILED)]
 
 
 def _wing_layout(n: int, height: float):
@@ -3352,17 +3450,20 @@ def claude_mode(args: dict) -> str:
         return agent_checks.report(action, args)
     if action == "send":
         return _send_to_agent(str(args.get("text") or ""), str(args.get("session") or ""))
-    if action in ("on", "auto", "off"):
+    if action in ("on", "auto", "quiet", "off"):
         prefs.set("agent_mode", action)
         if action == "off":
             AppHelper.callAfter(card_hide)
             return "Claude mode is off: coding agents no longer show in the notch."
         start()
+        if action == "quiet":
+            return ("Claude mode is on pop-ups only: Claude Code and Codex show up when one asks you something "
+                    "or finishes.")
         AppHelper.callAfter(_show_agents)
         return ("Claude mode is on: the notch shows Claude Code and Codex sessions." if action == "on" else
-                "Claude mode is on Auto: sessions show in the notch while they work.")
-    if prefs.get("agent_mode") == "off":
-        prefs.set("agent_mode", "auto")
+                "Claude mode is on Live: sessions show in the notch while they work.")
+    if mode() == "off":
+        prefs.set("agent_mode", "quiet")
     start()
     agent_watch.watcher.refresh()                  # fresh, not up to a second old
     items = agent_watch.sessions()
@@ -3421,9 +3522,12 @@ def declarations():
                      "whether its tests really passed, today's work, a recap, usage limits, hand-off to another "
                      "agent."),
         parameters=types.Schema(type=types.Type.OBJECT, properties={
-            "action": types.Schema(type=types.Type.STRING, enum=["open", "on", "auto", "off", "status", "send",
-                                                                 "tests", "today", "recap", "limits", "handoff"],
-                                   description="open (show it now), on / auto / off (the setting), status (tell), "
+            "action": types.Schema(type=types.Type.STRING, enum=["open", "on", "auto", "quiet", "off", "status",
+                                                                 "send", "tests", "today", "recap", "limits",
+                                                                 "handoff"],
+                                   description="open (show it now), quiet (pop up only when an agent asks or "
+                                               "finishes) / auto (also live while they work) / on / off (the "
+                                               "setting), status (tell), "
                                                "send (type text into a session), tests, today, recap, limits, "
                                                "handoff"),
             "text": types.Schema(type=types.Type.STRING, description="send: the words for the agent"),

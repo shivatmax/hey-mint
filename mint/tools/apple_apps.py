@@ -1969,7 +1969,7 @@ move to_list; rename; delete only when asked. New reminders still use create_rem
 day=<its current day> start=<new ISO start> (a date alone keeps the time; the length stays). Also rename, update \
 (location / notes), find ("when is my dentist appointment"), delete only when asked (undo puts it back). New events \
 still use create_event; the day's list still calendar_events.
-- Contacts: "what's Sam's email", "Priya's number", "when is Priya's birthday" -> contacts name=<name> field=email|phone|\
+- Contacts: "what's Sam's email", "Nina's number", "when is Nina's birthday" -> contacts name=<name> field=email|phone|\
 birthday|address|company|all. Read only. Say just what was asked; don't read out other details.
 - Maps: "directions to the airport", "how do I get to X by train" -> maps action=directions to=... (from= a named start; \
 leave it out for here) mode=driving|walking|transit|cycling. "how long to drive from A to B" -> action=eta (needs a \

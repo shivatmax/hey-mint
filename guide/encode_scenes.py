@@ -36,6 +36,7 @@ CUTS = {
     "island-meeting":  ("island-meeting", 1080, 762, 360, 96, 0, None),
     "island-teach":    ("island-teach", 200, 128, 1240, 738, 0, None),
     "island-video":    ("island-video", 1040, 640, 400, 226, 0, None),
+    "island-download": ("island-download", 1040, 640, 400, 226, 0, None),
     "island-schedule": ("island-schedule", 1050, 490, 390, 376, 0, None),
     "island-area":     ("island-area", 200, 128, 1240, 738, 0, None),
     "island-tutor":    ("island-tutor", 200, 128, 1240, 738, 0, None),
@@ -63,6 +64,19 @@ CUTS = {
     "notch-jobs":      ("notch-jobs", 370, 0, 700, 272, 0, None),
     "notch-guard":     ("notch-guard", 370, 0, 700, 230, 0, None),
     "notch-meet":      ("notch-meet", 370, 0, 700, 230, 0, None),
+    # The character system. Orb mode: the orb at the bottom right (centre 1394, 825; the Dock starts at 871).
+    "badge":           ("badge", 1130, 756, 310, 112, 0, None),       # the badge, the hover pill, the bubble
+    "poke":            ("poke", 1290, 760, 150, 108, 0, None),        # the dizzy stars just above the head
+    "glow":            ("glow", 180, 120, 740, 690, 0, None),          # the document card and its glow
+    "settings-look":   ("settings-look", 290, 244, 860, 626, 0, 12.6),  # the Settings window (until it closes)
+    # Notch mode: the open notch's scenes and outline, as notch-agents.
+    "notch-greet":     ("notch-greet", 370, 0, 700, 272, 0, None),
+    "notch-error":     ("notch-error", 370, 0, 700, 272, 0, None),
+    "notch-drop":      ("notch-drop", 370, 0, 700, 272, 0, None),
+    "notch-progress":  ("notch-progress", 370, 0, 700, 272, 0, None),
+    "notch-compose":   ("notch-compose", 370, 0, 700, 272, 0, None),
+    "notch-rim":       ("notch-rim", 370, 0, 700, 272, 0, None),
+    "notch-pals":      ("notch-pals", 370, 0, 700, 272, 0, None),
 }
 
 MIDDLE_SECONDS = 12            # the agent's middle, whatever its real length
@@ -117,7 +131,8 @@ SKIP_PROBES = {"image-card": {(1180, 300)},
                # the open notch (640 wide, ~200 tall) covers (1000, 120)
                **{name: {(1000, 120)} for name in ("notch-home", "notch-music", "notch-words", "notch-search",
                                                          "notch-agents", "notch-checks", "notch-jobs", "notch-guard",
-                                                         "notch-meet")}}
+                                                         "notch-meet", "notch-greet", "notch-error", "notch-drop",
+                                                         "notch-progress", "notch-compose", "notch-rim", "notch-pals")}}
 
 
 def foreign(src, start=0.0, length=None, skip=frozenset()) -> list[float]:

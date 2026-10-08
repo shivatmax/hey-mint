@@ -271,7 +271,7 @@ def check(now: bool = False) -> str:
     except Exception as error:
         _set("error", f"Couldn't check for updates: {error}")
         return _state["detail"]
-    _save(checked=time.time(), latest=offer["version"])
+    _save(checked=time.time(), latest=offer["version"], latest_url=offer["url"], latest_page=offer["page"])
     if not newer(offer["version"], current):
         with _lock:
             _offer = None
@@ -286,7 +286,8 @@ def check(now: bool = False) -> str:
         _offer = offer
     ok, why = packaged(app)
     if not ok:
-        _set("available", f"Hey Mint {offer['version']} is out (this is {current}). {why}")
+        _set("available", f"Hey Mint {offer['version']} is out (this is {current}). Download it, then drag it "
+                          "into Applications to replace this one - your settings and permissions stay.")
         return _state["detail"]
     _set("available", f"Hey Mint {offer['version']} is available (this is {current}).")
     if auto():
@@ -314,7 +315,10 @@ def info() -> dict:
     app = running_app()
     ok, why = packaged(app)
     with _lock:
-        return {"current": current_version(app), "latest": (_offer or {}).get("version") or _load().get("latest"),
+        saved = _load()
+        return {"current": current_version(app), "latest": (_offer or {}).get("version") or saved.get("latest"),
+                "download": (_offer or {}).get("url") or saved.get("latest_url"),
+                "page": (_offer or {}).get("page") or saved.get("latest_page") or f"https://github.com/{REPO}/releases/latest",
                 "status": _state["status"], "detail": _state["detail"], "progress": _state["progress"],
                 "checked": _load().get("checked"), "ready": _staged is not None, "can_update": ok, "why": why,
                 "auto": auto(), "channel": _channel()}

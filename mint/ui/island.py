@@ -1145,6 +1145,40 @@ class VideoEditScene(Scene):
         Quartz.CATransaction.commit()
 
 
+class DownloadScene(VideoEditScene):
+    """A video being downloaded (video_download.py): finding it in the page, then how far the download is."""
+
+    key = "video_download"
+    priority = 57
+
+    def provide(self, now):
+        from mint.tools import video_download
+        self.snap = video_download.snapshot()
+        return self if self.snap else None
+
+    def build(self, view, width, height):
+        super().build(view, width, height)
+        icon = next(v for v in view.subviews() if isinstance(v, AppKit.NSImageView))
+        icon.setImage_(gfx.symbol("arrow.down.circle.fill", 12, "bold"))
+
+    def tick(self, now):
+        from mint.tools import video_download
+        snap = video_download.snapshot() or self.snap
+        if not hasattr(self, "fill"):
+            return
+        percent = max(0.0, min(100.0, float(snap.get("percent") or 0)))
+        step = re.sub(r"\s*\d+%.*$", "", str(snap.get("step") or "")) or "Downloading the video"
+        title = str(snap.get("summary") or "")
+        if step == "Downloading" and title and len(title) <= 12:
+            step = f"Downloading {title}"                # (a longer title would only show cut off)
+        self.step.setStringValue_(step)
+        self.percent.setStringValue_(f"{percent:.0f}%" if percent else "")
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.3)
+        self.fill.setFrame_(Quartz.CGRectMake(34, ROW / 2 - 9, max(2.0, 190 * percent / 100), 4))
+        Quartz.CATransaction.commit()
+
+
 class ConvertScene(VideoEditScene):
     """A document being converted or translated (convert.py): the step and its parts done."""
 
@@ -1584,7 +1618,7 @@ class Island:
 
         self.drop = DropScene()
         scenes = (MeetingScene(), ScreenScene(), TeachScene(), TutorScene(), VideoScene(), TrackerScene(),
-                  DictationScene(), VideoEditScene(), ConvertScene(), self.drop)
+                  DictationScene(), VideoEditScene(), DownloadScene(), ConvertScene(), self.drop)
         self.providers = [scene.provide for scene in scenes]
         self._hide_bubble_while_shown()
 

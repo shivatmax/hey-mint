@@ -82,7 +82,7 @@ DEFAULTS: dict = {
     "window_glow": True,        # a glowing border round the window Mint is working in
     "notch_composer": True,
     "notch_agents_bar": True,   # notch mode: a slim bar under the notch with what your coding agents are doing     # notch mode: type to Mint right in the notch
-    "ui_sounds": True,          # soft little sounds for open, done, error, pokes
+    "ui_sounds": False,         # soft little sounds for open, done, error, pokes (off until the user turns them on)
     "sound_volume": 0.7,        # how loud those sounds are, 0..1
     "sounds_notch": True,       # sounds: the notch opening and closing
     "sounds_tasks": True,       # sounds: a task done or failed, a message sent, a file dropped
@@ -91,8 +91,9 @@ DEFAULTS: dict = {
     "motion": "full",           # animation: full (bouncy, playful) / calm (gentle, fewer extras) / minimal (fades only)
     "notch_open_to": "auto",    # notch mode: the tab the open notch shows first - auto / home / search / shelf / agents
     "menubar_face": True,       # the menu bar icon is Mint's face and shows its state
-    # Claude mode (notch_agents): Claude Code and Codex sessions live in the notch. auto / on / off.
-    "agent_mode": "auto",
+    # Claude mode (notch_agents): Claude Code and Codex in the notch. quiet = only a pop-up when one asks you something
+    # or finishes (the default since 8 Oct) / auto = also live while they work / on = the Agents tab always / off.
+    "agent_mode": "quiet",
     "agent_approvals": True,    # an agent's permission request or question opens the notch on it
     "agent_open_on_done": True, # a finished agent's summary shows in the notch for a few seconds
     "agent_compact": False,     # the Agents tab minimized to one line (the minimize button in the pane)
@@ -187,6 +188,8 @@ DEFAULTS: dict = {
     "output_device": "",
     "echo_cancellation": "auto",       # auto (off with headphones) | on | off
     "share_mic": True,                 # step aside while a call or meeting app uses the mic
+    # During a call: keep listening for the wake word on the plain microphone (False: let go of it entirely).
+    "listen_in_calls": True,
     "share_mic_apps": [],              # extra bundle ids to step aside for
     # Voice lock strictness: relaxed | balanced | strict.
     "lock_strictness": "balanced",
@@ -251,6 +254,35 @@ def _ensure_loaded() -> None:
     if _mtime is None and not _values:
         _values.update(_load())
         _mtime = _mtime_now()
+        if _migrate(_values):
+            _save()
+
+
+DISPLAY_VERSION = 2
+
+
+def _migrate(values: dict) -> bool:
+    """Once per settings file. 8 Oct (display 2): coding agents pop up only when they ask or finish - an "auto"
+    saved before that (the old default, written by turning Claude mode back on) becomes "quiet", and a finished
+    agent's pop-up, which is half of that, comes back on."""
+    if int(values.get("display_version") or 0) >= DISPLAY_VERSION:
+        return False
+    if not values:                    # a new user: already on today's defaults (saved with the first setting)
+        values["display_version"] = DISPLAY_VERSION
+        return False
+    if values.get("agent_mode") == "auto":
+        values["agent_mode"] = "quiet"
+    if values.get("agent_open_on_done") is False:
+        del values["agent_open_on_done"]
+    values["display_version"] = DISPLAY_VERSION
+    return True
+
+
+def is_set(key: str) -> bool:
+    """Has the user (or Mint for them) chosen this setting, rather than it being the default?"""
+    with _lock:
+        _ensure_loaded()
+        return key in _values
 
 
 def get(key: str):

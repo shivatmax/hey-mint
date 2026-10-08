@@ -46,7 +46,16 @@ def facts() -> dict:
             "keys": {provider: catalog.key(provider) for provider in KEYED}, "settings": catalog.settings(),
             "custom": {cid: dict(spec, has_key=bool(catalog.key(cid)))
                        for cid, spec in catalog.custom_providers().items()},
-            "agents": registry.load()}
+            "agents": registry.load(), "codex_problem": _codex_problem()}
+
+
+def _codex_problem() -> str:
+    """Why Codex can't run on this Mac ('' when it can) - read with the facts: it runs codex --version."""
+    try:
+        from mint.agents import codex as codex_runner
+        return codex_runner.problem()
+    except Exception as error:
+        return f"Codex can't be checked ({error})."
 
 
 def page(win, page, facts: dict) -> None:
@@ -376,15 +385,31 @@ def _agents_section(win, page, facts: dict) -> None:
         buttons = [] if codex else [("Edit…", 80, lambda a=agent["name"]: _edit_agent(win, a))]
         if agent["name"].lower() not in BUILT_IN:
             buttons.append(("Remove", 84, lambda a=agent["name"]: _remove_agent(win, a)))
-        if buttons:
-            made = win._row_buttons(page, f"●  {agent['name']}", buttons, hint=detail)
+        if codex:
+            _codex_row(win, page, agent, detail, facts.get("codex_problem", ""))
+        elif buttons:
+            win._row_buttons(page, f"●  {agent['name']}", buttons, hint=detail)
         else:
             win._row_value(page, f"●  {agent['name']}", "", hint=detail, w=40)
-            made = []
         _tint_dot(page, agent)
     win._row_buttons(page, "", [("Add an agent…", 140, lambda: _edit_agent(win, None))],
                      hint="Your own agent: its job, how it should work, and which models it uses.")
     page.end("Mint picks an agent by its role; you can also ask by name (\"ask Nova to…\").")
+
+
+def _codex_row(win, page, agent, detail: str, missing: str) -> None:
+    """Codex with an on/off switch. Without Codex on this Mac (it comes with the ChatGPT app) it is off and can't be
+    turned on: Mint never offers it, and hands building work to Luna instead."""
+    hint = detail + ("\n" + missing.replace("The user needs to", "To use it,") if missing else "")
+    card, top, x, h = page.row(f"●  {agent['name']}", hint, control_w=38)
+
+    def switched(on: bool) -> None:
+        registry.set_on(agent["name"], on)
+        print(f"  [agents: {agent['name']} {'on' if on else 'off'}]", flush=True)
+    switch = win._switch(card, x, top + (h - 22) / 2, not agent.get("off") and not missing, switched)
+    if missing:
+        switch.setEnabled_(False)
+        switch.setToolTip_(missing)
 
 
 def _tint_dot(page, agent) -> None:

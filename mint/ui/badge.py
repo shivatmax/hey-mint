@@ -150,13 +150,15 @@ class StatusBadge:
             layer.setPosition_(Quartz.CGPointMake(*new))
 
     def _shift(self) -> float:
-        """How far right the pill must sit to stay inside the window (it grows to the left)."""
+        """How far right the pill must sit to stay inside the window (it grows to the left). The body scales round
+        the face's centre (hover 1.1, breathing, the voice), so the left end is kept inside at the biggest scale."""
         if not self.expanded:
             return 0.0
         w = self._pill_width()
         orb = self.orb
-        left_in_root = orb.center[0] - orb._bc[0] + self.anchor[0] + self.h / 2 - w
-        return max(0.0, 3.0 - left_in_root)
+        k = 1.2
+        rel = self.anchor[0] + self.h / 2 - w - orb._bc[0]        # the pill's left end, from the face's centre
+        return max(0.0, (3.0 - orb.center[0]) / k - rel)
 
     def _pill_width(self) -> float:
         word = WORDS.get(self.shown or "", "")

@@ -231,8 +231,11 @@ class Hub:
             return automations.refused()
         agent = registry.get(agent_name)
         if agent is None:
-            names = ", ".join(a["name"] for a in registry.load())
+            names = ", ".join(a["name"] for a in registry.active())
             return f"There is no agent called '{agent_name}'. Agents: {names}. Or create one with create_agent."
+        if registry.unusable(agent):
+            others = ", ".join(a["name"] for a in registry.active())
+            return f"NOT STARTED: {registry.unusable(agent)} Agents that can take it: {others}."
         if too_small(task):
             return (f"NOT DELEGATED: '{task}' is too small to hand off - do it yourself, or give {agent['name']} "
                     "complete instructions (goal, constraints, deliverable).")
@@ -407,7 +410,7 @@ class Hub:
                 "well. When the task is complete, reply WITHOUT calling any tool: that reply is your final "
                 "result - short, concrete, with file names."
                 + (run.destination.note() if run.destination is not None and run.parent is None else "")
-                + team.team_prompt(run, registry.load()))
+                + team.team_prompt(run, registry.active()))
 
     async def _run_codex(self, run: Run, follow_up: bool = False) -> None:
         from mint.agents import codex
@@ -593,7 +596,7 @@ class Hub:
         if name == "read_board":
             return mission.board_text()
         if name == "list_team":
-            return team.roster_text(registry.load(), mission, run.name)
+            return team.roster_text(registry.active(), mission, run.name)
         jobs = ([args] if name == "ask_agent" else list(args.get("jobs") or []))[:4]
         if not jobs:
             return "No jobs given."
@@ -616,6 +619,8 @@ class Hub:
         agent = registry.get(agent_name)
         if agent is None:
             return f"There is no agent called '{agent_name}' (see list_team)."
+        if registry.unusable(agent):
+            return registry.unusable(agent)
         if not mission.may_use(agent["name"]):
             return f"{agent['name']} is not allowed on this mission."
         if parent.depth >= team.MAX_DEPTH:

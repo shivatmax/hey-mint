@@ -58,25 +58,62 @@ cleanup() {
 trap cleanup EXIT
 
 # --- where the app comes from -------------------------------------------------------------------------
+# Always the newest release. Run from a downloaded DMG ("Install Hey Mint.command"), the app beside the script is
+# used only if it is already the newest (or GitHub can't be reached): an old DMG used to install its old version.
+LATEST="" FILE="" WANT=""
+newest() {        # sets LATEST, FILE, WANT (empty if GitHub can't be reached); never fails
+  local api
+  if curl -fsSL -H 'Cache-Control: no-cache' "https://github.com/$REPO/releases/latest/download/latest.json" \
+       -o "$WORK/latest.json" 2>/dev/null; then
+    LATEST="$(plutil -extract version raw -o - "$WORK/latest.json" 2>/dev/null || true)"
+    FILE="$(plutil -extract dmg raw -o - "$WORK/latest.json" 2>/dev/null || true)"
+    WANT="$(plutil -extract sha256 raw -o - "$WORK/latest.json" 2>/dev/null || true)"
+  fi
+  if [[ -z "$LATEST" || -z "$FILE" ]]; then
+    # The newest release may still be building (no latest.json yet): ask GitHub's API for its DMG instead.
+    api="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null)" || return 0
+    LATEST="$(printf '%s' "$api" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("vV"))' 2>/dev/null || true)"
+    FILE="$(printf '%s' "$api" | /usr/bin/python3 -c 'import json,sys
+for a in json.load(sys.stdin).get("assets", []):
+    if a["name"].endswith("-arm64.dmg"): print(a["name"]); break' 2>/dev/null || true)"
+    WANT="$(printf '%s' "$api" | /usr/bin/python3 -c 'import json,sys
+for a in json.load(sys.stdin).get("assets", []):
+    if a["name"].endswith("-arm64.dmg") and str(a.get("digest","")).startswith("sha256:"): print(a["digest"][7:]); break' 2>/dev/null || true)"
+  fi
+  [[ -n "$LATEST" && -n "$FILE" ]] || { LATEST=""; FILE=""; WANT=""; }
+}
+version_of() { plutil -extract CFBundleShortVersionString raw -o - "$1/Contents/Info.plist" 2>/dev/null || echo 0; }
+older() {         # older A B: is version A older than B?
+  [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" == "$1" ]]
+}
+
 SRC=""
-if [[ -n "${BASH_SOURCE[0]:-}" && -d "$(dirname "${BASH_SOURCE[0]}")/$NAME.app" ]]; then
-  SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$NAME.app"          # run from the opened DMG
-  note "Using the app next to this script."
-else
-  DMG="${HEYMINT_DMG:-}"
+DMG="${HEYMINT_DMG:-}"
+if [[ -z "$DMG" && -n "${BASH_SOURCE[0]:-}" && -d "$(dirname "${BASH_SOURCE[0]}")/$NAME.app" ]]; then
+  BESIDE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$NAME.app"
+  note "Checking for a newer version than the one in this disk image…"
+  newest
+  here="$(version_of "$BESIDE")"
+  if [[ -n "$LATEST" ]] && older "$here" "$LATEST"; then
+    note "This disk image has $NAME $here; $LATEST is out - installing that instead."
+  else
+    SRC="$BESIDE"
+    note "Using the app next to this script ($here)."
+  fi
+fi
+if [[ -z "$SRC" ]]; then
   if [[ -z "$DMG" ]]; then
-    note "Finding the latest release…"
-    curl -fsSL "https://github.com/$REPO/releases/latest/download/latest.json" -o "$WORK/latest.json" \
-      || die "could not reach GitHub. Check the internet connection, or download the DMG from https://github.com/$REPO/releases"
-    file="$(plutil -extract dmg raw -o - "$WORK/latest.json")"
-    want="$(plutil -extract sha256 raw -o - "$WORK/latest.json")"
-    version="$(plutil -extract version raw -o - "$WORK/latest.json")"
-    note "Downloading $NAME ${version}…"
-    curl -fL --progress-bar "https://github.com/$REPO/releases/download/v$version/$file" -o "$WORK/$file" \
+    [[ -n "$LATEST" ]] || { note "Finding the latest release…"; newest; }
+    [[ -n "$LATEST" ]] \
+      || die "could not reach GitHub. Check the internet connection, or download the DMG from https://github.com/$REPO/releases/latest"
+    note "Downloading $NAME ${LATEST}…"
+    curl -fL --progress-bar "https://github.com/$REPO/releases/download/v$LATEST/$FILE" -o "$WORK/$FILE" \
       || die "the download failed."
-    have="$(shasum -a 256 "$WORK/$file" | cut -d' ' -f1)"
-    [[ "$have" == "$want" ]] || die "the download is corrupt (its checksum doesn't match). Try again."
-    DMG="$WORK/$file"
+    if [[ -n "$WANT" ]]; then
+      have="$(shasum -a 256 "$WORK/$FILE" | cut -d' ' -f1)"
+      [[ "$have" == "$WANT" ]] || die "the download is corrupt (its checksum doesn't match). Try again."
+    fi
+    DMG="$WORK/$FILE"
   fi
   MOUNT="$WORK/mount"
   mkdir -p "$MOUNT"
@@ -112,7 +149,7 @@ xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 xattr -dr com.apple.provenance "$DEST" 2>/dev/null || true
 codesign --verify --deep --strict "$DEST" >/dev/null 2>&1 || die "the app's signature didn't check out, so it was not approved."
 
-say "Installed: $DEST"
+say "Installed: $DEST ($NAME $(version_of "$DEST"))"
 
 # --- a few choices (in a terminal; Enter keeps the default) -----------------------------------------------
 # One line of input; piped answers are echoed so the transcript reads right. No more input: the default.

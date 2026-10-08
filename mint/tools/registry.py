@@ -183,7 +183,7 @@ def declarations() -> list[types.FunctionDeclaration]:
             "Open Slack, optionally switch to a workspace, and optionally jump to a channel, DM or person "
             "by name. Use this for anything in Slack rather than the desktop tool.",
             {"workspace": {**STRING, "description": "Workspace as the user said it. Omit to stay in the current one."},
-             "channel": {**STRING, "description": "Channel or person to open, e.g. 'on-call' or 'Priya'."}}),
+             "channel": {**STRING, "description": "Channel or person to open, e.g. 'on-call' or 'Nina'."}}),
         _fn("list_accounts", "List the Chrome profiles and Slack workspaces available.", {}),
         _fn("read_window",
             "Read ALL the text in the front window - a web page, a Gmail inbox or open email, a "
@@ -718,12 +718,13 @@ def _power_modules():
     from mint.tools import undo
     from mint.app import updater
     from mint.tools import video_edit
+    from mint.tools import video_download
     from mint.tools import agentapps
     from mint.tools import handoff
     from mint.ui import notch_agents
     from mint.app import meet_call
     return (rewrite, sheets, tidy, teach, tutor, meetings, briefing, apple_shortcuts, screenshots, translate,
-            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music, handoff, notch_agents, meet_call)
+            mailtriage, macctl, screenrec, trackers, cards, dictation, video_edit, video_download, convert, notifications, undo, updater, agentapps, calc, merge, imagegen, shortcut_maker, apple_apps, connector_maker, music, handoff, notch_agents, meet_call)
 
 
 def tools() -> list[types.Tool]:  # noqa: F811
@@ -744,7 +745,7 @@ _SYNC.update({name: _power(name) for name in ("edit_selection", "make_spreadshee
                                                   "tutor", "meeting", "briefing", "shortcut",
                                                   "find_screenshot", "translate_screen", "mail", "mac",
                                                   "screen_record", "track", "show_card", "notifications", "undo", "update", "calculate", "merge_folders", "make_image", "make_shortcut", "connector", "music", "notes", "reminders_manage", "contacts", "calendar_manage", "maps", "safari", "photos", "iwork", "agent_app", "hand_to_app", "claude_mode", "google_meet",
-                                                  "dictation", "edit_video", "video_info", "ocr_copy",
+                                                  "dictation", "edit_video", "video_info", "download_video", "ocr_copy",
                                                   "data_to_sheet", "convert_document")})
 
 

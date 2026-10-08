@@ -205,6 +205,7 @@ fi
 "$RUNTIME/.venv/bin/python" launcher/make_icon.py "$BUILD/Contents/Resources/$APP_NAME.icns" >/dev/null
 rm -f "$BUILD/Contents/Resources/$APP_NAME.png"
 
+MINT_VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$ROOT/mint/__init__.py")
 cat > "$BUILD/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -216,7 +217,7 @@ cat > "$BUILD/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>          <string>$APP_NAME</string>
   <key>CFBundleIconFile</key>            <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>         <string>APPL</string>
-  <key>CFBundleShortVersionString</key>  <string>0.2.0</string>
+  <key>CFBundleShortVersionString</key>  <string>$MINT_VERSION</string>
   <key>CFBundleVersion</key>             <string>2</string>
   <key>LSMinimumSystemVersion</key>      <string>14.2</string>
   <key>LSUIElement</key>                 <true/>

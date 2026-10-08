@@ -13,6 +13,10 @@ Nine pages in one window, each fading and springing in:
   permissions  Microphone, Accessibility, Screen Recording, Input Monitoring, Calendars and
                Reminders: why each is needed, Allow (macOS's own prompt, or its Settings pane), and
                the status, checked every second.
+  hear         "Say Hey Mint": the microphone test (mictest.py) - a live level, the wake word caught or
+               not, and what is in the way. No training is needed; optionally four takes of "Hey Mint"
+               teach the wake word this user's voice (wake_train, about a minute and a half, in the
+               background). The voice lock is not part of onboarding: Settings ▸ Voice, if wanted.
   shortcuts    the four keys, as keycaps; click one and press new keys (settings_window.record_keys).
   tour         ten things Mint does, each with its clip from the guide, playing one after another.
   done         you're set; three first things to try (a click sends it to Mint).
@@ -41,7 +45,7 @@ from mint.core import prefs
 log = logging.getLogger("mint.ui.onboarding")
 
 W, H = 980, 660
-PAGES = ("welcome", "about", "connect", "jev", "voice", "permissions", "shortcuts", "tour", "done")
+PAGES = ("welcome", "about", "connect", "jev", "voice", "permissions", "hear", "shortcuts", "tour", "done")
 STUDIO = "https://aistudio.google.com/apikey"
 TYPESAFE_KEYS = "https://console.typesafe.ai/keys"          # TypeSafe's quickstart: "Get your API key" there
 JEV_ENV = "TYPESAFE_API_KEY"
@@ -83,7 +87,7 @@ SHORTCUTS = (
 TOUR = (
     ("doing", "cursorarrow.click.2", "Talk, and it's done",
      "Ask in plain words. I open apps, click, type and fill things in while you watch, and stop the moment you say “stop”.",
-     ("reply to Priya's email", "open my last invoice")),
+     ("reply to Nina's email", "open my last invoice")),
     ("notch-meet", "video.fill", "Your Mac, from anywhere",
      "Start a Google Meet from your phone, Telegram or email: I share the screen and you talk to me while I work.",
      ("start a Google Meet", "end the call")),
@@ -116,7 +120,7 @@ TOUR = (
 TRY = (
     ("calendar", "What's on my calendar today?", "Your day, at the notch"),
     ("video.fill", "Start a Google Meet", "Then join from your phone"),
-    ("waveform.badge.mic", "Train my voice", "So only you can wake me"),
+    ("doc.text.magnifyingglass", "Summarise what's on my screen", "Reads whatever you're looking at"),
 )
 
 
@@ -1244,6 +1248,125 @@ class Onboarding:
             dance.setRepeatCount_(seconds / (0.7 + i * 0.13))
             bar.addAnimation_forKey_(dance, "dance")
 
+    # hear: "Say Hey Mint"
+
+    def _page_hear(self, page) -> list:
+        me = prefs.name()
+        phrase = f"Hey {me}"
+        items = self._heading(page, "Microphone", f"Say “{phrase}”.",
+                              "Let's check I can hear you. Press Listen, then say it - no training needed. "
+                              "If something is in the way, I'll tell you what.")
+        box = self._card(page, 80, 204, W - 160, 236, radius=18, fill=0.2)
+        items.append((box, 0.1, 0.97))
+        self._tile(box, "mic.fill", _mint(), 24, 24, size=40)
+        self.hear_state = self._label(box, "Ready when you are.", 80, 30, W - 160 - 300, size=17,
+                                      weight=AppKit.NSFontWeightSemibold)
+        track = Quartz.CALayer.layer()
+        track.setFrame_(Quartz.CGRectMake(80, 64, W - 160 - 300, 10))
+        track.setCornerRadius_(5)
+        track.setBackgroundColor_(_cg(INK, 0.08))
+        fill = Quartz.CALayer.layer()
+        fill.setFrame_(Quartz.CGRectMake(0, 0, 0, 10))
+        fill.setCornerRadius_(5)
+        fill.setBackgroundColor_(_cg(_mint()))
+        track.addSublayer_(fill)
+        box.top.layer().addSublayer_(track)
+        self.hear_track, self.hear_fill = track, fill
+        self.hear_result = self._label(box, "", 80, 90, W - 160 - 110, size=14, rgb=INK, lines=5, h=120)
+        listen = self._pill(box, "Listen", W - 160 - 200, 22, 176, 44, self._hear_listen, symbol="waveform")
+        self.hear_button = listen
+        items.append(listen)
+        teach_y = 452
+        self.hear_teach = self._pill(page, "Teach it my voice · 15 s", 80, teach_y, 250, 40, self._hear_teach,
+                                     primary=False, symbol="person.wave.2", size=14)
+        items.append(self.hear_teach)
+        self.hear_teach_state = self._label(page, f"Optional: four takes of “{phrase}” so it is surer of your "
+                                                  "voice and accent. Learns in the background.",
+                                            346, teach_y + 2, W - 160 - 270, size=13, rgb=DIM, lines=2)
+        items.append(self.hear_teach_state)
+        items.append(self._label(page, "Only your voice (the voice lock) is optional too - Settings ▸ Voice & "
+                                       "wake word, any time.", 80, 512, W - 160, size=12, rgb=DIM, alpha=0.85))
+        self.mic_test = None
+        return items
+
+    def _hear_level(self, level: float, score: float, need: float) -> None:
+        def paint():
+            if self.view is None or PAGES[self.page] != "hear":
+                return
+            width = self.hear_track.frame().size.width
+            Quartz.CATransaction.begin()
+            Quartz.CATransaction.setAnimationDuration_(0.08)
+            self.hear_fill.setFrame_(Quartz.CGRectMake(0, 0, width * max(0.02, min(1.0, level)), 10))
+            Quartz.CATransaction.commit()
+        AppHelper.callAfter(paint)
+
+    def _hear_listen(self) -> None:
+        from mint.voice import mictest
+        from mint.agents.runtime import hub
+        session = getattr(hub, "mint", None)
+        if getattr(self, "mic_test", None) is not None:
+            return
+        if session is None:
+            self.hear_state.setStringValue_("I'm still starting - try again in a moment.")
+            return
+        if not prefs.get("mic"):
+            prefs.set("mic", True)                    # the test is the user asking to be heard
+        self.hear_state.setStringValue_(f"Listening… say “Hey {prefs.name()}”")
+        self.hear_result.setStringValue_("")
+
+        def done(findings, facts):
+            def show():
+                self.mic_test = None
+                if self.view is None or PAGES[self.page] != "hear":
+                    return
+                self.hear_fill.setFrame_(Quartz.CGRectMake(0, 0, 0, 10))
+                good = any(kind == "ok" for kind, _ in findings) and not any(k == "problem" for k, _ in findings)
+                self.hear_state.setStringValue_("I can hear you. ✓" if good else "Not quite yet.")
+                marks = {"ok": "✓", "problem": "✗", "tip": "•"}
+                self.hear_result.setStringValue_("\n".join(f"{marks.get(k, '•')} {w}" for k, w in findings))
+                self.hear_button.label.setStringValue_("Listen again")
+                self._center(self.hear_button)
+                if good:
+                    _pop(self.hear_button)
+            AppHelper.callAfter(show)
+        self.mic_test = mictest.run(session, self._hear_level, done)
+
+    def _hear_teach(self) -> None:
+        from mint.voice import wake_train
+        if getattr(self, "_teaching", False):
+            return
+        self._teaching = True
+        phrase = f"Hey {prefs.name()}"
+        if not prefs.get("mic"):
+            prefs.set("mic", True)
+
+        def say(text):
+            AppHelper.callAfter(lambda: self.hear_teach_state.setStringValue_(text))
+
+        def run():
+            try:
+                takes = wake_train.record_samples(4, 2.5, lambda i, n, stage: say(
+                    f"Say “{phrase}” now ({i + 1} of {n})…" if stage == "say" else f"Got {i + 1} of {n}."))
+                if sum(1 for t in takes if t.size > 16000 * 0.3) < 3:
+                    say("I didn't catch enough of that - try again, a little closer.")
+                    self._teaching = False
+                    return
+                say("Learning your voice in the background (about a minute and a half) - carry on.")
+
+                def done(path, problem):
+                    self._teaching = False
+                    say(problem or f"Done - “{phrase}” now knows your voice. ✓")
+                    if path is not None:
+                        from mint.agents.runtime import hub
+                        if getattr(hub, "mint", None) is not None:
+                            hub.mint.refresh_voice_lock()      # reloads the wake word model
+                wake_train.start(phrase, takes, None, done)
+            except Exception as error:
+                log.exception("teaching the wake word")
+                self._teaching = False
+                say(f"Couldn't record just now ({error}). It works without this.")
+        threading.Thread(target=run, daemon=True, name="onboarding-takes").start()
+
     # permissions
 
     def _page_permissions(self, page) -> list:
@@ -1738,6 +1861,9 @@ class Onboarding:
                     log.exception("saving the TypeSafe key")
         elif name == "voice" and self.voice and self.voice != str(prefs.get("voice_name") or config.VOICE):
             prefs.set("voice_name", self.voice)
+        elif name == "hear" and getattr(self, "mic_test", None) is not None:
+            self.mic_test.stop()
+            self.mic_test = None
         elif name == "shortcuts" and self.recording:
             from mint.ui.settings import cancel_recording
             cancel_recording()

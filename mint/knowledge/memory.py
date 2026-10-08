@@ -8,7 +8,7 @@
 A block is one note. Its `kind` says what sort:
 
 * profile - how the user wants things done, standing preferences ("prefers drafts to be shown first")
-* fact    - a durable fact ("the user's manager is Priya"), filed in a section (`group`):
+* fact    - a durable fact ("the user's manager is Nina"), filed in a section (`group`):
             core, people, work, accounts, schedule, preferences, places, vocabulary, misc
 * episode - a dated thing that happened (`day` YYYY-MM-DD): "Worked with Mint on the launch video"
 
@@ -170,7 +170,7 @@ _NOT_NAMES = {"The", "User", "Mint", "Slack", "Chrome", "Gmail", "Google", "Noti
 
 
 def _people_in(text: str, known: set[str] | None = None) -> list[str]:
-    """Names of people a note is about: 'a person named Sam', 'Priya is the user's manager', and any
+    """Names of people a note is about: 'a person named Sam', 'Nina is the user's manager', and any
     already-known name that appears in it."""
     found = []
     for match in list(_NAME_AFTER.finditer(text)) + list(_NAME_BEFORE.finditer(text)):
@@ -1026,7 +1026,7 @@ def _decide(text: str, candidates: list[dict]) -> dict | None:
         f"Similar saved notes (id | section | kind | text):\n{listed}\n\n"
         "Decide: \"skip\" if the new note says nothing that one of them does not already say (target = that id); "
         "\"supersede\" if it is a newer or corrected version of ONE of them - the same subject with a new value "
-        "('my manager is Rahul' supersedes 'my manager is Priya'; 'I also like tea' does not supersede 'I like "
+        "('my manager is Rahul' supersedes 'my manager is Nina'; 'I also like tea' does not supersede 'I like "
         "coffee') (target = that id); otherwise \"add\".\n"
         f"Also file it: section, one of {', '.join(GROUPS)}; kind: profile (how the user wants things done, a "
         "standing preference), fact (a lasting fact), or episode (something that happened on a day).\n"

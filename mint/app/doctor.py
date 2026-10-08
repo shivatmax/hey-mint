@@ -324,6 +324,22 @@ def check_mcp():
         "optional: Settings ▸ Appearance & Sound ▸ Claude mode ▸ Let agents ask Mint"
 
 
+def check_downloads():
+    from mint.tools import video_download as vd
+    yt = vd._ytdlp()
+    if yt is None:
+        return BAD, "yt-dlp is missing", "reinstall Mint"
+    runtime = vd.js_runtime()
+    ffmpeg = vd._ffmpeg()
+    parts = [f"yt-dlp {yt.version.__version__}"]
+    parts.append(f"{next(iter(runtime))} for YouTube" if runtime else "no JavaScript engine")
+    parts.append("ffmpeg" if ffmpeg else "no ffmpeg")
+    if runtime and ffmpeg:
+        return OK, ", ".join(parts), ""
+    return WARN, ", ".join(parts), ("YouTube in full quality and joined picture + sound need both; reinstall Mint "
+                                     "(they come with it)")
+
+
 # --- remote control ---------------------------------------------------------------------------------------
 
 def check_telegram():
@@ -382,6 +398,7 @@ CHECKS = (
     ("Status line", check_statusline),
     ("Codex", check_codex),
     ("Agents ask Mint", check_mcp),
+    ("Video downloads", check_downloads),
     ("Telegram", check_telegram),
     ("Email control", check_email),
     ("Disk", check_disk),

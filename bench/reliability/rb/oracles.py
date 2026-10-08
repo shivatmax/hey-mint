@@ -80,7 +80,7 @@ def _(ctx: Ctx):
 
 @oracle("docs-action-items")
 def _(ctx: Ctx):
-    sb.write("Docs/action-items.md", "# Action items\n\n- Priya: send the revised budget to finance by Friday\n"
+    sb.write("Docs/action-items.md", "# Action items\n\n- Nina: send the revised budget to finance by Friday\n"
              "- Tom: book the venue for the offsite\n- Lena: draft the hiring plan\n"
              "- Omar: fix the login bug before the release\n")
 

@@ -911,7 +911,10 @@ class Orb:
             pass
 
     def _squash(self, k: float = 0.15, stiffness: float = 180.0, damping: float = 9.0) -> None:
-        """Squashed wide (k) then a wobbly spring back; additive, so it rides on the breathing scale."""
+        """Squashed wide (k) then a wobbly spring back; additive, so it rides on the breathing scale.
+        Animation: Calm settles without the wobble (critically damped)."""
+        if kinetics.calm():
+            damping = max(damping, 2.0 * stiffness ** 0.5)
         for key, value in (("transform.scale.x", k), ("transform.scale.y", -k)):
             wobble = Quartz.CASpringAnimation.animationWithKeyPath_(key)
             wobble.setFromValue_(value)

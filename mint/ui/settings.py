@@ -77,7 +77,8 @@ MCP_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 WHERE = [(False, "A floating orb"), (True, "The notch")]
 OPEN_TO = [("auto", "Auto"), ("home", "Home"), ("search", "Search"), ("shelf", "Shelf"), ("agents", "Coding agents")]
 MOTION = [("full", "Full (playful)"), ("calm", "Calm"), ("minimal", "Minimal (fades only)")]
-AGENT_MODES = [("auto", "Auto (while they work)"), ("on", "Always on"), ("off", "Off")]
+AGENT_MODES = [("quiet", "Pop-ups only"), ("auto", "Live while they work"), ("on", "Always (Agents tab)"),
+               ("off", "Off")]
 FOLLOW_UP = [(0, "No - always say Hey Mint"), (4, "4 seconds"), (6, "6 seconds"), (8, "8 seconds"),
              (12, "12 seconds")]
 GUARD_LEVELS = [("all", "Deleting, changes and system commands"), ("delete", "Only deleting and system commands"),
@@ -162,8 +163,10 @@ def _cgc(color, alpha: float | None = None):
 
 def _text_height(text: str, size: float, width: float) -> float:
     font = AppKit.NSFont.systemFontOfSize_(size)
+    # A label's cell lays text out 2 pt in from each side (line fragment padding): measured at the full width, a
+    # line that only just fits here wraps in the label and its last word was cut off (the Status badge hint).
     rect = AppKit.NSString.stringWithString_(text).boundingRectWithSize_options_attributes_(
-        AppKit.NSMakeSize(width, 10_000), AppKit.NSStringDrawingUsesLineFragmentOrigin,
+        AppKit.NSMakeSize(max(1.0, width - 5), 10_000), AppKit.NSStringDrawingUsesLineFragmentOrigin,
         {AppKit.NSFontAttributeName: font})
     return float(rect.size.height) + 2
 
@@ -453,6 +456,7 @@ class SettingsWindow:
 
     def _page_voice(self, page, facts: dict) -> None:
         name = prefs.name()
+        self._mic_test_section(page, facts["active"][0] if facts.get("active") else f"Hey {name}")
         self._wake_section(page, facts["active"])
 
         if facts["stale"]:
@@ -475,6 +479,56 @@ class SettingsWindow:
                              "choose Strict.")
         self._row_switch(page, "addressee_check", "Ignore talk meant for others",
                          f"Things you say to other people, not to {name}.")
+        page.end()
+
+    def _mic_test_section(self, page, phrase: str) -> None:
+        """Is Mint hearing me? A live level, "Hey Mint" caught or not, and what is in the way (mictest.py)."""
+        name = prefs.name()
+        page.section("Microphone test")
+        card, top, x, h = page.row("Is it hearing me?", f"Press Test and say “{phrase}”. It checks the "
+                                   f"microphone, the wake word and - if it's on - the voice lock.", control_w=330)
+        meter = AppKit.NSLevelIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(x, top + (h - 16) / 2, 200, 16))
+        meter.setLevelIndicatorStyle_(AppKit.NSLevelIndicatorStyleContinuousCapacity)
+        meter.setMinValue_(0)
+        meter.setMaxValue_(1)
+        meter.setWarningValue_(0.85)
+        meter.setCriticalValue_(0.97)
+        card.addSubview_(meter)
+        # Room for a few findings (the label does not grow after the page is laid out).
+        results = page.text("Not tested yet.\n \n \n \n ", size=12, alpha=0.8)
+        fix = [None]
+
+        def level(value, score, need):
+            AppHelper.callAfter(lambda: (meter.setDoubleValue_(value),
+                                         results.setStringValue_(f"Listening… say “{phrase}”   "
+                                                                 f"(wake word {score:.2f} / {need:.2f})")))
+
+        def done(findings, facts):
+            def show():
+                meter.setDoubleValue_(0)
+                marks = {"ok": "✓", "problem": "✗", "tip": "•"}
+                results.setStringValue_("\n".join(f"{marks.get(kind, '•')} {words}" for kind, words in findings)
+                                        or "No problems found.")
+                button.setEnabled_(True)
+                button.setTitle_("Test again")
+                if not facts.get("mic_on", True) and fix[0] is None:
+                    fix[0] = self._button(card, "Turn mic on", x + 210, top + (h - 28) / 2, 120,
+                                          lambda: (self._act("mic_on"), test()))
+            AppHelper.callAfter(show)
+
+        def test():
+            run = self.actions.get("mic_test")
+            if run is None:
+                results.setStringValue_(f"{name} isn't running - start it and test again.")
+                return
+            button.setEnabled_(False)
+            results.setStringValue_(f"Listening… say “{phrase}”")
+            run(level, done)
+        button = self._button(card, "Test", x + 210, top + (h - 28) / 2, 120, test)
+        self._row_switch(page, "listen_in_calls", "Listen during calls",
+                         f"In Google Meet, Zoom or FaceTime, {name} still hears “{phrase}” (without echo "
+                         "cancellation, so the call is not disturbed). Off: it lets go of the microphone until the "
+                         "call ends.")
         page.end()
 
     def _wake_section(self, page, active: list[str]) -> None:
@@ -769,16 +823,78 @@ class SettingsWindow:
                 mcp[app] = None if not agent_mcp.available(app) else bool(agent_mcp.connected(app))
         except Exception:
             mcp = {"claude": None, "codex": None}
-        return {"hooks": self._hooks_title(), "limits": self._limits_title(), "mcp": mcp}
+        try:
+            from mint.tools import agent_checks
+            usage = agent_checks.limits_line()
+        except Exception:
+            usage = ""
+        try:
+            from mint.tools import agent_watch
+            here = any(agent_watch.installed().values()) or prefs.is_set("agent_mode")
+        except Exception:
+            here = True
+        return {"hooks": self._hooks_title(), "limits": self._limits_title(), "mcp": mcp, "usage": usage,
+                "agents_here": here}
 
     def _page_looks(self, page, facts: dict) -> None:
-        """Appearance & Sound: where Mint lives and how it looks, how much it moves, how much it makes a sound."""
+        """Appearance & Sound. The few things most people change, then everything else behind More options."""
         name = prefs.name()
         page.section("View")
         self._row_popup(page, "notch_mode", f"Where {name} lives", WHERE,
                         "Switching plays live: the orb flies into the notch, or drops out of it.", w=200)
         self._row_popup(page, "theme", "Theme", THEMES, w=200)
-        self._row_popup(page, "position", "Orb position", POSITIONS, w=200)
+        if not prefs.get("notch_mode"):
+            self._row_popup(page, "position", "Orb position", POSITIONS, w=200)
+        self._row_popup(page, "motion", "How much it moves", MOTION,
+                        "Calm: gentle, no bounce. Minimal: fades only (as with macOS Reduce motion).", w=200)
+        key = (prefs.get("shortcuts") or {}).get("hide") or ""
+        from mint.core import hotkeys
+        page.end(f"To hide {name}, use the menu bar or {hotkeys.display(key) if key else 'Shortcuts'}: it "
+                 f"comes out when you say Hey {name} and hides again when it goes back to sleep.")
+
+        page.section("Sounds")
+        self._row_switch(page, "ui_sounds", "Little sounds",
+                         "Off unless you turn it on. Soft sounds for done, error and pokes; quiet while you "
+                         "dictate or are on a call.")
+        self._row_slider(page, "sound_volume", "Volume", 0.0, 1.0, on_release=lambda: self._sample_sound("done"))
+        page.end()
+
+        page.section("Claude Code and Codex")
+        if not facts.get("agents_here", True):
+            self._row_value(page, "Not on this Mac", "",
+                            "Neither Claude Code nor Codex is installed, so this stays off. Install one and Mint "
+                            "turns on its pop-ups by itself.", w=40)
+            page.end()
+        else:
+            self._agent_rows(page, facts)
+
+        more = getattr(self, "_looks_more", False)
+        page.section()
+        self._row_buttons(page, "Face, effects, the notch's parts, agent extras",
+                          [("Fewer options" if more else "More options…", 150, self._toggle_looks_more)])
+        page.end()
+        if more:
+            self._looks_more_rows(page, facts)
+
+    def _agent_rows(self, page, facts: dict) -> None:
+        self._row_switch(page, "agent_approvals", "Pop up when one asks you something",
+                         "A permission request or a question: Allow, Deny or pick the answer right in the pop-up.")
+        self._row_switch(page, "agent_open_on_done", "Pop up when one finishes",
+                         "What it did, for a few seconds. Nothing shows while they work.")
+        self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet",
+                        "Claude's from the Claude app (it notes them while it's open), Codex's from its logs. "
+                        "Ask: \"how much Claude do I have left?\"", w=250)
+        page.end()
+
+    def _toggle_looks_more(self) -> None:
+        self._looks_more = not getattr(self, "_looks_more", False)
+        self.refresh(keep_scroll=True)
+
+    def _looks_more_rows(self, page, facts: dict) -> None:
+        """Everything else on Appearance & Sound (More options)."""
+        page.section("View")
+        if prefs.get("notch_mode"):
+            self._row_popup(page, "position", "Orb position", POSITIONS, "When it isn't in the notch.", w=200)
         self._row_popup(page, "notch_open_to", "The open notch shows", OPEN_TO,
                         "Auto: Home, or your coding agents while they work.", w=200)
         self._row_switch(page, "face", "Face on the orb")
@@ -786,8 +902,6 @@ class SettingsWindow:
         page.end()
 
         page.section("Animation")
-        self._row_popup(page, "motion", "How much it moves", MOTION,
-                        "Calm: gentle, no bounce. Minimal: fades only (as with macOS Reduce motion).", w=200)
         self._row_switch(page, "auto_emotions", "Expressions during conversation",
                          "Smiles, laughs and hearts that follow what you say.")
         self._row_switch(page, "status_badge", "Status badge",
@@ -803,16 +917,14 @@ class SettingsWindow:
         self._row_switch(page, "wander", "Little trips", "Now and then the orb takes a short trip near its spot.")
         page.end()
 
-        page.section("Sounds")
-        self._row_switch(page, "ui_sounds", "Little sounds", "Soft sounds made by Mint itself. Quiet while you dictate or are on a call.")
-        self._row_slider(page, "sound_volume", "Volume", 0.0, 1.0, on_release=lambda: self._sample_sound("done"))
+        page.section("Which sounds")
         self._row_switch(page, "sounds_notch", "Notch opening and closing")
         self._row_switch(page, "sounds_tasks", "Tasks", "Done, failed, a message sent, a file dropped.")
         self._row_switch(page, "sounds_play", "Play", "Pokes, dizzy and the morning hello.")
         self._row_buttons(page, "Hear them", [("Done", 80, lambda: self._sample_sound("done")),
                                               ("Error", 80, lambda: self._sample_sound("error")),
                                               ("Poke", 80, lambda: self._sample_sound("poke"))])
-        page.end()
+        page.end("Only with Little sounds on.")
 
         page.section("More")
         self._row_switch(page, "music_player_auto", "Music player",
@@ -830,15 +942,13 @@ class SettingsWindow:
         self._row_switch(page, "notch_search", "Search in the notch", "Find files and apps from the notch; what Mint finds shows there too.")
         self._row_switch(page, "notch_composer", "Type in the notch", "The + in the open notch turns it into a box to type a request.")
         page.end()
+        if not facts.get("agents_here", True):
+            return                                   # no Claude Code or Codex here: nothing to set up
         page.section("Claude mode (coding agents)")
         self._row_popup(page, "agent_mode", "Claude Code and Codex", AGENT_MODES,
-                        "Auto: the notch shows a session while it works. On: the Agents tab even when idle.", w=200)
+                        "Pop-ups only: when one asks or finishes. Live: also step by step while they work.", w=200)
         self._row_switch(page, "notch_agents_bar", "Agents bar under the notch",
-                         "A slim bar with the current step while Claude Code or Codex works.")
-        self._row_switch(page, "agent_approvals", "Open when an agent needs you",
-                         "A permission request or a question opens the notch on it.")
-        self._row_switch(page, "agent_open_on_done", "Show the summary when it finishes",
-                         "The notch opens for a few seconds on what it did.")
+                         "Live only: a slim bar with the current step while Claude Code or Codex works.")
         self._row_popup(page, "agent_telegram", "Message me on Telegram", AGENT_TELEGRAM,
                         "When an agent needs you or finishes: Allow / Deny there, or reply to tell it what to do.",
                         w=200)
@@ -848,8 +958,8 @@ class SettingsWindow:
                          "Needs Mint's Claude Code hooks. At most twice per request.")
         self._agent_hooks_row = self._row_buttons(
             page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks)],
-            "Allow, Always or Deny Claude Code's permission requests from the notch (adds a hook to "
-            "~/.claude/settings.json; a backup is kept). The terminal still asks too.")
+            "Allow, Always or Deny Claude Code's permission requests, and answer its questions, from the notch (adds "
+            "a hook to ~/.claude/settings.json; a backup is kept). The terminal still asks too.")
         mcp = facts.get("mcp") or {}
         self._mcp_buttons = dict(zip(("claude", "codex"), self._row_buttons(
             page, "Let agents ask Mint", [(self._mcp_title(app, mcp.get(app)), {"claude": 178, "codex": 132}[app],
@@ -861,8 +971,9 @@ class SettingsWindow:
                 button.setToolTip_(f"{MCP_NAMES[app]} isn't installed on this Mac.")
         self._mcp_state = dict(mcp)
         self._agent_limits_row = self._row_buttons(
-            page, "Claude's usage limits", [(facts["limits"], 210, self._toggle_limits)],
-            "Mint reads Claude Code's 5-hour and weekly limits through a status line, and keeps showing yours.")
+            page, "Claude's limits in a terminal", [(facts["limits"], 210, self._toggle_limits)],
+            "Only for Claude Code in a terminal (the Claude app's are read without this): a status line passes "
+            "its 5-hour and weekly limits to Mint, and keeps showing yours.")
         page.end()
 
     def _meet_setup(self) -> None:
@@ -1569,25 +1680,32 @@ class SettingsWindow:
         return {"info": updater.info(), "can_restart": power.can_restart()}
 
     def _page_help(self, page, facts: dict) -> None:
-        from mint import __version__
         from mint.app import report
-        page.section("Hey Mint")
-        self._row_value(page, "Version", __version__)
+        from mint.app import updater
         info = facts["info"]
-        latest = info.get("latest")
-        if not info.get("can_update"):
-            page.text(info.get("why") or "", size=11, alpha=0.6)
-        else:
+        current, latest = info.get("current") or "?", info.get("latest")
+        newer = bool(latest) and updater.newer(latest, current)
+        page.section("Hey Mint")
+        # The app's own version (it showed mint/__init__'s stale 0.3.1 under v0.6.1).
+        self._row_value(page, "Version", current + (f"  ·  {latest} is out" if newer else ""))
+        if info.get("can_update"):
             self._row_switch(page, "auto_update", "Update automatically",
                              "Checks at launch and twice a day; installs while you're away and reopens in place. "
                              "Your permissions stay.")
-            words = info.get("detail") or (f"Version {latest} is ready." if latest and latest != info["current"]
-                                           else "")
-            status = page.text(words or " ", size=11, alpha=0.6)
-            buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
-            if latest and latest != info["current"]:
-                buttons.append((f"Install {latest}", 130, lambda: self._install_update(status)))
-            self._row_buttons(page, "", buttons)
+        words = info.get("detail") or (f"Version {latest} is ready." if newer else
+                                       f"You have the newest version ({current})." if latest else "")
+        status = page.text(words or " ", size=11, alpha=0.6)
+        buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
+        if newer and info.get("can_update"):
+            buttons.append((f"Install {latest}", 130, lambda: self._install_update(status)))
+        elif newer:
+            # This copy can't swap itself (not the downloaded app, or no write access): a plain download,
+            # never a terminal command.
+            buttons.append((f"Download {latest}", 140, lambda: _open(info.get("download") or info["page"])))
+        self._row_buttons(page, "", buttons)
+        if not info.get("can_update"):
+            page.text("This copy doesn't update itself. Press Download when a new version is out, open it, and drag "
+                      "Hey Mint into Applications - your settings and permissions stay.", size=11, alpha=0.55)
         page.end("Free and open source (GPL-3.0).")
 
         page.section("Help")
@@ -1970,6 +2088,7 @@ class SettingsWindow:
         doc.setFrame_(AppKit.NSMakeRect(0, 0, body_w, max(page.y + 24, H - 70)))
         scroll.setDocumentView_(doc)
         content.addSubview_(scroll)
+        self._scroll = scroll
         self.window.setContentView_(content)
 
     def select(self, key: str) -> None:
@@ -1977,13 +2096,20 @@ class SettingsWindow:
         self.page_key = key
         self.refresh()
 
-    def refresh(self) -> None:
-        """Rebuild the contents (after training, forgetting, a device change, a new page)."""
+    def refresh(self, keep_scroll: bool = False) -> None:
+        """Rebuild the contents (after training, forgetting, a device change, a new page). keep_scroll: stay where
+        the page was scrolled to (a button in the middle of it)."""
         if self.window is None:
             return
+        scroll = getattr(self, "_scroll", None)
+        y = scroll.contentView().bounds().origin.y if keep_scroll and scroll is not None else 0.0
         self._handlers.clear()
         self._ended_handlers.clear()
         self._fill()
+        if y and self._scroll is not None:
+            clip = self._scroll.contentView()
+            clip.scrollToPoint_(AppKit.NSMakePoint(0, y))
+            self._scroll.reflectScrolledClipView_(clip)
         self.window.setTitle_(f"{prefs.name()} Settings")
 
     def _front(self) -> None:

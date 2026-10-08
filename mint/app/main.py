@@ -387,8 +387,8 @@ def main() -> int:
             AppHelper.callAfter(presence.register_shortcuts)
         elif key == "listen_while_working":
             mint.listen_while_working = bool(value)
-        elif key in ("voice_lock", "wake_phrase", "wake_models"):
-            mint.refresh_voice_lock()             # reloads the wake word models too
+        elif key in ("voice_lock", "wake_phrase", "wake_models", "quiet_while_waiting"):
+            mint.refresh_voice_lock()             # reloads the wake word models and the mic mode too
         elif key in ("theme", "position", "face"):
             presence.refresh()
         elif key in ("input_device", "output_device", "echo_cancellation"):
@@ -434,7 +434,9 @@ def main() -> int:
             try:
                 report = wake.train_name(name, progress=presence.action)
                 print(f"  [wake word ready: {report}]", flush=True)
-                presence.action(f"“Hey {name}” is ready - retrain your voice to make it yours")
+                from mint.voice import voicelock
+                presence.action(f"“Hey {name}” is ready" + (" - retrain your voice so the voice lock knows it"
+                                                            if voicelock.lock.enrolled else ""))
             except Exception as error:
                 print(f"  [could not set up 'Hey {name}': {error}; 'Hey Mint' still works]", flush=True)
                 presence.action(f"Could not set up “Hey {name}” - “Hey Mint” still works")
@@ -454,8 +456,19 @@ def main() -> int:
 
         if mint.enroller is not None:
             return
+        busy_with = getattr(mint, "_in_call", "") or getattr(mint, "_mic_lent_to", "")
+        if busy_with:
+            # 8 Oct: training started while Google Meet held the mic heard nothing, and was cancelled.
+            presence.action(f"{busy_with} is using the microphone - end the call, then train your voice")
+            print(f"  [voice training not started: {busy_with} is using the microphone]", flush=True)
+            return
         if not prefs.get("mic"):
             prefs.set("mic", True)              # enrolment needs the microphone
+        # Record through the microphone the voice lock will listen with (echo cancellation on speakers):
+        # a voiceprint recorded on the plain mic and checked through the other one turned the user away.
+        set_mode = getattr(mint.audio, "set_mode", None)
+        if set_mode is not None:
+            set_mode(quiet_asleep=False, reason="voice training: the microphone the voice lock uses")
 
         def start():
             enroller = None
@@ -464,6 +477,7 @@ def main() -> int:
                 if enroller is not None:
                     enroller.cancel()
                 mint.enroller = None
+                mint.refresh_voice_lock()           # back to the usual microphone mode
                 print("  [voice training cancelled]", flush=True)
 
             window = enroll.EnrollWindow(on_cancel=cancel)
@@ -482,7 +496,8 @@ def main() -> int:
             enroller.start()
             print("  [voice training started]", flush=True)
 
-        AppHelper.callAfter(start)
+        # The microphone switch above takes a moment; start once it has settled.
+        threading.Timer(2.5 if set_mode is not None else 0.0, lambda: AppHelper.callAfter(start)).start()
 
     def forget_voice():
         from mint.voice import voicelock
@@ -502,7 +517,13 @@ def main() -> int:
                     "train_voice": lambda: presence.fire("train_voice"),
                     "forget_voice": lambda: presence.fire("forget_voice"),
                     "audio_status": lambda: ((f"{mint._mic_lent_to} has the microphone - "
-                                              if mint._mic_lent_to else "") + getattr(mint.audio, "status", "")),
+                                              if mint._mic_lent_to else "")
+                                             + (f"in a {mint._in_call} call (wake word only) - "
+                                                if getattr(mint, "_in_call", "") else "")
+                                             + getattr(mint.audio, "status", "")),
+                    "mic_test": lambda on_level, on_done: __import__("mint.voice.mictest", fromlist=["run"]).run(
+                        mint, on_level, on_done),
+                    "mic_on": lambda: prefs.set("mic", True),
                 })
             settings_window[0].show()
         AppHelper.callAfter(show)
