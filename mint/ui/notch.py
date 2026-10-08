@@ -1275,7 +1275,7 @@ class Notch:
     def _music(self):
         """What is playing (music_player.compact_info), or None when nothing is."""
         import sys
-        player = sys.modules.get("mint.ui.music_player")
+        player = sys.modules.get(f"{__package__}.music_player")
         if player is None or prefs.get("notch_music") is False:
             return None
         try:
@@ -1290,7 +1290,9 @@ class Notch:
     def _mod(self, name):
         try:
             import importlib
-            return importlib.import_module("mint." + name)
+            # By this package, not "mint.": the packaged app keeps these in mint.ui (restructure.py), and a flat
+            # "mint.ui.notch_shelf" there is no module - the open notch lost Search, the shelf and the calendar.
+            return importlib.import_module(f"{__package__}.{name}")
         except Exception:
             log.debug("no %s", name, exc_info=True)
             return None
@@ -1564,7 +1566,7 @@ class Notch:
         return self.tab == "search" and (self.panel.isKeyWindow() or self._holding())
 
     def _search_dragging(self) -> bool:
-        mod = self._mod("notch_search") if "mint.ui.notch_search" in __import__("sys").modules else None
+        mod = self._mod("notch_search") if f"{__package__}.notch_search" in __import__("sys").modules else None
         try:
             return bool(mod is not None and mod.dragging())
         except Exception:
@@ -2018,7 +2020,7 @@ class Notch:
     def _no_music_card(self, music) -> None:
         """In the notch the player lives inside the notch, never as a card of its own under it."""
         import sys
-        player = sys.modules.get("mint.ui.music_player")
+        player = sys.modules.get(f"{__package__}.music_player")
         card = getattr(player, "card", None)
         try:
             if card is not None and card.is_open():

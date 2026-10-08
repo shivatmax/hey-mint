@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.12 (2026-10-08)
+
+- **The open notch is whole again in the app from the DMG:** it showed only the music player - Search, the file shelf,
+  the calendar, the battery, the coding agents and the setup tips were missing, because the notch looked them up by
+  names that exist only in a developer's copy of Mint. It finds them in the installed app now (a test keeps it so).
+- **Sounds stay quiet while you dictate or are on a call** in the installed app too (the same kind of lookup).
+
+- **Updates show their progress:** after Install, Settings ▸ Updates & Help shows a spinner, "Downloading Hey Mint X ·
+  42% · 107 of 254 MB" and a bar, live, then "Checking…" and "Installing…" - instead of the same button again. Once it
+  is downloaded and checked, "Install X now" restarts into it at once (otherwise it installs itself when Mint is idle).
+
 ## 0.6.11 (2026-10-08)
 
 - **Clipboard: preview and copy.** Rest the pointer on a clip and its preview opens beside the card (a picture

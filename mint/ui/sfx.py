@@ -258,9 +258,14 @@ def prepare() -> None:
     _ensure()
 
 
+# Written out whole: publish/restructure.py rewrites "mint.x" literals to where x lives in the packaged app
+# (mint.voice.dictation, mint.app.meet_call...); a name built at run time would miss there.
+_MODULES = {"dictation": "mint.voice.dictation", "meet_call": "mint.app.meet_call", "meetings": "mint.tools.meetings"}
+
+
 def _loaded(name: str):
     # Only modules Mint already uses: importing one here would cost the main thread its first sound.
-    return sys.modules.get(f"{__package__}.{name}")
+    return sys.modules.get(_MODULES.get(name, f"{__package__}.{name}"))
 
 
 def _quiet(name: str) -> bool:

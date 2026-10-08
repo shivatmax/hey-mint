@@ -131,6 +131,14 @@ AGENT_MODES = [("quiet", "Pop-ups only", ("bubble.left.fill", _BLUE), "When one 
 WAKE_SENSITIVITY = [("normal", "Normal", ("ear", _BLUE)),
                     ("high", "High - catches more", ("ear.badge.waveform", _ORANGE)),
                     ("low", "Low - fewer false starts", ("checkmark.shield", _GREEN))]
+def _updating(status, requested, ready) -> bool:
+    """An update on its way: downloading, being checked or installed, or asked for and not downloaded yet (and not
+    failed or done - those show their own words and buttons)."""
+    if status in ("downloading", "verifying", "installing"):
+        return True
+    return bool(requested) and not ready and status not in ("error", "ready", "installed", "current", "blocked")
+
+
 NOTCH_OPEN_AFTER = [(0.5, "Half a second", ("hare.fill", _GREEN)), (0.8, "Under a second", ("timer", _BLUE),
                                                                             "Default"),
                     (1.2, "About a second", ("timer", _BLUE)), (2.0, "Two seconds", ("tortoise.fill", _ORANGE))]
@@ -2261,15 +2269,26 @@ class SettingsWindow:
                              "Your permissions stay.")
         words = info.get("detail") or (f"Version {latest} is ready." if newer else
                                        f"You have the newest version ({current})." if latest else "")
-        status = page.text(words or " ", size=11, alpha=0.6)
-        buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
-        if newer and info.get("can_update"):
+        moving = bool(info.get("can_update")) and _updating(info.get("status"), info.get("requested"),
+                                                            info.get("ready"))
+        if moving:
+            self._update_progress(page)          # the progress row says it all, live
+            buttons = []
+        else:
+            status = page.text(words or " ", size=11, alpha=0.6)
+            buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
+        if moving:
+            pass                                 # (no Install button while it's on its way)
+        elif newer and info.get("can_update") and info.get("ready"):
+            buttons.append((f"Install {latest} now", 150, self._install_now, True))
+        elif newer and info.get("can_update"):
             buttons.append((f"Install {latest}", 130, lambda: self._install_update(status), True))
         elif newer:
             # This copy can't swap itself (not the downloaded app, or no write access): a plain download,
             # never a terminal command.
             buttons.append((f"Download {latest}", 140, lambda: _open(info.get("download") or info["page"]), True))
-        self._row_buttons(page, "", buttons)
+        if buttons:
+            self._row_buttons(page, "", buttons)
         if not info.get("can_update"):
             page.text("This copy doesn't update itself. Press Download when a new version is out, open it, and drag "
                       "Hey Mint into Applications - your settings and permissions stay.", size=11, alpha=0.55)
@@ -2425,10 +2444,80 @@ class SettingsWindow:
         subprocess.run(["open", "-e", str(custom.PATH)], check=False)
 
     def _install_update(self, status) -> None:
-        """Downloading, checking the signature and swapping the app take a while: on a thread."""
+        """Downloading, checking the signature and swapping the app take a while: on a thread. The page shows the
+        progress row at once (not the same button again)."""
         from mint.app import updater
-        status.setStringValue_("Installing…")
-        self._background("update-install", updater.install, status.setStringValue_)
+        status.setStringValue_("Starting the download…")
+        self._background("update-install", updater.install, lambda said: (status.setStringValue_(said),
+                                                                          self.refresh(keep_scroll=True)))
+        AppHelper.callLater(0.4, lambda: self.window is not None and self.refresh(keep_scroll=True))
+
+    def _install_now(self) -> None:
+        """Downloaded and checked: swap it in and restart now (the user asked; otherwise it waits for idle)."""
+        from mint.app import updater
+        self._background("update-now", updater.install_now)
+
+    def _update_progress(self, page) -> None:
+        """While an update downloads, checks and installs: a spinner, what it's doing with the percent and the
+        megabytes, and a bar - updated live (twice a second) until it's ready, then the page is built again."""
+        card, top, _x, _h = page.row("", height=64)
+        width = page.width
+        spinner = AppKit.NSProgressIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + 12, 16, 16))
+        spinner.setStyle_(AppKit.NSProgressIndicatorStyleSpinning)
+        spinner.setControlSize_(AppKit.NSControlSizeSmall)
+        spinner.setDisplayedWhenStopped_(False)
+        spinner.startAnimation_(None)
+        card.addSubview_(spinner)
+        label = self._label(card, "", 40, top + 11, width - 56, h=18, size=13)
+        bar = AppKit.NSProgressIndicator.alloc().initWithFrame_(AppKit.NSMakeRect(16, top + 37, width - 32, 10))
+        bar.setStyle_(AppKit.NSProgressIndicatorStyleBar)
+        bar.setIndeterminate_(False)
+        bar.setMinValue_(0.0)
+        bar.setMaxValue_(1.0)
+        card.addSubview_(bar)
+        self._upd_view = (spinner, label, bar)
+        self._update_tick()
+        if getattr(self, "_upd_timer", None) is None:
+            self._upd_timer = AppKit.NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+                0.5, True, lambda timer: self._update_tick())
+
+    def _update_tick(self) -> None:
+        from mint.app import updater
+        view = getattr(self, "_upd_view", None)
+        if self.window is None or view is None or view[1].window() is None:
+            self._stop_update_timer()
+            return
+        spinner, label, bar = view
+        p = updater.progress()
+        version = p["version"] or "the update"
+        status = p["status"]
+        if status == "downloading":
+            mb = p["size"] / 1e6
+            label.setStringValue_(f"Downloading Hey Mint {version} · {p['progress'] * 100:.0f}%"
+                                  + (f" · {p['progress'] * mb:.0f} of {mb:.0f} MB" if mb else ""))
+            bar.setIndeterminate_(False)
+            bar.setDoubleValue_(p["progress"])
+        elif status == "verifying":
+            label.setStringValue_(f"Checking Hey Mint {version} (its signature and checksum)…")
+            bar.setIndeterminate_(True)
+            bar.startAnimation_(None)
+        elif status == "installing":
+            label.setStringValue_(f"Installing Hey Mint {version} - Mint restarts in a few seconds…")
+            bar.setIndeterminate_(True)
+            bar.startAnimation_(None)
+        elif _updating(status, p["requested"], p["ready"]):
+            label.setStringValue_(f"Getting Hey Mint {version}…")
+            bar.setIndeterminate_(True)
+            bar.startAnimation_(None)
+        else:                                   # ready, installed or failed: the page says it with its buttons
+            self._stop_update_timer()
+            self.refresh(keep_scroll=True)
+
+    def _stop_update_timer(self) -> None:
+        timer = getattr(self, "_upd_timer", None)
+        if timer is not None:
+            timer.invalidate()
+        self._upd_timer = None
 
     def _restart(self) -> None:
         from mint.app import power

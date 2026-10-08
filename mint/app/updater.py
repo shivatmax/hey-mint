@@ -339,6 +339,15 @@ def info() -> dict:
                 "auto": auto(), "channel": _channel(), "requested": requested(), "waiting": _waiting}
 
 
+def progress() -> dict:
+    """For Settings' progress row, several times a second: cheap (no disk or signature checks)."""
+    with _lock:
+        offer = _offer or {}
+        return {"status": _state["status"], "progress": _state["progress"], "detail": _state["detail"],
+                "version": offer.get("version"), "size": offer.get("size") or 0, "ready": _staged is not None,
+                "requested": bool(_requested), "waiting": _waiting}
+
+
 # --- downloading and checking the new app ----------------------------------------------------------
 
 def _download(offer: dict, folder: Path) -> Path:

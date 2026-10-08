@@ -113,3 +113,18 @@ def test_keys_kept_before_are_dropped_from_the_saved_history(monkeypatch, tmp_pa
     clip_tools._load()
     assert [h["id"] for h in clip_tools.HISTORY] == ["n"]
     assert SECRETS[1] not in (tmp_path / "history.json").read_text()       # gone from the file too
+
+
+def test_settings_shows_update_progress_only_while_it_is_on_its_way():
+    try:
+        from mint.ui import settings as settings_window
+        from mint.app import updater
+    except ImportError:
+        from mint import settings_window, updater
+    on_way = settings_window._updating
+    assert on_way("downloading", False, False) and on_way("verifying", True, False) and on_way("installing", True, True)
+    assert on_way("available", True, False)                     # asked for: about to download
+    assert not on_way("error", True, False)                     # failed: the page shows why, with its buttons
+    assert not on_way("ready", True, True) and not on_way("available", False, False)
+    p = updater.progress()
+    assert {"status", "progress", "version", "size", "ready", "requested"} <= set(p)
