@@ -238,9 +238,35 @@ def _fourcc(text: str) -> int:
     return int.from_bytes(text.encode(), "big")
 
 
+_stuck: set = set()          # bundles whose permission check never came back (macOS hangs on some quit apps)
+AUTOMATION_WAIT = 3.0
+
+
 def automation(bundle_id: str, ask: bool = False) -> int:
     """AEDeterminePermissionToAutomateTarget: 0 allowed, -1743 denied, -1744 macOS would ask, -600 the app
-    isn't running (unknown). ask=True shows macOS's prompt (blocks until answered; not on the main thread)."""
+    isn't running (unknown). ask=True shows macOS's prompt (blocks until answered; not on the main thread).
+    Without ask it gives up after 3 s and says unknown: for an app that was just quit (Spotify) macOS can hang in
+    there for good, which froze Settings' apps list and the library."""
+    if ask:
+        return _automation(bundle_id, True)
+    if bundle_id in _stuck:
+        return AE_NOT_RUNNING
+    out: list = []
+    done = threading.Event()
+
+    def run():
+        out.append(_automation(bundle_id, False))
+        _stuck.discard(bundle_id)
+        done.set()
+    _stuck.add(bundle_id)
+    threading.Thread(target=run, daemon=True, name="automation-check").start()
+    if not done.wait(AUTOMATION_WAIT):
+        log.info("automation %s: no answer from macOS", bundle_id)
+        return AE_NOT_RUNNING
+    return out[0]
+
+
+def _automation(bundle_id: str, ask: bool) -> int:
     global _cs
     try:
         if _cs is None:

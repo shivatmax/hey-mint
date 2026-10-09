@@ -2083,8 +2083,8 @@ class Notch:
             self._setup_until = max(self._setup_until, time.monotonic() + 20.0)   # (over a song: it stays up)
 
     def _setup_pill(self, show: bool, keys, left: float, top_y: float) -> None:
-        """Music has the Mint pane's place: a small "Set up · 2" pill in the header says there's something to set
-        up; a click brings the Mint pane and its chips over the player for a while."""
+        """Music has the Mint pane's place: a small "✦ Set up · 2" pill just above the player says there's something
+        to set up; a click brings the Mint pane and its chips over the player for a while."""
         h = self.home
         pill = h.get("setup_pill")
         if show and pill is None:
@@ -2093,7 +2093,7 @@ class Notch:
             pill = MintNotchButton.buttonWithTitle_target_action_("", act, "fire:")
             pill.setBordered_(False)
             pill.setWantsLayer_(True)
-            pill.layer().setCornerRadius_(10)
+            pill.layer().setCornerRadius_(9)
             pill.layer().setBackgroundColor_(gfx.cg(gfx.accent(), 0.22))
             pill.layer().setBorderWidth_(1.0)
             pill.layer().setBorderColor_(gfx.cg(gfx.accent(), 0.6))
@@ -2104,18 +2104,19 @@ class Notch:
         if pill is None:
             return
         if show:
-            words = f"Set up · {len(keys)}"
+            # Under the tabs, in the gap above the player (the header has no room: the tabs run up to the little
+            # Mint in the wing, and the right side holds the battery and the buttons).
+            words = f"✦ Set up · {len(keys)}"
             if str(pill.title()) != words:
                 pill.setAttributedTitle_(AppKit.NSAttributedString.alloc().initWithString_attributes_(words, {
-                    AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightSemibold),
+                    AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(10.5, AppKit.NSFontWeightSemibold),
                     AppKit.NSForegroundColorAttributeName: gfx.ns(gfx.light(gfx.accent()))}))
-            after = max([AppKit.NSMaxX(b.frame()) for b in h["tabs"].values() if not b.isHidden()] or [left])
-            w = pill.attributedTitle().size().width + 20
-            fresh = pill.isHidden()
-            pill.setFrame_(AppKit.NSMakeRect(after + 8, top_y - 10, w, 20))
+            pill.setToolTip_(f"{len(keys)} thing{'s' if len(keys) != 1 else ''} you can still set up")
+            w = pill.attributedTitle().size().width + 18
+            body_top = WIN_H - self.nh - 8
+            gap_top = body_top - (BODY_H - PLAYER_H) / 2           # where the player starts
+            pill.setFrame_(AppKit.NSMakeRect(left + 2, gap_top + 1, w, min(18.0, body_top - gap_top - 1)))
             self._top(pill, True)
-            if fresh and not kinetics.reduce_motion() and pill.layer() is not None:
-                kinetics.pop(pill.layer(), "bouncy", start=0.6, delay=0.25)
         elif not pill.isHidden():
             self._conceal(pill)
 

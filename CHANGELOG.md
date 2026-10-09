@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.17 (2026-10-09)
+
+- **Settings' apps list never freezes on a quit app:** macOS's check of whether Mint may control an app can hang
+  for good right after that app quits (Spotify); Mint now gives up after 3 seconds and shows it as unknown.
+- **The "Set up" pill no longer overlaps the little Mint:** over a song it sits just above the player, under the
+  tabs ("✦ Set up · 4"), instead of in the header where the tabs already run up to the little Mint.
+
 ## 0.6.16 (2026-10-09)
 
 - **"Stop the music" stops it, and a quit Spotify stays quit.** Play / pause by voice tells Spotify or Music
