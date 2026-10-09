@@ -111,10 +111,11 @@ def prompt_text() -> str:
     words = terms()
     fixes = corrections()
     parts = [hearing.prompt_text()]
+    from mint.tools.diet import clip
     if words:
-        parts.append("Words and names this user says often - when you hear something close to one "
-                     "of these, it is almost certainly that: " + ", ".join(words) + ".")
+        parts.append(clip("Words and names this user says often - when you hear something close to one "
+                          "of these, it is almost certainly that: " + ", ".join(words) + ".", 400))
     if fixes:
-        parts.append("Mishearings you have been corrected on: " +
-                     "; ".join(f"'{h}' means {m}" for h, m in fixes) + ".")
+        parts.append(clip("Mishearings you have been corrected on: " +
+                          "; ".join(f"'{h}' means {m}" for h, m in fixes) + ".", 300))
     return "\n".join(parts)

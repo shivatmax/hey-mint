@@ -489,10 +489,7 @@ def settings(pane: str) -> str:
 
 # --- The tool ------------------------------------------------------------------------------
 
-PROMPT = """Mac switches: brightness, keep awake, Do Not Disturb, window layouts (halves, thirds, quarters, \
-maximise, full screen, two apps side by side, other display - Rectangle does it when installed), resume music, \
-Night Shift, Wi-Fi, show desktop / Mission Control, a Settings page -> the `mac` tool. Volume and mute: \
-set_volume / system_action. Screenshots: screenshot. Screen recordings: screen_record."""
+PROMPT = """Volume and mute: set_volume / system_action; the other Mac switches and window layouts: mac."""
 
 
 def declarations():

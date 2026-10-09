@@ -118,13 +118,46 @@ def test_claude_limits_come_from_the_claude_apps_newest_sample(tmp_path, monkeyp
     assert "97% of the 5-hour limit left" in agent_checks._limits()
 
 
-def test_an_old_sample_says_nothing_about_the_five_hours(tmp_path, monkeypatch):
+def test_an_old_sample_is_not_shown_at_all(tmp_path, monkeypatch):
+    """Numbers that may be wrong now are left out: the 5 hours after 20 minutes, the week after an hour."""
     now = time.time() * 1000
+    _app_usage(tmp_path, monkeypatch, [{"t": now - 30 * 60_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
+    claude = agent_watch.limits()["claude"]
+    assert "5h" not in claude and claude["week"] == 50 and not claude["live"]
     _app_usage(tmp_path, monkeypatch, [{"t": now - 6 * 3_600_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
-    assert agent_watch.limits()["claude"] == {"at": (now - 6 * 3_600_000) / 1000, "source": "app", "week": 50}
-    _app_usage(tmp_path, monkeypatch, [{"t": now - 8 * 86_400_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
     assert "claude" not in agent_watch.limits()
     assert agent_checks.limits_line() == ""
+    assert "aren't known right now" in agent_checks._limits()
+
+
+def test_a_window_that_has_reset_since_is_unknown_not_zero():
+    now = time.time()
+    old = agent_watch._limit_pair({"used_percent": 70, "resets_at": now - 10}, {"used_percent": 20, "resets_at": now + 9e4},
+                                  "used_percent", now - 60)
+    assert "5h" not in old and old["week"] == 20
+
+
+def test_codex_live_reading():
+    now = time.time()
+    x = agent_watch._codex_reading({"primary": {"usedPercent": 43, "windowDurationMins": 300, "resetsAt": now + 600},
+                                    "secondary": {"usedPercent": 16, "windowDurationMins": 10080,
+                                                  "resetsAt": now + 86400}, "planType": "team"})
+    assert x["5h"] == 43 and x["week"] == 16 and x["live"] and x["plan"] == "team"
+    assert agent_watch._codex_reading(None) is None
+    assert agent_watch._codex_reading({"primary": None, "secondary": None}) is None
+
+
+def test_live_codex_beats_its_logs(tmp_path, monkeypatch):
+    _app_usage(tmp_path, monkeypatch, [])
+    now = time.time()
+    monkeypatch.setattr(agent_watch, "LIMITS", {"codex": {"5h": 7.0, "week": 10.0, "at": now - 4 * 3600}})
+    assert "codex" not in agent_watch.limits(live=False)          # 4 hours old: not shown
+    agent_watch._live["at"] = time.monotonic()                     # (just asked: no new reading started)
+    agent_watch.LIVE["codex"] = {"5h": 43.0, "5h_resets": now + 600, "week": 16.0, "week_resets": now + 9e4,
+                                 "at": now, "live": True}
+    codex = agent_watch.limits(live=False)["codex"]
+    assert codex["5h"] == 43.0 and codex["week"] == 16.0 and codex["live"]
+    assert agent_checks.limits_line() == "Codex 5h 43% · week 16%"
 
 
 def test_a_newer_status_line_wins(tmp_path, monkeypatch):
@@ -401,3 +434,14 @@ def test_a_new_agent_without_a_model_is_on_gemini(tmp_path, monkeypatch):
     assert registry.get("Nova")["models"] == FLASH
     assert catalog.resolve("gemini") == "gemini/gemini-3.8-flash"
     assert catalog.GEMINI_LAST[:3] == FLASH                                   # the last resort is the same chain
+
+
+def test_refresh_asks_codex_again_at_once(monkeypatch):
+    asked = []
+    monkeypatch.setattr(agent_watch, "codex_live", lambda *a, **k: asked.append(1) or None)
+    agent_watch._live.update(at=time.monotonic(), failed=-1e9)
+    agent_watch.refresh_live(block=True)
+    assert asked == []                                  # asked just now: not again
+    agent_watch.refresh_live(force=True)
+    agent_watch.refresh_live(block=True)
+    assert asked == [1]

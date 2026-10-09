@@ -161,17 +161,16 @@ def meant_words() -> list[str]:
 def prompt_text() -> str:
     phrase = _main_phrase()
     heard_as = " - 'payment', 'hymen', 'Hey man' -" if phrase.lower() == "hey mint" else ""
-    lines = [f"The wake phrase \"{phrase}\" is caught on the Mac and cut from the audio you get, so a "
-             "turn normally starts with the request itself. If a turn still starts with a stray word that "
-             f"sounds like it{heard_as} that is the wake phrase, not a request: "
-             "ignore it, and if nothing else was said, just ask briefly what they need."]
+    lines = [f"The wake phrase \"{phrase}\" is cut from your audio. A stray first word that sounds like "
+             f"it{heard_as} is the wake phrase, not a request: ignore it (nothing else said: ask briefly what "
+             "they need)."]
     pairs = [f for f in fixes() if not _is_wake(f["meant"])]
     if pairs:
-        lines.append("Words you have misheard before, and what the user actually says: "
-                     + "; ".join(f"'{_clean(f['heard'])}' is '{_clean(f['meant'])}'" for f in pairs) + ".")
-    lines.append("When the user corrects how you heard a word or name (\"I said Aman, not Amen\", "
-                 f"\"it's {phrase}, not payment\"), call fix_hearing once with what you heard and what "
-                 "they meant, then carry on with the corrected request. Not for a change of mind.")
+        from mint.tools.diet import clip
+        lines.append(clip("Words you have misheard before, and what the user actually says: "
+                          + "; ".join(f"'{_clean(f['heard'])}' is '{_clean(f['meant'])}'" for f in pairs) + ".", 300))
+    lines.append("When the user corrects a word you heard (\"I said Aman, not Amen\"), use_tool fix_hearing once "
+                 "with what you heard and what they meant, then carry on. Not for a change of mind.")
     return "\n".join(lines)
 
 

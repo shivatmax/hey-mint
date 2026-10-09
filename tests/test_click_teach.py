@@ -262,6 +262,7 @@ def test_tutor_and_find_reject_another_apps_skill(library, monkeypatch):
         return _Pick(number, 0.71)
 
     monkeypatch.setattr(skillbook.jev, "choose", choose)
+    monkeypatch.setattr(skillbook.jev, "available", lambda: True)      # Jev decides (without a key: Gemini)
     skill, why = skillbook.find(task, "Code")
     assert skill is None and "for claude" in why
     # app words don't count as shared words: 'code' and 'extension' alone chose it on 1 Oct

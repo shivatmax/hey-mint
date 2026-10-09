@@ -201,37 +201,26 @@ NAMES = ("read_file", "write_file", "find_files", "file_action", "web_search", "
 
 PROMPT = """
 # Harness: how to act on this Mac
-Work in the background first; move the pointer only when nothing else can do it. Never tell the user you
-can't do something on the Mac before trying the tools below - try, and if it fails, try the next rung.
-Background (no pointer, nothing needs to be in front):
-1. Facts, news, docs, prices: web_search, then read_url on the best result. Don't open a browser to look
-   something up unless the user wants to see it.
-2. Files: find_files to locate. For a file you don't know the name of ("my grocery list", "the PDF from
-   yesterday"), call find_files with NO query first: it lists files Mint made and recently changed documents.
-   Then one content word. After three searches, ask the user where it is. read_file to read, write_file to create or edit (mode=replace for a small change), file_action to
-   open, reveal, move, rename or trash. Say where you saved things.
-3. Web pages: open_url or browser new_tab - they pick the browser by themselves (the one the user names,
-   else the user's browser rules, e.g. entertainment in Brave), so never open_app a browser first. Inside a
-   page in Chrome or Brave: ALWAYS the browser tool - read / links / find to see, click / fill / select by
-   the visible text or label, back, tabs, close_tab, group (a named tab group: "put YouTube and anime in a
-   group called Entertainment"), toolbar (an extension's button, a bookmark). It is exact and fast. When
-   the user says which browser to always use for something, save it: browser action=rule.
+Never say you can't do something on the Mac before trying these; if one fails, take the next rung.
+Background first, the pointer last:
+1. Facts, news, prices: web_search, then read_url - no browser unless the user wants to see it.
+2. Files: find_files. A file they can't name ("my grocery list"): NO query first (it lists files Mint made
+   and recent documents), then one content word; after three searches, ask. read_file; write_file
+   (mode=replace for a small change); file_action (open, reveal, move, rename, trash). Say where you saved.
+3. Web pages: open_url or browser new_tab pick the browser themselves - never open_app a browser first.
+   Inside a page in Chrome or Brave: ALWAYS the browser tool (read, find, click, fill, select by visible
+   text; tabs, group, toolbar). "Always use Brave for X": browser action=rule.
 4. Scriptable apps (Finder, Music, Notes, Calendar, Reminders, System Events): run_applescript.
-Foreground (the app comes to the front, still no guessing):
-5. An app command (export, new window, show sidebar, full screen, format, sort): menu - list a menu first
-   when unsure; it also tells you the keyboard shortcut for next time.
-6. Something off screen: scroll_to target=... (it scrolls until it appears); one pane of several: where=.
-7. A control by its name: ui_act (ui_elements lists the exact names).
-8. After a click that opens a dialog or page, or starts an export: wait_for_text (seconds; gone=true for a
-   'Loading…' label). An AI chat writing its answer, or minutes of work: wait_until_done.
-Pointer (last):
-9. "this" / "here" / "where my mouse is": pointer (where tells you what it is over; click clicks it).
-10. Only for things no tool above can see (canvases, games, custom-drawn apps): look, then click_at with the
-   target's name (x, y only a hint - Mint finds it by name, text or vision). click_at says what it hit - if that is not the target, pick a different point or use ui_act; never the same point twice.
-If a tool result starts with [Loop warning], do something different - never the same call a fourth time.
-A request repeated after an earlier failure means: try again, differently - never answer it from the
-earlier failure without a single tool call.
-"""
+5. An app command (export, show sidebar, full screen): menu (action=list first when unsure).
+6. Off screen: scroll_to target=... (one pane of several: where=).
+7. A control by its name: ui_act (ui_elements lists the names).
+8. After a click that opens a dialog or page: wait_for_text (gone=true for 'Loading…'); an AI chat
+   answering, or minutes of work: wait_until_done.
+9. "This" / "here" / "where my mouse is": pointer.
+10. Only what nothing above can see (canvases, games): look, then click_at by the target's name; it says
+   what it hit - if wrong, another point or ui_act, never the same point twice.
+[Loop warning] in a result: do something different. A request repeated after a failure: try again,
+differently - never answer it from the earlier failure without a tool call."""
 
 from mint.tools import clipboard as _clip  # noqa: E402  (the screenshot and clipboard guide joins the prompt)
 PROMPT += _clip.PROMPT
@@ -1718,18 +1707,33 @@ def _highlight_box(box, label: str = "", seconds: float = 1.6) -> None:
         pass
 
 
-def _wheel(point, direction: str, amount: int) -> None:
+def _wheel(point, direction: str, amount: int) -> str:
+    """Turn the wheel over `point`. -> the route used ("background_pointer" or "global_input")."""
     import Quartz
 
+    from mint.screen import bg_pointer
     from mint.tools.fastinput import _post
     step = 5
     dy = {"down": -step, "up": step}.get(direction, 0)
     dx = {"left": step, "right": -step}.get(direction, 0)
+    # Mint's own pointer first (that window only); the wheel at the point when it can't be used or moved nothing.
+    mine = bg_pointer.scroll(point[0], point[1], dy, dx, max(1, amount))
+    if mine.landed or (mine.sent and mine.checked and bg_pointer.proven(mine.target.pid)):
+        return bg_pointer.BACKGROUND            # moved, or at its end in an app Mint's pointer is known to reach
+    from mint.screen import effect
+    was = effect.pointer_at()
     for _ in range(max(1, amount)):
         event = Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 2, dy, dx)
         Quartz.CGEventSetLocation(event, Quartz.CGPointMake(*point))
         _post(event)
         time.sleep(0.02)
+    time.sleep(0.05)
+    effect.give_pointer_back(was, (point[0], point[1]))      # a placed wheel event takes the pointer there
+    return bg_pointer.REAL
+
+
+def _delivery(route: str) -> tuple[str, str]:
+    return route, "background" if route == "background_pointer" else "foreground"
 
 
 def _scroll_area_of(element):
@@ -1860,13 +1864,13 @@ def scroll_to(args: dict) -> str:
             pass
         from mint.screen import effect
         last = _signature(pane)
-        _wheel(point, direction, amount)
+        how = _delivery(_wheel(point, direction, amount))
         time.sleep(0.25)
         if _signature(pane) != last:
-            return effect.Effect(effect.CONFIRMED, f"Scrolled the {where} pane of {name} {direction}", "global_input",
-                                 "foreground", ["its content moved (read back)"]).render()
+            return effect.Effect(effect.CONFIRMED, f"Scrolled the {where} pane of {name} {direction}", *how,
+                                 ["its content moved (read back)"]).render()
         return effect.Effect(effect.NOOP, f"Scrolled the {where} pane of {name} {direction}, but its content did not "
-                             "move", "global_input", "foreground",
+                             "move", *how,
                              escalation=f"it may be at its end - try direction={'up' if direction == 'down' else 'down'}, "
                              "or name the pane with where=").render()
 
@@ -1882,7 +1886,7 @@ def scroll_to(args: dict) -> str:
         return _rank(found, target)[0] if found else None
 
     element = locate()
-    rounds = 0
+    rounds, how = 0, ("global_input", "foreground")
     seen = _ocr_find(target) if element is None else None
     if seen is not None:
         _highlight_box(seen, target)
@@ -1908,7 +1912,7 @@ def scroll_to(args: dict) -> str:
             point = _center(_frame(pane))
             last = _signature(pane)
             for step in range(1, 16):
-                _wheel(point, direction, 4)
+                how = _delivery(_wheel(point, direction, 4))
                 rounds += 1
                 time.sleep(0.3)
                 element = locate()
@@ -1919,8 +1923,7 @@ def scroll_to(args: dict) -> str:
                     _highlight_box(seen, target)
                     from mint.screen import effect
                     return effect.Effect(effect.CONFIRMED, f"'{target}' is now in view in {name} after {rounds} "
-                                         f"scroll{'s' if rounds > 1 else ''}", "global_input", "foreground",
-                                         ["read on screen"]).render()
+                                         f"scroll{'s' if rounds > 1 else ''}", *how, ["read on screen"]).render()
                 now = _signature(pane)
                 if now == last:
                     break                  # this pane is at its end
@@ -1948,14 +1951,14 @@ def scroll_to(args: dict) -> str:
                 box = _frame(element)
                 if not box or (ay <= box[1] and box[1] + box[3] <= ay + ah):
                     break
-                _wheel(point, "down" if box[1] > ay + ah else "up", 3)
+                how = _delivery(_wheel(point, "down" if box[1] > ay + ah else "up", 3))
                 time.sleep(0.08)
     visible = _on_screen(element, window)
     label = _label(element)[:60] or target
     _highlight(element, target)
     role = (_attr(element, "AXRole") or "").removeprefix("AX")
     from mint.screen import effect
-    route = ("global_input", "foreground") if wheeled else ("accessibility", "background")
+    route = (how if wheeled else ("accessibility", "background"))
     if visible:
         return effect.Effect(effect.CONFIRMED, f"'{label}' ({role}) is now in view in {name}"
                              + (f" after {rounds} scrolls" if rounds else ""), *route,

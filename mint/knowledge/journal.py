@@ -343,9 +343,8 @@ def recall_history(question: str, when: str = "", around: str = "") -> str:
     return f"({label}, {len(lines)} entries) {text.strip()}{more}"
 
 
-PROMPT = """The past: for what happened before - "what did we do yesterday", "when did I ask about…", "what was \
-that site / file / video from last week", "what did Astra find on Monday", "what was I working on", "how long was I in Slack" - call recall_history (with `when` if \
-the user gives a time). recall is for lasting facts about the user; recall_history is for events. Its answer names the best matching line; to hear more of that conversation word for word, call it again with around=<that number>."""
+PROMPT = """The past: recall is for lasting facts about the user, recall_history for events ("what did we do yesterday", \
+"what did Astra find on Monday", "how long was I in Slack"; around=<line> reads that part word for word)."""
 
 
 def declarations():

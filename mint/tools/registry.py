@@ -343,6 +343,19 @@ def declarations() -> list[types.FunctionDeclaration]:
              "button": {**STRING, "description": "left (default) or right."},
              "double": {"type": types.Type.BOOLEAN, "description": "Double-click."}},
             ["target"]),
+        _fn("drag",
+            "Drag one thing onto or to another with the mouse: a file onto a folder, a card to another column, "
+            "a slider's knob, a window edge, a selection. Name each end by its text or a short description "
+            "(found like click_at's target); x/y (0-1000 across the latest look) are hints, or the place itself "
+            "when it has no name. Look afterwards to check it landed.",
+            {"from_target": {**STRING, "description": "What to pick up: its text or a short description."},
+             "to_target": {**STRING, "description": "Where to drop it: its text or a short description."},
+             "from_x": {"type": types.Type.NUMBER, "description": "Hint: start, 0-1000 from the left."},
+             "from_y": {"type": types.Type.NUMBER, "description": "Hint: start, 0-1000 from the top."},
+             "to_x": {"type": types.Type.NUMBER, "description": "Hint: end, 0-1000 from the left."},
+             "to_y": {"type": types.Type.NUMBER, "description": "Hint: end, 0-1000 from the top."},
+             "seconds": {"type": types.Type.NUMBER, "description": "How long the move takes (0.25-2, default 0.6)."}},
+            []),
     ]
 
     if config.ALLOW_SHELL:
@@ -432,10 +445,41 @@ _SYNC = {
     "export_doc_pdf": lambda a: documents.export_doc_pdf(a.get("open_after", True) is not False),
     "create_pdf": lambda a: documents.create_pdf(a["title"], a["content"], a.get("open_after", True) is not False,
                                                  str(a.get("save_to") or "")),
+    "drag": lambda a: vision.drag(
+        str(a.get("from_target") or ""), str(a.get("to_target") or ""), _number(a.get("from_x")),
+        _number(a.get("from_y")), _number(a.get("to_x")), _number(a.get("to_y")), _number(a.get("seconds")) or 0.6),
     "click_at": lambda a: vision.click_at(
         _number(a.get("x")), _number(a.get("y")), a.get("button", "left"), bool(a.get("double", False)),
         str(a.get("target") or "")),
 }
+
+
+def _screen_words(limit: int = 45) -> str:
+    """With a look: the app in front and the words in its window with where they are (0-1000 across the screenshot) -
+    read on the Mac, exact, so the model needn't make out small text in the picture (seen 9 Oct: it guessed points
+    in Telegram's window that landed on the desktop behind)."""
+    try:
+        import AppKit
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        items, _ = ocr.read_screen()
+        window = ocr._front_window()
+        area = vision._last_area
+        if not items or not area:
+            return ""
+        mine = [i for i in items if window is None or ocr._inside(i, window)]
+        head = f"\n[In front: {front.localizedName() if front else 'nothing'}"
+        head += "" if window else " - no window of it is on screen; open_app it again"
+        if not mine:
+            return head + "]"
+        def at(i):
+            x = (i["x"] + i["w"] / 2 - area["left"]) / max(1, area["width"]) * 1000
+            y = (i["y"] + i["h"] / 2 - area["top"]) / max(1, area["height"]) * 1000
+            return f"{int(x)},{int(y)}"
+        rows = sorted(mine, key=lambda i: (round(i["y"] / 8), i["x"]))[:limit]
+        return head + ". Words in its window (x,y): " + "; ".join(f"'{i['text'][:40]}' {at(i)}" for i in rows) + "]"
+    except Exception as error:
+        log.debug("screen words: %s", error)
+        return ""
 
 
 def _fallback_in(loop: asyncio.AbstractEventLoop):
@@ -538,7 +582,7 @@ def _fallback_goal(name: str, args: dict) -> str | None:
 # breath; in testing a scroll landed 66ms after a URL opened and hit nothing.
 _OPENERS = {"open_app", "open_url", "open_folder", "open_chrome", "open_slack"}
 _SCREEN_ACTIONS = {"scroll", "press_key", "type_text", "get_selected_text", "desktop", "look",
-                   "media_key", "click_at", "click_text", "read_window", "export_doc_pdf",
+                   "media_key", "click_at", "click_text", "read_window", "export_doc_pdf", "drag",
                    "ui_act", "ui_elements"}
 _SETTLE = 2.0
 _last_open = 0.0
@@ -597,8 +641,10 @@ async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:
                 f"Could not capture the screen: {error}. The user may need to grant "
                 "Screen Recording permission to the terminal running Mint."
             ), None
-        return ("The screenshot was just sent to you as a video frame. Find what the user wants; "
-                "to click it, use click_at with its name as target (and its rough 0-1000 x, y as a hint)."), frame
+        words = await asyncio.to_thread(_screen_words)
+        return ("The screenshot was just sent to you as a video frame. Find what the user wants; to click words "
+                "you see, use click_text with those words; for a thing with no words, click_at with its name as "
+                "target (and its rough 0-1000 x, y as a hint)." + words), frame
 
     handler = _SYNC.get(name)
     if handler is None:
@@ -933,7 +979,7 @@ _dispatch_before_diet = dispatch
 async def dispatch(name: str, args: dict) -> tuple[str, dict | None]:  # noqa: F811
     from mint.tools import diet as tool_diet
     if name == "find_tools":
-        return await asyncio.to_thread(tool_diet.find, str((args or {}).get("query", ""))), None
+        return await asyncio.to_thread(tool_diet.find_for_request, str((args or {}).get("query", ""))), None
     if name == "use_tool":
         name, args, unusable = tool_diet.unwrap(name, args)
         if unusable:

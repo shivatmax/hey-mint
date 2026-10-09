@@ -1242,17 +1242,10 @@ def tool(args: dict) -> str:
     return f"FAILED: unknown action '{action}'."
 
 
-PROMPT = """Music (Spotify, or Apple Music's Music app) -> the `music` tool. "play Blinding Lights by the \
-Weeknd" -> action=play query="Blinding Lights" artist="The Weeknd" kind=track; "play Taylor Swift" -> kind=artist; \
-"play the album After Hours" -> kind=album; "play my Discover Weekly / the RapCaviar playlist" -> kind=playlist; \
-"play some jazz / lo-fi / something chill" -> kind=genre query=<the genre or mood>; "play my Liked Songs" -> \
-kind=liked; "play music" / "resume" with nothing named -> action=resume. "next song" -> next, "previous" -> \
-previous, "pause the music" -> pause, "what's playing?" -> now_playing, "turn the music down/up" -> volume \
-value=down/up (a number = that %; the music app's own volume - the Mac's volume is set_volume), "shuffle on" -> \
-shuffle value=on, "repeat" -> repeat, "skip to 1:30 / forward 30 seconds" -> seek value="1:30"/"forward 30", \
-"like this song" -> like, "open Spotify" -> open_app, "hide the player" -> hide_player. app="spotify"/"music" \
-only when the user names one. Say what is playing in a few words (the tool says it); don't read URIs out. A \
-mini player card shows by the orb while music plays."""
+PROMPT = """Music (Spotify or Apple's Music) -> music: "play Blinding Lights by the Weeknd" = play query="Blinding \
+Lights" artist="The Weeknd" kind=track; an artist, album, playlist, genre or mood, "my Liked Songs" = that \
+kind; "play music" with nothing named = resume. The music app's volume is music action=volume; the Mac's is \
+set_volume. Say what is playing in a few words; never read URIs out."""
 
 
 def declarations():

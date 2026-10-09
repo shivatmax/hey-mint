@@ -12,7 +12,9 @@ MODULES = sorted(".".join(p.relative_to(ROOT).with_suffix("").parts).removesuffi
 def test_packages_present():
     for package in ("app", "core", "voice", "knowledge", "tools", "screen", "ui", "agents"):
         assert (ROOT / "mint" / package / "__init__.py").exists(), f"mint/{package} is missing"
-    assert list((ROOT / "mint" / "resources" / "skills").rglob("*.md")), "example skills are missing"
+    # No starter skills ship (9 Oct): the basics are built in (mint/core/guides.py); skills are learned.
+    assert not list((ROOT / "mint" / "resources" / "skills").rglob("*.md")), "only built-in how-to ships"
+    assert (ROOT / "mint" / "core" / "guides.py").exists()
 
 
 @pytest.mark.parametrize("name", MODULES)

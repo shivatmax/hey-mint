@@ -1342,7 +1342,7 @@ class Notch:
                                       left + 36, top_y),
                      "shelf": button("tray.full.fill", "Shelf: files to AirDrop or share", lambda: self._set_tab("shelf"),
                                      left + 72, top_y)}
-        h["tabs"]["agents"] = button("sparkles", "Claude mode: your coding agents", lambda: self._set_tab("agents"),
+        h["tabs"]["agents"] = button("sparkles", "Coding agents: Claude Code and Codex", lambda: self._set_tab("agents"),
                                      left + 108, top_y)
         h["tabs"]["compose"] = button("plus", "Type to Mint here (Enter sends, Esc cancels)", self.compose,
                                       left + 144, top_y)

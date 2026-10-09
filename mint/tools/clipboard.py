@@ -118,25 +118,12 @@ NAMES = ("screenshot", "clipboard")
 
 PROMPT = """
 # Screenshots and the clipboard
-- "Take a screenshot" = screenshot (never look, which only shows YOU the screen). "Screenshot this image" / "that
-  chart" = what=element with target. "Of this window" = window. "1280 by 720" = size. "Let me pick" = select.
-  Say where it was saved, and that it is on the clipboard.
-- "Screenshot of my Claude Code window" / "of the Chrome window" / "of iTerm" = what=window target=<the app>
-  (Claude Code = Claude); "of the Slack tab in Chrome" / "the window with the invoice" = add title=<words from the
-  title>. It works when that window is in another Space or full screen: do not open, switch to or look at it first.
-  If the result says AMBIGUOUS, ask which window and call again. "Save it to ~/X/y.png" / "in Documents" = path.
-- "Copy X" = clipboard copy; "copy the path / link of this" = copy_path (no path: Finder selection, browser page,
-  or the open document); "copy this file" = copy_file; "copy what I selected" = copy_selection; "paste it
-  (here)" = paste; "what did I copy before" / "show my clipboard" = history, then restore. Numbers count from the
-  newest (1): "the one I copied before the last two" = 3. Never paste into a password field.
-- "Open my clipboard" / "show the clipboard window" = open.
-- "Paste the last 5 screenshots (into the chat)" = paste_many kind=screenshot count=5 (items 2 and 4 = indexes).
-  "Whenever I say screenshot, just put it on the clipboard" = set_preference screenshot_to=clipboard (or file,
-  both).
-- "Pin this as X" / "paste X" = pin / paste_pin. "This is my OpenAI key" / "save this password as bank" (it is on
-  the clipboard) = save_secret label=...; "copy my OpenAI key" = copy_secret. Never ask the user to say or type a
-  secret to you, never repeat one.
-"""
+- "Take a screenshot" = screenshot, never look (look only shows YOU the screen). A window works even in
+  another Space or full screen - don't switch to it first. Say where it was saved and that it is copied.
+- "Copy X" = clipboard copy; history and restore for earlier copies (1 = the newest). Never paste into a
+  password field. A key or password on the clipboard: save_secret label=...; copy_secret to use it. Never ask
+  the user to say or type a secret, never repeat one. The how-to skill "Take a screenshot or use the
+  clipboard" has the rest."""
 
 
 # --- the pasteboard ---------------------------------------------------------------------------
@@ -269,13 +256,33 @@ def _load() -> None:
         _save()                                     # the file on disk loses them too
 
 
+SECRET_MINUTES = 15            # how long a copied key or token stays in the list (in memory only)
+
+
+def mask(text: str) -> str:
+    """A key or token as the list shows it: its ends only."""
+    text = "".join(str(text).split())
+    return f"Secret · {text[:4]}…{text[-4:]}" if len(text) > 12 else "Secret"
+
+
+def drop_old_secrets() -> bool:
+    """Secrets copied more than SECRET_MINUTES ago leave the list. True if any did."""
+    cutoff = time.time() - SECRET_MINUTES * 60
+    old = [h for h in HISTORY if h.get("secret") and h.get("at", 0) < cutoff]
+    for h in old:
+        HISTORY.remove(h)
+    if old:
+        VERSION[0] += 1
+    return bool(old)
+
+
 def _save() -> None:
     import json
     VERSION[0] += 1
     keep = {r.get("image") for r in HISTORY if r.get("image")} | {r.get("image") for r in _pins().values()}
     try:
         tmp = _store() / "history.tmp"
-        tmp.write_text(json.dumps(HISTORY, ensure_ascii=False))
+        tmp.write_text(json.dumps([r for r in HISTORY if not r.get("secret")], ensure_ascii=False))
         os.chmod(tmp, 0o600)
         tmp.replace(STORE / "history.json")
         for old in (STORE / "images").glob("*.png"):          # pictures nothing points to any more
@@ -305,7 +312,10 @@ def _snapshot(board) -> dict | None:
     if text:
         text = str(text)
         if _secret(text):
-            return None
+            # Copied on purpose (by the user, or by Mint when asked - seen 9 Oct: "copy the bot token", and the
+            # clipboard window showed nothing). Kept in this run's list only, masked, never written to disk, and
+            # dropped after SECRET_MINUTES.
+            return {"kind": "text", "text": text, "label": mask(text), "secret": True}
         return {"kind": "text", "text": text, "label": " ".join(text.split())[:80]}
     png = board.dataForType_("public.png")
     if png is None and board.dataForType_("public.tiff") is not None:
@@ -584,8 +594,8 @@ def undo_snapshot() -> dict | None:
         if not _types(board):
             return {"type": "empty"}
         entry = _snapshot(board)
-    if entry is None:
-        return None
+    if entry is None or entry.get("secret"):
+        return None                     # a key or token is never kept for undo either
     if entry["kind"] == "image":
         from mint.tools import undo
         return {"type": "image", "image": undo.clip_image(entry["png"])}
@@ -921,6 +931,8 @@ def _pin_action(action: str, args: dict) -> str:
                 return "FAILED: the clipboard is empty, hidden (a password) or looks like a secret - use save_secret."
             if entry.get("png") is not None:
                 entry["image"] = _png_file(entry.pop("png"))
+        if entry.get("secret"):
+            return "FAILED: that looks like a key or token, and pins are saved on disk - use save_secret to keep it."
         if key not in pins and len(pins) >= 20:
             return "FAILED: 20 clips are pinned already - unpin one first."
         entry.update(name=label, at=time.time())

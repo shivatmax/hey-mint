@@ -137,9 +137,10 @@ def test_entries_start_after_the_last_marker_and_the_session_start(tmp_path):
 
 # --- when to compact on our own -----------------------------------------------------------------------------
 
-def test_due_at_eighty_percent_of_the_trigger():
+def test_due_once_a_long_conversation_passes_sixty_thousand():
     assert not compaction.due(0)
-    assert not compaction.due(80_000)
+    assert not compaction.due(55_000)                 # a normal conversation stays as it is
+    assert compaction.due(60_000)                     # long: summarised at a quiet moment (user's ask, 9 Oct)
     assert compaction.due(84_000)
     assert compaction.due(120_000)
     assert compaction.context_tokens(SimpleNamespace(total_token_count=2313, prompt_token_count=2289)) == 2313

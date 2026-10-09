@@ -2780,6 +2780,9 @@ _SEND_WORDS = re.compile(r"\b(press(?:es|ing)? (?:the )?(?:return|enter)|hit (?:
                          re.IGNORECASE)
 
 
+_SENDISH = re.compile(r"\b(send|reply|post|submit|arrow|paper ?plane|enter)\b|➤|↵")
+
+
 def send_guard(name: str, args: dict, request: str) -> str:
     """For EVERY request, not only the phone's: in a messaging app (Telegram, Slack, Messages…), nothing that would
     send - Return, a Send button, a blind click - unless the user asked to send, reply or message someone. Seen: asked
@@ -2803,7 +2806,11 @@ def send_guard(name: str, args: dict, request: str) -> str:
         if _messaging(app) and _SEND_WORDS.search(goal):
             why = f"that would press Return or Send in {app}, which sends a message"
     elif name in ("click_at", "pointer") and ("click" in action or name == "click_at") and _messaging(front):
-        why = f"a blind click in {front} could press Send"
+        # A click on something named (a search box, a chat in the list) is how a chat is found in apps that
+        # tell Accessibility nothing (Telegram for Mac); only an unnamed click, or one on Send, could send.
+        target = str(args.get("target") or args.get("name") or args.get("text") or "").strip().lower()
+        if not target or _SENDISH.search(target):
+            why = f"a blind click in {front} could press Send"
     elif name in ("click_text", "ui_act") and _messaging(front):
         target = str(args.get("text") or args.get("target") or args.get("name") or "").strip().lower()
         if target in ("send", "send message", "reply", "post"):

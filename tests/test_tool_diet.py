@@ -45,10 +45,11 @@ def test_core_set_is_stable_and_small(full):
     again = _names(tool_diet.live_tools(tools.tools()))
     assert first == again                                   # the same list every time it is built
     assert set(first) == (tool_diet.CORE & set(_names(full))) | set(tool_diet.BRIDGE)
-    assert 45 <= len(first) <= 72, len(first)
-    assert len(first) < len(_names(full)) * 0.6
-    for everyday in ("open_app", "type_text", "set_timer", "set_volume", "media_key", "music", "stop_listening",
-                     "create_reminder", "web_search", "look", "background_task", "remember", "recall"):
+    assert 15 <= len(first) <= 26, len(first)           # 21 (9 Oct): the rest is picked per request (router.py)
+    assert len(first) < len(_names(full)) * 0.2
+    for everyday in ("open_app", "type_text", "press_key", "ui_act", "click_text", "click_at", "look", "read_window",
+                     "set_volume", "media_key", "stop_listening", "background_task", "plan_task", "step_done",
+                     "recall"):
         assert everyday in first, everyday
     assert len(first) == len(set(first))
 
@@ -99,12 +100,13 @@ def test_find_tools_stays_within_budget_and_brings_the_guidance(full):
 
 
 def test_descriptions_point_to_hidden_tools_through_use_tool(full):
-    declared = {d.name: d for t in tool_diet.live_tools(full) for d in t.function_declarations}
-    assert "edit_selection: through use_tool" in declared["get_selected_text"].description
+    tool_diet.live_tools(full)
+    decl = types.FunctionDeclaration(name="x", description="To change it in place use edit_selection.")
+    assert "edit_selection: through use_tool" in tool_diet._with_hints(decl, {"edit_selection"}).description
+    assert "through use_tool" not in decl.description                                   # the original is untouched
     # Plain words that happen to be tool names (notes, mail, track) are not tool mentions.
-    assert "through use_tool" not in declared["recall"].description
-    full_desc = {d.name: d for t in full for d in t.function_declarations}
-    assert "through use_tool" not in full_desc["get_selected_text"].description     # the original is untouched
+    plain = types.FunctionDeclaration(name="y", description="Look up saved notes and mail you track.")
+    assert "through use_tool" not in tool_diet._with_hints(plain, {"notes", "mail", "track"}).description
 
 
 def test_bridge_declarations_are_valid(full):
@@ -192,12 +194,103 @@ def test_prompt_moves_hidden_families_sections_to_find_tools():
         from mint.tools import harness as harness_mod
     except ImportError:
         from mint import harness_tools as harness_mod, music, video_edit
-    parts = tool_diet.prompt_parts([harness_mod.PROMPT, video_edit.PROMPT, music.PROMPT])
-    assert harness_mod.PROMPT in parts and music.PROMPT in parts
-    assert video_edit.PROMPT not in parts
+    parts = tool_diet.prompt_parts(["the user's own note", harness_mod.PROMPT, video_edit.PROMPT, music.PROMPT])
+    assert parts[0] == "the user's own note" and len(parts) == 2      # guides.py carries the harness rules now
     line = parts[-1]
-    assert "find_tools" in line and "video editing" in line and "never send" in line
+    assert "find_tools" in line and "videos" in line and "use_tool" in line
     assert video_edit.PROMPT.strip()[:60] in tool_diet.find("cut a video")
+
+
+# --- what every step re-reads -----------------------------------------------------------------------------
+
+# Gemini Live bills the instruction and the declared tools again on every function-call step. At ~26k tokens a
+# step (9 Oct) two or three steps a minute hit the user's 65k tokens/min limit and the model was rested mid-task.
+# These budgets (characters, ~4 per token) keep the fixed part near 3k tokens (with the session's time, permissions
+# and hearing lines): past one, move the text into a guide (guides.py, a family's prompt) that router.py hands over
+# when a request needs it, rather than raising the number.
+TOOLS_BUDGET = 7_500
+INSTRUCTION_BUDGET = 4_000
+SECTIONS_BUDGET = 2_000
+STEP_BUDGET = 13_000
+
+
+def _fixed_sections(monkeypatch) -> str:
+    """The prompt sections every session carries, without the user's own skills, memories and conversation."""
+    try:
+        from mint.app import tasks
+        from mint.knowledge import memory as membank
+        from mint.knowledge import skills as skillbook
+        from mint.tools import app_library, automations, connector_maker
+        from mint.tools import extra as extra_tools
+    except ImportError:
+        from mint import app_library, automations, connector_maker, extra_tools, membank, skillbook, tasks
+    for module, name in ((skillbook, "index_text"), (tasks, "prompt_text"), (automations, "habit_note"),
+                         (connector_maker, "prompt_addendum"), (app_library, "prompt_text")):
+        monkeypatch.setattr(module, name, lambda: "")
+    monkeypatch.setattr(membank, "core_text", lambda *a, **k: "")
+    monkeypatch.setattr(extra_tools, "recent_conversation", lambda *a, **k: "")
+    return extra_tools.prompt_text()
+
+
+def _declared_json(declared) -> str:
+    return json.dumps([d.model_dump(exclude_none=True, mode="json") for d in declared], ensure_ascii=False,
+                      separators=(",", ":"))
+
+
+def test_what_every_step_rereads_stays_within_budget(full, monkeypatch):
+    try:
+        from mint.core import config
+    except ImportError:
+        from mint import config
+    tools_chars = len(_declared_json([d for t in tool_diet.live_tools(full) for d in t.function_declarations]))
+    sections = _fixed_sections(monkeypatch)
+    assert tools_chars <= TOOLS_BUDGET, tools_chars
+    assert len(config.SYSTEM_INSTRUCTION) <= INSTRUCTION_BUDGET, len(config.SYSTEM_INSTRUCTION)
+    assert len(sections) <= SECTIONS_BUDGET, len(sections)
+    total = tools_chars + len(config.SYSTEM_INSTRUCTION) + len(sections)
+    assert total <= STEP_BUDGET, total
+    assert "find_tools" in sections and "Saved skills" not in sections        # the line about hidden tools is there
+
+
+def _shape(schema):
+    """A schema without its descriptions: names, types, enums, required."""
+    if isinstance(schema, dict):
+        return {k: _shape(v) for k, v in schema.items() if k != "description"}
+    if isinstance(schema, list):
+        return [_shape(v) for v in schema]
+    return schema
+
+
+def test_short_descriptions_keep_names_arguments_and_the_full_notes(full):
+    originals = {d.name: d for t in full for d in t.function_declarations}
+    declared = {d.name: d for t in tool_diet.live_tools(full) for d in t.function_declarations}
+    for name, text in tool_diet.LIVE.items():
+        assert name in tool_diet.CORE, f"{name} is not declared: drop its short text"
+        assert len(text) < len(originals[name].description), name
+        assert declared[name].description.startswith(text), name
+    for name, notes in tool_diet.LIVE_ARGS.items():
+        assert name in tool_diet.CORE, name
+        for path, text in notes.items():
+            found = tool_diet._arg(declared[name].parameters, path)
+            assert found is not None and found.description == text, (name, path)
+    for name, decl in declared.items():
+        if name in originals:                       # the same arguments, types and enums as the full tool
+            assert _shape(decl.parameters.model_dump(exclude_none=True, mode="json")) == \
+                _shape(originals[name].parameters.model_dump(exclude_none=True, mode="json")), name
+    assert len(originals["ui_act"].description) > len(tool_diet.LIVE["ui_act"])    # the original is untouched
+    notes = tool_diet.find("ui_act")                 # find_tools with a declared tool's name: its full notes
+    assert "already one of your tools" in notes and originals["ui_act"].description[:80] in notes
+
+
+def test_moved_tools_are_found_and_run(full):
+    tool_diet.live_tools(full)
+    for query, tool in (("smile for me", "express"), ("ask Astra to research flights to Goa", "delegate_task"),
+                        ("pause everything", "pause_everything"), ("read the ChatGPT app's latest reply", "agent_app")):
+        assert tool_diet.rank(query)[0] == tool, (query, tool_diet.rank(query)[:3])
+    # express has no family guide (its rules stay in the prompt), so it runs at once
+    assert tool_diet.unwrap("use_tool", {"name": "express", "args": {"emotion": "smile", "requested": True}})[0] \
+        == "express"
+    assert "Delegating:" in tool_diet.find("delegate a job to Sage")
 
 
 # --- loops ----------------------------------------------------------------------------------------------

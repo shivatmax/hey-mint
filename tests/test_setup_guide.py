@@ -167,18 +167,16 @@ def test_what_can_you_do_card_marks_what_needs_setup(fake, monkeypatch):
     assert rows["From your phone"]["trailing"] == "Ready"
 
 
-def test_tools_are_declared_core_and_findable():
+def test_tools_are_findable_with_their_guide():
     full = tools.tools()
     names = {d.name for t in full for d in t.function_declarations or []}
     assert {"setup_status", "open_setup"} <= names
-    assert {"setup_status", "open_setup"} <= tool_diet.CORE
     tool_diet.reset()
     tool_diet._on = True
     try:
-        declared = {d.name for t in tool_diet.live_tools(full) for d in t.function_declarations}
-        assert {"setup_status", "open_setup"} <= declared
+        tool_diet.live_tools(full)        # 9 Oct: no longer declared; the router (or find_tools) brings them
         found = tool_diet.find("connect telegram")
-        assert "open_setup" in found and "Already in your tools" in found
+        assert "- open_setup:" in found and "How to use them:" in found and "NEVER open Settings" in found
         tool_diet.reset()
         tool_diet._on = False
         tool_diet.remember(full)

@@ -1512,14 +1512,27 @@ def _post(kind, point, button=Quartz.kCGMouseButtonLeft, clicks=1):
 
 
 def mouse_click(x: float, y: float, button: str = "left", double: bool = False, label: str = "",
-                spark: bool = True) -> None:
-    """A real click with the user's pointer - the last resort (see act): it moves their cursor, so
-    afterwards the cursor goes back where they had it, unless they moved it meanwhile."""
+                spark: bool = True, pid: int | None = None) -> str:
+    """Click at (x, y) - in app `pid`'s window there when given, else the window on top there. First with
+    Mint's own pointer (bg_pointer: events posted to that window only - the user's cursor does not move, the
+    window is not raised); when that can't be used, or the window does not change, with the user's real
+    pointer, which then goes back where they had it, unless they moved it meanwhile.
+    -> the route used: bg_pointer.BACKGROUND ("background_pointer") or bg_pointer.REAL ("global_input")."""
+    from mint.screen import bg_pointer
     from mint.screen import effect
     from mint.ui.effects import fx
 
     if spark:
         time.sleep(fx.click(x, y, label[:40]))
+    count = 2 if double else 1
+    mine = bg_pointer.click(x, y, button=button, count=count, pid=pid)
+    if mine.landed:
+        axkit.note_click(mine.target.pid, x, y, label)
+        _debug(f"background pointer click at ({int(x)}, {int(y)}) in {mine.target.app} "
+               f"({'window changed' if mine.checked else 'not checked'})")
+        return bg_pointer.BACKGROUND
+    if mine.why:
+        _debug(f"background pointer not used at ({int(x)}, {int(y)}): {mine.why}")
     was = effect.pointer_at()
     point = Quartz.CGPointMake(x, y)
     down, up, which = (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp, Quartz.kCGMouseButtonLeft)
@@ -1528,7 +1541,7 @@ def mouse_click(x: float, y: float, button: str = "left", double: bool = False, 
     # Enter first, then press: Chromium ignores a press with no hover before it.
     _post(Quartz.kCGEventMouseMoved, point, which)
     time.sleep(0.09)
-    for n in range(2 if double else 1):
+    for n in range(count):
         _post(down, point, which, n + 1)
         time.sleep(0.045)
         _post(up, point, which, n + 1)
@@ -1537,6 +1550,53 @@ def mouse_click(x: float, y: float, button: str = "left", double: bool = False, 
     if button != "right":          # an open context menu follows the pointer; leave it
         time.sleep(0.05)
         effect.give_pointer_back(was, (x, y))
+    _learn(mine)
+    return bg_pointer.REAL
+
+
+def _learn(mine) -> None:
+    """Mint's pointer was sent and its window did not change: when the real pointer's click does change it,
+    that app is one Mint's pointer does not reach (for this run - next time straight to the real pointer)."""
+    from mint.screen import bg_pointer
+    if mine.sent and mine.checked and mine.target is not None:
+        if bg_pointer.wait_for_change(mine.target, mine.before, 0.5):
+            bg_pointer.mark_no_reach(mine.target.pid)
+            _debug(f"background pointer does not reach {mine.target.app}; real pointer from now on")
+
+
+def mouse_drag(x0: float, y0: float, x1: float, y1: float, seconds: float = 0.6, pid: int | None = None) -> str:
+    """Press at (x0, y0), move to (x1, y1) over `seconds`, release. With Mint's own pointer when both ends are
+    in one window (bg_pointer.drag), else with the user's pointer, which goes back where they had it
+    afterwards (unless they moved it meanwhile). -> the route used, as mouse_click."""
+    from mint.screen import bg_pointer
+    from mint.app import control
+    from mint.screen import effect
+    mine = bg_pointer.drag(x0, y0, x1, y1, seconds, pid=pid)
+    if mine.landed:
+        _debug(f"background pointer drag in {mine.target.app}")
+        return bg_pointer.BACKGROUND
+    if mine.why:
+        _debug(f"background pointer not used for the drag: {mine.why}")
+    was = effect.pointer_at()
+    start = Quartz.CGPointMake(x0, y0)
+    _post(Quartz.kCGEventMouseMoved, start)
+    time.sleep(0.08)
+    _post(Quartz.kCGEventLeftMouseDown, start)
+    time.sleep(0.12)                        # a held press: lists and canvases tell a drag from a click by it
+    steps = max(12, int(seconds * 60))
+    for i in range(1, steps + 1):
+        if control.stopped():
+            break
+        t = i / steps
+        t = t * t * (3 - 2 * t)             # ease in and out, like a hand
+        _post(Quartz.kCGEventLeftMouseDragged, Quartz.CGPointMake(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t))
+        time.sleep(seconds / steps)
+    time.sleep(0.08)
+    _post(Quartz.kCGEventLeftMouseUp, Quartz.CGPointMake(x1, y1))
+    time.sleep(0.1)
+    effect.give_pointer_back(was, (x1, y1))
+    _learn(mine)
+    return bg_pointer.REAL
 
 
 def same_app(name: str, app) -> bool:
@@ -1952,8 +2012,7 @@ def _press(e: dict, inv: dict, own: bool = False, front: "_Front | None" = None)
         x, y = _center(e)
         if not front.need() or ensure_on_top(inv, x, y):
             return ""
-    mouse_click(*_center(e), label=e["label"])
-    return "global_input"
+    return mouse_click(*_center(e), label=e["label"], pid=inv.get("pid"))
 
 
 def _took_anyway(chosen: dict, values: tuple, before: dict, app, windows_before: dict, pid,
@@ -2231,9 +2290,9 @@ def _act_click(action, chosen, name, why, inv, before, app, own, front, started,
             covered = ensure_on_top(inv, x, y)
             if covered:
                 return effect.refused(covered)
-        mouse_click(x, y, button="right" if action == "right_click" else "left",
-                    double=action == "double_click", label=chosen["label"], spark=False)
-        route, delivery = "global_input", "foreground"
+        route = mouse_click(x, y, button="right" if action == "right_click" else "left",
+                            double=action == "double_click", label=chosen["label"], spark=False, pid=pid)
+        delivery = "background" if route == "background_pointer" else "foreground"
         # A menu opened with the pointer closes too when the front goes back: keep it until the next action.
         keep_front = keep_front or action == "right_click" or chosen["role"] in effect.MENU_OPENERS
     # Watch for the effect for a while; apps take their time (a dialog that
@@ -2257,7 +2316,7 @@ def _act_click(action, chosen, name, why, inv, before, app, own, front, started,
         verb = {"AXShowMenu": "Opened the menu of", "select": "Selected", "focus": "Focused"}.get(plan, "Pressed")
     if not evidence and chosen["role"] in TEXT_INPUT and axkit.attr(chosen["ref"], "AXFocused"):
         evidence = ["it has the keyboard focus, ready to type"]
-    if not evidence and not own and route == "global_input" and axkit.is_editable(axkit.focused_element(inv.get("pid"))):
+    if not evidence and not own and route in ("global_input", "background_pointer") and axkit.is_editable(axkit.focused_element(inv.get("pid"))):
         # a placeholder or label of a web/Electron text box (VS Code's "Search Extensions in
         # Marketplace" is static text over a hidden textarea): the click put the cursor in the box
         evidence = ["a text box now has the keyboard focus - type into it with type_text (no field= needed)"]
@@ -2424,6 +2483,13 @@ def _act_type(chosen, name, why, text, press_return, replace, inv, before, app, 
                          evidence, escalation="look at it before typing again - never type it twice").render()
 
 
+def _shown_as(text: str) -> str:
+    """A label as read off the screen, without its shortcut hint: Telegram's "Q Search (⌘K)" (read "(9K)") is
+    "search"."""
+    from mint.screen import ocr
+    return ocr._words(re.sub(r"\([^()]{1,6}\)", " ", text))
+
+
 def _by_screen_text(action: str, target: str, text: str, press_return: bool, inv: dict) -> str:
     """Accessibility doesn't list it, but its words are written on screen in the front window
     (an Electron app's search box placeholder, a button VS Code didn't expose): click those words
@@ -2446,7 +2512,10 @@ def _by_screen_text(action: str, target: str, text: str, press_return: bool, inv
             front = ocr._front_window()
     except Exception:
         return ""
-    hits = [i for i in items if (front is None or ocr._inside(i, front)) and ocr._words(i["text"]) == want]
+    mine = [i for i in items if front is None or ocr._inside(i, front)]
+    hits = [i for i in mine if _shown_as(i["text"]) == want]
+    if not hits:        # a placeholder that says more: "Search chats" for the search box
+        hits = [i for i in mine if _shown_as(i["text"]).startswith(want + " ") and len(_shown_as(i["text"]).split()) <= 3]
     if len(hits) != 1:
         return ""
     clicked = ocr.click_text(hits[0]["text"], double=action == "double_click", app=app)
@@ -2492,6 +2561,10 @@ def summary(limit: int = 140, since: str | None = None) -> str:
         return any(low in g["label"].lower() and _overlap(g["box"], e["box"]) > 0.5 for g in groups if g is not e)
     pool = [e for e in pool if not repeated(e)]
     lines = [describe(e, inv["window"], token=True) for e in pool[:limit]]
+    if not lines:       # Telegram for Mac, games, some Qt and Java apps: the window tells Accessibility nothing
+        lines = ["(nothing listed: this app doesn't share its buttons and boxes with Accessibility. Read it with "
+                 "read_window or look, and click by the words on screen with click_text, or ui_act with the words "
+                 "you see as the target - the search box by its placeholder, e.g. 'Search'.)"]
     more = f"\n... and {len(pool) - limit} more" if len(pool) > limit else ""
     hidden = offscreen_text(inv)
     return head + "\n" + "\n".join(lines) + more + (f"\n{hidden}" if hidden else "")

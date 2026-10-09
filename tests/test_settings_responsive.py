@@ -44,7 +44,7 @@ USAGE = {"rows": [{"model": "gemini-test", "requests": 3, "input": 120, "output"
 # --- every page reads its facts off the main thread -------------------------------------------------
 
 def test_every_page_reads_off_the_main_thread():
-    pure = {"shortcuts"}                        # prefs and key names only
+    pure = {"shortcuts", "looks"}               # prefs and key names only
     for key, _, _ in settings_window.PAGES:
         builder = getattr(settings_window.SettingsWindow, f"_page_{key}")
         assert list(inspect.signature(builder).parameters)[1:] == ["page", "facts"], key
@@ -345,18 +345,18 @@ def test_every_drawn_brand_tile_draws(monkeypatch):
 def test_setup_guide_anchors_exist(fresh_prefs, monkeypatch):
     """The setup guide opens Settings at page#anchor: every anchor it uses is where it should be."""
     monkeypatch.setattr(settings_window.SettingsWindow, "_facts_voice", lambda self: dict(VOICE))
-    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_looks", lambda self: {
-        "hooks": "Connect Claude Code", "limits": "Show Claude's usage limits", "mcp": {}, "usage": "",
-        "agents_here": True})
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_models", lambda self: dict(MODELS))
+    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_coding", lambda self: {
+        "here": {"claude": True, "codex": True}, "hooks": False, "statusline": False, "mcp": {}, "limits": {}})
     monkeypatch.setattr(settings_window.SettingsWindow, "_facts_storage", lambda self: {
         "folder": "/tmp", "perms": {kind: "allowed" for kind, *_ in permissions.ALL}})
     win = _window()
-    for page_key, anchor in (("voice", "voice"), ("looks", "claude_code"), ("storage", "permissions")):
+    for page_key, anchor in (("voice", "voice"), ("models", "claude_code"), ("storage", "permissions")):
         win.page_key = page_key
         doc = win._build_page(_column(), 480).doc
         assert anchor in win._anchors, (page_key, anchor)
-        if page_key == "looks":                   # connecting Claude Code is in the basic view
-            assert "Connect Claude Code" in [str(b.title()) for b in _buttons(doc)]
+        if page_key == "models":                  # connecting Claude Code is in the basic view
+            assert "Connect" in [str(b.title()) for b in _buttons(doc)]
     source = inspect.getsource(settings_window.SettingsWindow._page_accounts)
     for anchor in ("keys", "google", "meet", "connectors", "telegram", "email"):
         assert f'self._anchor(page, "{anchor}")' in source, anchor

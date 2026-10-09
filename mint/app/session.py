@@ -58,6 +58,86 @@ ANSWER_NUDGE = 1.2      # the user's voice stopped and nothing came back: close 
 ANSWER_RESEND = 5.0     # and still nothing: send their words (said right after "Hey Mint") as text
 
 
+def _permissions_note() -> str:
+    """Which permissions Mint has, so it knows what it can't do before it tries (permit.py)."""
+    try:
+        from mint.core import permit
+        return permit.prompt_note()
+    except Exception:
+        log.debug("permissions note", exc_info=True)
+        return ""
+
+
+_SCREEN_TOOLS = {"ui_act", "ui_elements", "click_text", "click_at", "type_text", "press_key", "scroll", "drag",
+                 "read_window", "look", "switch_to", "open_app", "menu"}
+_MISSED = ("FAILED", "NOT CLICKED", "NOT DRAGGED", "SUSPECTED NO-OP", "No text is visible", "UNVERIFIED",
+           "REFUSED", "NOT RUN")
+
+def _ladder(owner, name: str, result: str) -> str:
+    """After two screen actions in one request didn't work: the next way to try, so the model changes method
+    instead of retrying variants of the same call (seen 9 Oct: ui_act, ui_act, type_text, click_text x2 in
+    Telegram, then "try it yourself"). '' while things work."""
+    if name not in _SCREEN_TOOLS:
+        return ""
+    track = owner.__dict__.setdefault("_misses", {"asked": 0.0, "n": 0})
+    if track["asked"] != getattr(owner, "_asked_at", 0.0):
+        track.update(asked=getattr(owner, "_asked_at", 0.0), n=0)
+    if not result.startswith(_MISSED):
+        return ""
+    track["n"] += 1
+    if track["n"] < 2:
+        return ""
+    return (f"\n[{track['n']} tries in this request didn't work. Change method, don't repeat: 1) is the app's window "
+            "really showing? look - if not, open_app it again; 2) read what is there: ui_elements, or read_window "
+            "if it lists nothing; 3) click the words you see with click_text (a search box by its placeholder, an "
+            "item by its name); 4) a keyboard shortcut or the menu (menu action=list); 5) look + click_at naming "
+            "the target. After it opens something, read_window and check it is the right one before step_done.]")
+
+
+def control_stopped() -> bool:
+    try:
+        from mint.app import control
+        return bool(control.stopped())
+    except Exception:
+        return False
+
+
+def _carry_on_note(mint) -> str:
+    """For a new voice session started in the middle of a job: what the job is, where it stands, and what the user
+    said - so it carries on by itself."""
+    parts = ["(Mint - not the user: the voice model was switched mid-job to stay under the per-minute limit. Carry on "
+             "now from where it stopped, without asking.)"]
+    try:
+        from mint.app import autopilot
+        from mint.app import tasks
+        task = getattr(mint, "task", None)
+        if task:
+            parts.append("The plan:\n" + tasks.outline(task))
+        request = autopilot._state.get("request") or ""
+        if request:
+            parts.append(f"The user asked: \u201c{request[:300]}\u201d")
+    except Exception:
+        pass
+    said = [text for _, text in getattr(mint, "_user_lines", [])][-3:]
+    if said:
+        parts.append("The user's latest words (they override the plan): " + " | ".join(f"\u201c{t}\u201d" for t in said))
+    return "\n".join(parts)
+
+
+def _by_modality(meta) -> str:
+    """' (text 9k, audio 12k, image 300k)': what the context is made of, to see what fills it."""
+    try:
+        parts = []
+        for detail in getattr(meta, "prompt_tokens_details", None) or []:
+            kind = str(getattr(detail, "modality", "") or "").split(".")[-1].lower()
+            count = int(getattr(detail, "token_count", 0) or 0)
+            if count:
+                parts.append(f"{kind} {count // 1000}k")
+        return f" ({', '.join(parts)})" if parts else ""
+    except Exception:
+        return ""
+
+
 def _live_config() -> types.LiveConnectConfig:
     # The model has no clock. Giving it the start time lets it reason about
     # "tomorrow at nine"; get_status covers long sessions.
@@ -68,8 +148,10 @@ def _live_config() -> types.LiveConnectConfig:
     from mint.app import compaction
     from mint.core import custom
     from mint.knowledge.conversation import memory
+    from mint.tools.diet import clip
     personal = custom.prompt_addendum()
-    remembered = memory.summary()
+    # The running notes grow with use: capped, so the prompt re-read on every tool step stays small (9 Oct).
+    remembered = clip(memory.summary(), 1200, "recall_history has more")
     from mint.voice import vocab
     words = vocab.prompt_text()
     from mint.core import prefs as _prefs
@@ -82,12 +164,13 @@ def _live_config() -> types.LiveConnectConfig:
                    + ("" if config.desktop_engine() else
                       "\n\nThe desktop tool is not installed on this Mac: wherever these "
                       "instructions mention it, use ui_act (or click_text) instead.")
+                   + f"\n\n{_permissions_note()}"
                    + (f"\n\n{personal}" if personal else "")
                    + (f"\n\n{words}" if words else "")
                    + (f"\n\nWhat you remember from earlier conversations with this user "
                       f"(your own notes; use them, do not recite them):\n{remembered}" if remembered else "")
                    + (f"\n\n{jobs}" if (jobs := _jobs_note()) else "")
-                   + (f"\n\n{compaction.framed(_carry_over)}" if _carry_over else ""))
+                   + (f"\n\n{compaction.framed(clip(_carry_over, 2000))}" if _carry_over else ""))
     from mint.tools import diet as tool_diet
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
@@ -914,6 +997,10 @@ class Mint:
                 return
             self._print(f"[{live_models.label(current)}: {why} - switching to {live_models.label(target)}]")
             log.info("switching voice model %s -> %s (%s)", current, target, why)
+            if self._working_on_request():
+                # Mid-job (a per-minute token limit can strike between two clicks): the new session picks the job up
+                # where it was, instead of waiting to be asked again.
+                self._carry_note = _carry_on_note(self)
             config.MODEL = target
             self._latencies = []
             self._resume_handle = None             # a resumption handle belongs to the other model
@@ -1376,6 +1463,10 @@ class Mint:
         self.ui.user_said(text, new_turn=True)
         from mint.knowledge.conversation import memory
         memory.add("user", text)
+        if not text.lstrip().startswith(("(System", "[")):        # a timer's or autopilot's note is not the user
+            lines = self.__dict__.setdefault("_user_lines", [])
+            lines.append((time.time(), " ".join(text.split())[:240]))
+            del lines[:-6]
         try:
             from mint.app import live
             live.typed(asked or text)       # the user's own words decide what they asked (not a file name)
@@ -1514,6 +1605,20 @@ class Mint:
         except Exception:
             log.debug("closing the user's audio failed", exc_info=True)
 
+    async def _send_carry_note(self) -> None:
+        note, self._carry_note = getattr(self, "_carry_note", ""), ""
+        await asyncio.sleep(0.6)
+        if not note or self.session is None or control_stopped():
+            return
+        self._print("[carrying on with the job on the new voice model]")
+        self._nudge_turn = True
+        self._turn_open = True
+        try:
+            await self.session.send_realtime_input(text=note)
+        except Exception:
+            log.debug("carry-on note not sent", exc_info=True)
+            self._turn_open = False
+
     async def _send_pending_text(self) -> None:
         await asyncio.sleep(0.5)
         pending, self._pending_text = self._pending_text, []
@@ -1552,10 +1657,15 @@ class Mint:
                 await self._handle(response)
 
     async def _handle(self, response) -> None:
+        if getattr(response, "tool_call", None) is not None:
+            self._turn_steps = getattr(self, "_turn_steps", 0) + 1
         if (meta := getattr(response, "usage_metadata", None)) is not None:
             from mint.core import usage
             usage.live(config.MODEL, meta)
-            self._watch_context(meta)        # near the sliding window: compact at a quiet moment
+            # A turn's usage adds up the prompt re-read at every tool-call step (billed tokens), so it is not the
+            # context's size: 321k after 11 tool calls in a 30k context (9 Oct) set off compaction - Mint started
+            # over from a summary and forgot what the user had just said. One step's share is the context.
+            self._watch_context(meta, steps=getattr(self, "_turn_steps", 0) + 1)
             from mint.voice import live_models
             spent = getattr(meta, "prompt_token_count", None) or getattr(meta, "total_token_count", 0) or 0
             if live_models.tokens(config.MODEL, spent):
@@ -1619,6 +1729,7 @@ class Mint:
                 self._flush_playback()
 
             if server.turn_complete:
+                self._turn_steps = 0
                 if self.meet is not None:
                     self._chat_flush()
                 if self._verdict_pending() and self._heard[self._seg:].strip():
@@ -1638,6 +1749,9 @@ class Mint:
                     if self._heard.strip():
                         self._print(f"you:    {' '.join(self._heard.split())}")
                         memory.add("user", self._heard)
+                        lines = self.__dict__.setdefault("_user_lines", [])
+                        lines.append((time.time(), " ".join(self._heard.split())[:240]))
+                        del lines[:-6]
                         from mint.knowledge import teach
                         if teach.recording():
                             teach.add_narration(self._heard)      # what the user says while showing Mint
@@ -1801,23 +1915,27 @@ class Mint:
             log.warning("compaction failed: %s", str(error)[:160])
             return f"Could not summarise right now: {str(error)[:120]}"
 
-    def _watch_context(self, meta) -> None:
+    def _watch_context(self, meta, steps: int = 1) -> None:
         """Every turn's Live usage numbers: near the sliding window's trigger (where the server would
         silently drop the oldest turns, the user's first instructions with them), compact at the next
         quiet moment instead (pref auto_compact)."""
         from mint.app import compaction
         from mint.core import prefs
-        tokens = compaction.context_tokens(meta)
+        tokens = compaction.context_tokens(meta) // max(1, steps)
         if not tokens:
             return
         self._context_tokens = tokens
+        seen = self.__dict__.setdefault("_context_seen", [])
+        seen.append(tokens)
+        del seen[:-8]
         if (not compaction.due(tokens) or getattr(self, "_auto_compacting", False)
                 or time.monotonic() < getattr(self, "_auto_compact_after", 0.0) or not prefs.get("auto_compact")):
             return
         self._auto_compacting = True
         log.info("context at %d tokens (%.0f%% of the window's trigger): compacting at the next quiet moment",
                  tokens, 100 * tokens / compaction.TRIGGER_TOKENS)
-        self._print(f"[context {tokens} tokens: compacting at the next quiet moment]")
+        self._print(f"[context {tokens} tokens{_by_modality(meta)}; last turns {', '.join(f'{n // 1000}k' for n in seen)}: "
+                    "compacting at the next quiet moment]")
         asyncio.create_task(self._auto_compact())
 
     def _lost_words(self) -> str:
@@ -2017,6 +2135,30 @@ class Mint:
             log.debug("autopilot note not sent", exc_info=True)
             self._turn_open = False
 
+    def _permission_on(self, kind: str) -> None:
+        """permit.py's watcher (any thread): the permission Mint asked for is on - carry on with the request."""
+        from mint.core import permissions
+        title = permissions.title(kind)
+        self._print(f"[permission: {title} is on]")
+        if self.loop is None or self.session is None or self.paused or self.asleep:
+            return
+        epoch = self._stop_epoch
+        note = (f"[{title} is on now - the user switched it on. Carry on with what they asked, from where it "
+                "stopped, now. Say one short line first, like 'Thanks, carrying on.']")
+
+        async def carry_on():
+            if epoch != self._stop_epoch or self.session is None:
+                return
+            self._nudge_turn = True
+            self._turn_open = True
+            self._window.handling()
+            try:
+                await self.session.send_realtime_input(text=note)
+            except Exception:
+                log.debug("permission note not sent", exc_info=True)
+                self._turn_open = False
+        asyncio.run_coroutine_threadsafe(carry_on(), self.loop)
+
     async def stop_everything(self, source: str) -> None:
         """The user said stop: cut off speech, the running tool, Desktop Voice's
         command and the task plan, and tell the model plainly."""
@@ -2175,7 +2317,8 @@ class Mint:
         except asyncio.TimeoutError:
             pass
         if self._verdict_pending() and ready is self._verdict_ready:
-            self._decide(listening.fallback(self._kind, self._heard[self._seg:], self._last_said), "too slow")
+            self._decide(listening.fallback(self._kind, self._heard[self._seg:], self._last_said,
+                                            self._working_on_request()), "too slow")
 
     def _special(self, text: str) -> bool:
         """Words that always get through: stop, a goodbye, a yes/no to the guard, an instant
@@ -2317,13 +2460,29 @@ class Mint:
         took = time.monotonic() - started
         if ready is not self._verdict_ready or not self._verdict_pending():
             return                        # a newer turn, or decided meanwhile
+        working = self._working_on_request()
         if pick is None:
-            self._decide(listening.fallback(kind, text, self._last_said), "no Jev", took, text)
+            self._decide(listening.fallback(kind, text, self._last_said, working), "no Jev", took, text)
             return
         option, probability, confidence = pick
         log.info("addressee %s p=%.2f c=%.2f in %.2fs (%s): %s", option, probability, confidence, took, kind, text)
-        self._decide(listening.judge(kind, option, probability, self._last_said, text),
-                     f"{option or 'none'} {probability:.2f}", took, text)
+        self._decide(listening.judge(kind, option, probability, self._last_said, text, working),
+                     f"{option or 'none'} {probability:.2f}{' working' if working else ''}", took, text)
+
+    def _working_on_request(self) -> bool:
+        """Mint is in the middle of what the user asked: a plan with steps left, or a tool in the last 45 s."""
+        tool_task = getattr(self, "_tool_task", None)
+        if getattr(self, "_busy", False) or (tool_task is not None and not tool_task.done()):
+            return True
+        if time.monotonic() - (getattr(self, "_tools_at", 0.0) or 0.0) < 45:
+            return True
+        try:
+            from mint.app import tasks
+            task = getattr(self, "task", None)
+            return bool(task) and bool(tasks.remaining(task)) and \
+                time.time() - float(task.get("updated") or task.get("created") or 0) < 300
+        except Exception:
+            return False
 
     def _flush_playback(self) -> None:
         while not self.audio_in.empty():
@@ -2439,11 +2598,22 @@ class Mint:
                     send_key = words if name in ("ui_act", "type_text") and args.get("press_return") and words \
                         and _messaging_front() else None
                     sent = sends.get(send_key) if send_key else None
-                    if name in self._IDEMPOTENT and seen and time.monotonic() - seen[0] < 10:
+                    # The same words typed twice doubles them in the field ("BotFatherBotFather"): seen 9 Oct, when
+                    # Return was refused and the model typed the search again.
+                    typed_map = self.__dict__.setdefault("_recent_typed", {})
+                    typed_key = words if name == "type_text" and words else None
+                    typed = typed_map.get(typed_key) if typed_key else None
+                    if typed and time.monotonic() - typed < 45:
+                        result, image = (f"ALREADY TYPED: '{str(args.get('text', ''))[:60]}' went in "
+                                         f"{int(time.monotonic() - typed)}s ago and is still there - typing it again "
+                                         "would double it. Go on from there: click the result or button you need by "
+                                         "its name (click_text), or look first."), None
+                    elif name in self._IDEMPOTENT and seen and time.monotonic() - seen[0] < 10:
                         result, image = (f"ALREADY DONE a moment ago, not repeated: {seen[1][:300]} "
                                          "Continue from there."), None
                     elif sent and time.monotonic() - sent[0] < 120 and not any(
-                            w in sent[1] for w in ("FAILED", "WARNING", "Not confirmed", "not verified")):
+                            w in sent[1] for w in ("FAILED", "WARNING", "Not confirmed", "not verified", "REFUSED",
+                                                   "NOT RUN", "PERMISSION", "Cannot")):
                         result, image = (f"NOT SENT AGAIN: exactly this was already sent "
                                          f"{int(time.monotonic() - sent[0])}s ago ({sent[1][:160]}). Never send a "
                                          "message twice - wait for the reply with wait_until_done."), None
@@ -2451,7 +2621,20 @@ class Mint:
                         if name in _OPENERS:
                             opened = True
                         result, image = await self._run_detachable(name, args)
+                        from mint.core import permit
+                        lacking = permit.from_result(result)      # a tool ran into a missing permission: ask now
+                        if lacking:
+                            result, image = permit.request(lacking, name, resume=self._permission_on), None
+                        elif name in permit.NEEDS_ACCESSIBILITY | {"look", "read_window", "open_app"} and \
+                                await asyncio.to_thread(permit.system_box_open):
+                            result += permit.BOX_NOTE
+                        result += _ladder(self, name, result)
                         self._recent_calls[key] = (time.monotonic(), result)
+                        if typed_key and result.startswith(("CONFIRMED", "Typed", "UNVERIFIABLE", "PARTIAL", "STILL RUNNING")):
+                            typed_map[typed_key] = time.monotonic()
+                        elif name in ("click_text", "click_at", "ui_act", "press_key") and \
+                                not result.startswith(("FAILED", "REFUSED", "NOT RUN")):
+                            typed_map.clear()        # the focus may have moved: the same words can go elsewhere
                         if send_key:
                             sends[send_key] = (time.monotonic(), result)
                 result = tool_diet.fit(name, result)        # a huge result: head + tail, the rest in a file
@@ -2529,6 +2712,10 @@ class Mint:
             refused = telegram.send_guard(name, args, live.request() or "")    # no sending unless asked, ever
         if refused:
             return refused, None
+        from mint.core import permit
+        lacking = permit.missing(name, args)         # needs a permission Mint lacks: ask for it now, not fail quietly
+        if lacking:
+            return permit.request(lacking, name, resume=self._permission_on), None
         from mint.core import guard
         refused = await guard.check(name, args)      # deletes, overwrites, risky commands: the user's yes first
         if refused:
@@ -2864,6 +3051,7 @@ class Mint:
                 notes.append(f"[Now in front: {front.localizedName() if front else 'nothing'}{title}]")
             except Exception:
                 pass
+        since = time.time() - 180
         if self.task:
             from mint.app import tasks
             step = tasks.current(self.task)
@@ -2871,6 +3059,13 @@ class Mint:
                 done, total = tasks.progress(self.task)
                 notes.append(f"[Task '{self.task['goal'][:60]}': {done}/{total} steps done. Current: step "
                              f"{tasks.label(step)}. Call step_done when it is finished.]")
+                since = min(since, float(self.task.get("created") or since) - 60)
+        # What the user said while this is under way, pinned to every result: seen 9 Oct, "don't search with @, the
+        # chat is already there" was forgotten two tool calls later and Mint did the same thing again.
+        said = [text for at, text in getattr(self, "_user_lines", []) if at >= since][-3:]
+        if said:
+            notes.append("[The user's words for this, newest last - they override your plan: "
+                         + " | ".join(f"\u201c{t}\u201d" for t in said) + "]")
         return ("\n" + "\n".join(notes)) if notes else ""
 
     def _start_timer(self, minutes: float, label: str) -> str:
@@ -2990,6 +3185,8 @@ class Mint:
                     self._unanswered = ""
                     if self._pending_text:
                         asyncio.create_task(self._send_pending_text())
+                    elif getattr(self, "_carry_note", ""):
+                        asyncio.create_task(self._send_carry_note())
                     from mint.agents.runtime import hub as _hub
                     if _hub._outbox:
                         # Agent reports and automations that arrived while connecting.
@@ -3074,8 +3271,14 @@ class Mint:
         # 5 Oct: gemini-3.8-live answered every turn - even a bare config with no tools - with "1011 Internal
         # error" for minutes, and voice requests vanished. After one fresh-session retry, use the next model
         # (benched longer each time it happens; live_models).
-        refused = any(word in lowered for word in ("not found", "not supported", "1007", "invalid argument",
-                                                     "thinking level"))
+        # "1008 ... session not found" is the resumption handle having expired, not the model refusing Mint: seen
+        # 9 Oct, it set the main model aside for a week and every request after ran on the weaker fallback. Start
+        # a fresh session (memory is kept) on the same model instead.
+        stale_handle = "session not found" in lowered
+        if stale_handle:
+            self._resume_handle = None
+        refused = not stale_handle and any(word in lowered for word in (
+            "not found", "not supported", "1007", "invalid argument", "thinking level"))
         if refused and len(live_models.pool()) > 1:
             # This model won't take Mint's session at all (a new model found by live_models.discover, or one
             # Google retired): set aside for a week, and the next model.

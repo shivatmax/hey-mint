@@ -101,8 +101,9 @@ def page(win, page, facts: dict) -> None:
     if advanced:
         _backups_section(win, page, facts)
     _agents_section(win, page, facts)
-    win._more_section(page, "Backup models for every agent, how two Gemini keys share the work, and your own "
-                            "OpenAI-compatible endpoints.")
+    win._part(page, "coding", win._coding_section, "Coding agents")     # Claude Code and Codex (their own reader)
+    win._more_section(page, "Backup models for every agent, how two Gemini keys share the work, your own "
+                            "OpenAI-compatible endpoints, and more for Claude Code and Codex.")
 
 
 # --- Gemini ----------------------------------------------------------------------------------------

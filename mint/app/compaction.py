@@ -311,9 +311,13 @@ def framed(carry: str) -> str:
 
 # --- when to compact on our own --------------------------------------------------------------------------
 
+COMPACT_AT = 60_000           # a long conversation is summarised (at a quiet moment) once its context passes this
+
+
 def due(tokens: int, trigger: int = TRIGGER_TOKENS, share: float = AUTO_SHARE) -> bool:
-    """The session's context (the Live usage total) is near where the server starts dropping turns."""
-    return bool(tokens) and tokens >= trigger * share
+    """The session's context (one step's prompt - see session._watch_context) has grown past COMPACT_AT, well before
+    the server's sliding window would start dropping the oldest turns."""
+    return bool(tokens) and tokens >= min(COMPACT_AT, trigger * share)
 
 
 def context_tokens(meta) -> int:

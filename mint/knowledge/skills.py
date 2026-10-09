@@ -45,6 +45,7 @@ be undone (rollback).
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import shutil
@@ -154,6 +155,14 @@ def _write(path: Path, meta: dict, body: str) -> None:
     """Counters and state only (uses, wins, last_used, stale): not a change worth a ledger entry."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_render(meta, body))
+    held = _snapshot["skills"]
+    if held is not None:                            # a use or a counter: update the big library's list in place
+        fresh = _parse(path)
+        spot = next((i for i, s in enumerate(held) if s["path"] == path), None)
+        if fresh is None or spot is None:
+            _snapshot["skills"] = None
+        else:
+            held[spot] = fresh
 
 
 def _read(path: Path) -> str | None:
@@ -177,6 +186,7 @@ def _commit(path: Path, meta: dict, body: str, action: str, actor: str, reason: 
 
 
 def _wrote(action: str, name: str, actor: str) -> None:
+    _snapshot["skills"] = None                      # a skill's text changed: list the library again
     for callback in list(_write_listeners):
         try:
             callback(action, name, actor)
@@ -243,11 +253,39 @@ SEEDS = Path(__file__).resolve().parents[1] / "resources" / "skills"
 _seeded_once = False
 
 
+def _seed_body(path: Path) -> str:
+    match = re.match(r"^---\n.*?\n---\n?(.*)$", path.read_text(), re.S)
+    return (match.group(1) if match else "").strip()
+
+
+def _untouched_seed(target: Path, seed: Path) -> bool:
+    try:
+        parsed = _parse(target)
+        body = _seed_body(seed)
+    except Exception:
+        return False
+    if parsed is None or not body or parsed["body"].strip() == body:
+        return False
+    meta = parsed["meta"]
+    return meta.get("created_by") == "seed" and not int(meta.get("uses") or 0) and "updated" not in meta
+
+
+def _refresh_seed(target: Path, seed: Path) -> None:
+    try:
+        target.write_text(seed.read_text())
+        parsed = _parse(target)
+        if parsed is not None:
+            _write(target, dict(parsed["meta"], created_by="seed"), parsed["body"])
+        log.info("refreshed starter skill %s", target.name)
+    except OSError:
+        log.debug("refresh %s", target, exc_info=True)
+
+
 def _seed() -> None:
     """Copy the starter skills in, once each. A seed is never copied over a
     learned skill of the same name, and one the user deleted stays deleted."""
     global _seeded_once
-    if _seeded_once or not SEEDS.exists():
+    if _seeded_once:
         return
     _seeded_once = True
     record = ROOT / ".seeded"
@@ -255,10 +293,16 @@ def _seed() -> None:
         done = set(record.read_text().split()) if record.exists() else set()
     except OSError:
         done = set()
+    _retire_dropped_seeds(done)
     added = []
-    for seed in SEEDS.rglob("*.md"):
+    for seed in (SEEDS.rglob("*.md") if SEEDS.exists() else ()):
         rel = str(seed.relative_to(SEEDS))
         target = ROOT / rel
+        if rel in done and target.exists() and _untouched_seed(target, seed):
+            # A newer starter skill replaces the old copy as long as it was never used or edited: built-in
+            # know-how improves with each version for everyone, not just new installs.
+            _refresh_seed(target, seed)
+            continue
         if rel in done or target.exists():
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -274,6 +318,27 @@ def _seed() -> None:
         ROOT.mkdir(parents=True, exist_ok=True)
         record.write_text("\n".join(sorted(done | set(added))) + "\n")
         log.info("seeded %d starter skills", len(added))
+
+
+def _retire_dropped_seeds(done: set[str]) -> None:
+    """A starter skill Mint no longer ships (9 Oct: the basics - clicking, typing, files, the web, chat apps, Mint's
+    own settings - became built-in how-to, guides.py) leaves the library if it was never used or edited; a used
+    or changed copy is the user's now and stays."""
+    for rel in sorted(done):
+        target = ROOT / rel
+        if (SEEDS / rel).exists() or not target.exists():
+            continue
+        parsed = _parse(target)
+        if parsed is None:
+            continue
+        meta = parsed["meta"]
+        if (meta.get("created_by") == "seed" and str(meta.get("source", "seed")) == "seed"
+                and not int(meta.get("uses") or 0) and "updated" not in meta):
+            try:
+                archive(parsed["name"], actor="seed", reason="no longer a starter skill (now built in)", skill=parsed)
+                log.info("retired starter skill %s", rel)
+            except Exception:
+                log.debug("retire %s", rel, exc_info=True)
 
 
 def _is_support(path: Path) -> bool:
@@ -295,22 +360,52 @@ def _migrate(skill: dict) -> None:
         _write(skill["path"], skill["meta"], skill["body"])
 
 
+_parsed: dict[Path, tuple[float, dict | None]] = {}     # path -> (mtime, parsed): a big library is parsed once
+# A big library (thousands of learned skills) is listed again at most every SNAPSHOT_FOR seconds - or at once
+# after any change made here (_wrote); counters (_write) are updated in place. A small one is always re-listed.
+_snapshot: dict = {"root": None, "at": 0.0, "skills": None}
+SNAPSHOT_FROM, SNAPSHOT_FOR = 2000, 300.0
+
+
 def all_skills() -> list[dict]:
     _seed()
     if not ROOT.exists():
         return []
-    found = []
-    for path in sorted(ROOT.rglob("*.md")):
-        if ARCHIVE in path.relative_to(ROOT).parts or _is_support(path):
+    held = _snapshot["skills"]
+    if held is not None and _snapshot["root"] == ROOT and time.monotonic() - _snapshot["at"] < SNAPSHOT_FOR:
+        return [dict(s, meta=dict(s["meta"])) for s in held]
+    found, seen = [], set()
+    paths = sorted(ROOT.rglob("*.md"))
+    every = set(paths)
+    for path in paths:
+        rel = path.relative_to(ROOT)
+        if (ARCHIVE in rel.parts or any(part.startswith(".") for part in rel.parts)
+                or any(str(up) != "." and (ROOT / up).with_suffix(".md") in every for up in rel.parents)):
+            continue                                # archived, hidden, or a support file (as _is_support)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
             continue
-        skill = _parse(path)
-        if skill:
-            try:
-                _migrate(skill)
-            except OSError:
-                log.debug("could not migrate %s", path, exc_info=True)
-            found.append(skill)
-    return sorted(found, key=score, reverse=True)
+        seen.add(path)
+        cached = _parsed.get(path)
+        if cached is None or cached[0] != mtime:
+            skill = _parse(path)
+            if skill:
+                try:
+                    _migrate(skill)
+                except OSError:
+                    log.debug("could not migrate %s", path, exc_info=True)
+            cached = _parsed[path] = (mtime, skill)
+        if cached[1]:
+            found.append(dict(cached[1], meta=dict(cached[1]["meta"])))
+    for gone in set(_parsed) - seen:
+        _parsed.pop(gone, None)
+    found.sort(key=score, reverse=True)
+    if len(found) >= SNAPSHOT_FROM:
+        _snapshot.update(root=ROOT, at=time.monotonic(), skills=[dict(s, meta=dict(s["meta"])) for s in found])
+    else:
+        _snapshot["skills"] = None
+    return found
 
 
 def score(skill: dict) -> float:
@@ -414,12 +509,16 @@ def app_key(name: str) -> str:
 
 def skill_apps(skill: dict) -> set[str]:
     """The apps a skill is for (canonical names); empty for a general skill."""
-    raw = skill["meta"].get("apps", "") or ""
+    return set(_apps_of(skill["meta"].get("apps", "") or "", skill["category"]))
+
+
+@functools.lru_cache(maxsize=4096)
+def _apps_of(raw: str, category: str) -> frozenset[str]:
     apps = {app_key(a) for a in re.split(r"[,;/]+", raw) if app_key(a)}
-    parts = skill["category"].split("/")
+    parts = category.split("/")
     if len(parts) >= 2 and parts[0] in ("apps", "browser") and parts[1] != "general":
         apps.add(app_key(parts[1].replace("-", " ")))
-    return apps
+    return frozenset(apps)
 
 
 def for_app(app_name: str) -> list[dict]:
@@ -448,13 +547,14 @@ def mentioned_apps(text: str, skills: list[dict] | None = None) -> set[str]:
 
 
 def app_conflict(skill: dict, task: str, app: str = "", skills: list[dict] | None = None,
-                 use_front: bool = True) -> str:
+                 use_front: bool = True, named: set[str] | None = None) -> str:
     """Why `skill` is for another app than this task, or ''. A general skill (no apps) never
     conflicts. The task's app is the one it names, else (use_front) the app in front."""
     mine = skill_apps(skill)
     if not mine:
         return ""
-    named = mentioned_apps(task, skills)
+    if named is None:
+        named = mentioned_apps(task, skills)
     target = named or ({app_key(app)} if use_front and app_key(app) else set())
     if not target or mine & target:
         return ""
@@ -471,10 +571,18 @@ def find(task: str, app: str = "") -> tuple[dict | None, str]:
         return None, "No skills saved yet."
     pool = skills
     if app:
-        preferred = for_app(app)
-        pool = preferred + [s for s in skills if s not in preferred]
-    options = {str(i): _describe(s) for i, s in enumerate(pool[:250])}
+        wanted = app_key(app)
+        preferred = [s for s in skills if wanted and wanted in skill_apps(s)]
+        first = {id(s) for s in preferred}
+        pool = preferred + [s for s in skills if id(s) not in first]
+    named = mentioned_apps(task, skills)            # once: it walks the whole library
+    if len(pool) > SHORTLIST:
+        # A big library (thousands of learned skills): the chooser sees the best word matches, not the first N.
+        pool = _shortlist(task, pool, app)
+    options = {str(i): _describe(s) for i, s in enumerate(pool)}
     started = time.monotonic()
+    if not jev.available():
+        return _gemini_find(task, app, pool, skills, options, started, named)
     pick = jev.choose(
         task, options, context={"app in front": app} if app else None, timeout=4.0,
         instructions=("A voice assistant that operates a Mac keeps a library of skills: learned "
@@ -488,7 +596,7 @@ def find(task: str, app: str = "") -> tuple[dict | None, str]:
     if pick is None:
         # Jev unreachable (it timed out now and then in testing): fall back to
         # word overlap, but only on a clear winner.
-        best, why = _lexical(task, [s for s in pool if not app_conflict(s, task, app, skills)])
+        best, why = _lexical(task, [s for s in pool if not app_conflict(s, task, app, skills, named=named)])
         if best is not None:
             return best, why
         return None, "Could not reach Jev to choose a skill, and no skill clearly matches; carry on without one."
@@ -499,10 +607,81 @@ def find(task: str, app: str = "") -> tuple[dict | None, str]:
         return None, f"No saved skill clearly fits (best guess '{chosen['title']}' at {pick.confidence:.2f})."
     # The app the request names must be the skill's; the app merely in front counts only when Jev
     # is not sure ("manage my labeling tasks" may well be asked with Chrome in front).
-    clash = app_conflict(chosen, task, app, skills, use_front=pick.confidence < 0.75)
+    clash = app_conflict(chosen, task, app, skills, use_front=pick.confidence < 0.75, named=named)
     if clash:
         return None, f"No saved skill fits ('{chosen['title']}' came closest, but {clash})."
     return chosen, f"Jev chose it ({pick.confidence:.2f} confident, {took:.1f}s)"
+
+
+SHORTLIST = 60
+_CHOOSE = ("A voice assistant that operates a Mac keeps a library of skills: learned step-by-step how-tos. Which "
+           "skill should it follow to do `request`? Pick a skill only if it clearly covers this task (same app or "
+           "site, same kind of action). A skill for a particular app (ChatGPT, Slack, ZCode...) fits only when the "
+           "request names that app or is plainly about it. Otherwise choose none.")
+
+
+def _shortlist(task: str, pool: list[dict], app: str = "", size: int = SHORTLIST) -> list[dict]:
+    """The `size` skills sharing the most (rarer) words with the task - title and `when` count most, the app
+    named or in front adds - in a stable order (the pool's own, best first, for ties)."""
+    words = {w for w in re.findall(r"[a-z0-9]+", f"{task} {app}".lower()) if w not in _STOP and len(w) > 2}
+    if not words:
+        return pool[:size]
+    docs = []
+    for skill in pool:
+        strong = set(re.findall(r"[a-z0-9]+", f"{skill['title']} {skill['meta'].get('when', '')}".lower()))
+        weak = set(re.findall(r"[a-z0-9]+", f"{skill['category']} {' '.join(skill_apps(skill))}".lower()))
+        docs.append((strong, weak))
+    have = {w: sum(1 for strong, weak in docs if w in strong or w in weak) for w in words}
+    total = len(docs)
+    scores = []
+    for i, (strong, weak) in enumerate(docs):
+        score = sum((1.0 if w in strong else 0.5) * (1 + total / (1 + have[w])) ** 0.5
+                    for w in words if w in strong or w in weak)
+        scores.append((-score, i))
+    scores.sort()
+    return [pool[i] for _, i in scores[:size]]
+
+
+def _gemini_find(task: str, app: str, pool: list[dict], skills: list[dict], options: dict[str, str],
+                 started: float, named: set[str] | None = None) -> tuple[dict | None, str]:
+    """No TypeSafe key (most users): a cheap Gemini model chooses from the same shortlist; word overlap when it
+    can't be reached."""
+    from mint.core import llm
+    listing = "\n".join(f"{k}: {v}" for k, v in options.items())
+    answer = None
+
+    def ask():
+        from google.genai import types
+        return llm.client().models.generate_content(
+            model=llm.LITE[0], contents=(f"{_CHOOSE}\n\nSkills:\n{listing}\n\nrequest: {task}"
+                                         + (f"\napp in front: {app}" if app else "")
+                                         + '\n\nAnswer JSON only: {"id": "<skill id>" or "none"}'),
+            config=types.GenerateContentConfig(
+                temperature=0, response_mime_type="application/json", max_output_tokens=40,
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        runner = ThreadPoolExecutor(1)                # at most 5 s, like Jev's 4: then the word match decides
+        try:
+            reply = runner.submit(ask).result(timeout=5.0)
+        finally:
+            runner.shutdown(wait=False)
+        answer = llm.parse_json(str(reply.text or "{}"))
+    except Exception as error:
+        log.info("skill choice by Gemini failed: %s", str(error)[:120])
+    took = time.monotonic() - started
+    chosen_id = str((answer or {}).get("id", "") if isinstance(answer, dict) else "")
+    if answer is None:
+        best, why = _lexical(task, [s for s in pool if not app_conflict(s, task, app, skills, named=named)])
+        return (best, why) if best is not None else (None, "No skill clearly matches; carry on without one.")
+    if chosen_id not in options:
+        return None, f"No saved skill fits (Gemini, {took:.1f}s)."
+    chosen = pool[int(chosen_id)]
+    clash = app_conflict(chosen, task, app, skills, named=named)
+    if clash:
+        return None, f"No saved skill fits ('{chosen['title']}' came closest, but {clash})."
+    return chosen, f"Gemini chose it ({took:.1f}s)"
 
 
 def instructions_for(skill: dict) -> str:

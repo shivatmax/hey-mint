@@ -214,7 +214,7 @@ SECTION_ICONS = {
     "Tokens by model": ("chart.bar.fill", (0.2, 0.6, 1.0)), "Last 14 days": ("calendar", (1.0, 0.36, 0.33)),
     "Hey Mint": ("arrow.down.circle.fill", (0.2, 0.75, 0.4)), "Your Apple Shortcuts": ("square.stack.3d.up.fill",
                                                                                        (0.93, 0.27, 0.55)),
-    "Claude mode (coding agents)": ("chevron.left.forwardslash.chevron.right", (0.85, 0.47, 0.34)),
+    "Coding agents": ("chevron.left.forwardslash.chevron.right", (0.85, 0.47, 0.34)),
     "Backups for every agent": ("arrow.triangle.2.circlepath", (0.2, 0.6, 1.0)), "Connected apps": ("checkmark.circle.fill", (0.2, 0.75, 0.4)),
     "Available on this Mac": ("plus.circle.fill", (1.0, 0.6, 0.1)), "Skills": ("graduationcap.fill", (0.2, 0.6, 1.0)),
     "Memory": ("brain.head.profile", (1.0, 0.42, 0.62)), "Help": ("questionmark.circle.fill", (0.2, 0.6, 1.0)),
@@ -1290,28 +1290,25 @@ class SettingsWindow:
         self.mic_users.setStringValue_("Will also make way for: " + ", ".join(extra) if extra else
                                        "No other app is using the microphone right now.")
 
-    def _facts_looks(self) -> dict:
+    def _facts_coding(self) -> dict:
+        """Models & agents ▸ Coding agents (reader thread): which tools are here, what's connected, and their usage
+        limits - Codex's asked live (about a second), and only figures that are true now."""
+        from mint.tools import agent_hooks
+        from mint.tools import agent_watch
+        here = dict(agent_watch.installed())
+        if here.get("codex"):
+            agent_watch.refresh_live(block=True)
         mcp = {}
-        try:
-            from mint.tools import agent_mcp
-            for app in ("claude", "codex"):
-                mcp[app] = None if not agent_mcp.available(app) else bool(agent_mcp.connected(app))
-        except Exception:
-            mcp = {"claude": None, "codex": None}
-        try:
-            from mint.tools import agent_checks
-            from mint.tools import agent_watch
-            usage = agent_checks.limits_line()
-            limits = agent_watch.limits()            # files: read here, off the main thread
-        except Exception:
-            usage, limits = "", None
-        try:
-            from mint.tools import agent_watch
-            here = any(agent_watch.installed().values()) or prefs.is_set("agent_mode")
-        except Exception:
-            here = True
-        return {"hooks": self._hooks_title(), "limits": self._limits_title(), "mcp": mcp, "usage": usage,
-                "limits_data": limits, "agents_here": here}
+        if self._advanced():
+            try:
+                from mint.tools import agent_mcp
+                for app in ("claude", "codex"):
+                    if here.get(app) and agent_mcp.available(app):
+                        mcp[app] = bool(agent_mcp.connected(app))
+            except Exception:
+                log.debug("mcp status", exc_info=True)
+        return {"here": here, "hooks": agent_hooks.installed(), "statusline": agent_hooks.statusline_installed(),
+                "limits": agent_watch.limits(live=False), "mcp": mcp}
 
     def _page_looks(self, page, facts: dict) -> None:
         """Appearance & Sound. The few things most people change; the rest with advanced settings."""
@@ -1357,67 +1354,77 @@ class SettingsWindow:
                                                   ("Poke", 80, lambda: self._sample_sound("poke"))])
         page.end()
 
-        self._anchor(page, "claude_code")            # the setup guide's "connect Claude Code"
-        page.section("Claude mode (coding agents)")
-        if not facts.get("agents_here", True):
-            self._row_value(page, "Not on this Mac", "",
-                            "Neither Claude Code nor Codex is installed, so this stays off. Install one and Mint "
-                            "turns on its pop-ups by itself.", w=40)
-        else:
-            self._agent_rows(page, facts)
-            if advanced:
-                self._agent_more_rows(page, facts)
-        page.end()
-
         if advanced:
             self._looks_more_rows(page, facts)
-        self._more_section(page, "Face, animations, the notch's parts, which sounds play, and more for Claude Code "
-                                 "and Codex.")
+        self._more_section(page, "Face, animations, the notch's parts and which sounds play.")
 
-    def _agent_rows(self, page, facts: dict) -> None:
+    def _coding_section(self, page, facts: dict) -> None:
+        """Models & agents ▸ Coding agents: Claude Code and Codex - only the ones on this Mac, and only rows that
+        apply (a usage meter only when its figures are true now; nothing rather than an old number)."""
+        here = facts.get("here") or {}
+        advanced = self._advanced()
+        self._anchor(page, "claude_code")            # the setup guide's "connect Claude Code"
+        page.section("Coding agents")
+        if not any(here.values()):
+            self._row_value(page, "Not on this Mac", "",
+                            "Neither Claude Code nor Codex is installed. Install one and its pop-ups turn on by "
+                            "themselves.", w=40)
+            page.end()
+            return
+        limits = facts.get("limits") or {}
+        if here.get("claude"):
+            hooks = bool(facts.get("hooks"))
+            self._agent_hooks_row = self._row_buttons(
+                page, "Claude Code", [("Disconnect" if hooks else "Connect", 110, self._toggle_hooks, not hooks)],
+                "Connected: allow, deny and answer its questions from the notch." if hooks else
+                "Connect to allow, deny and answer its questions from the notch. The terminal still asks too.",
+                icon="anthropic")
+            self._limit_meters(page, "claude", limits.get("claude"))
+            if limits.get("claude") is None and not facts.get("statusline"):
+                self._agent_limits_row = self._row_buttons(
+                    page, "Its usage limits", [("Show", 90, self._toggle_limits, True)],
+                    "Claude Code passes its 5-hour and weekly limits to Mint while it runs (your own status "
+                    "line keeps showing).")
+        if here.get("codex"):
+            self._row_badge(page, "Codex", "Found", tone="ok",
+                            hint="Mint follows its sessions: a pop-up when it asks you something or finishes.",
+                            icon="openai", w=90)
+            self._limit_meters(page, "codex", limits.get("codex"))
         self._row_switch(page, "agent_approvals", "Pop up when one asks you something",
-                         "A permission request or a question: Allow, Deny or pick the answer right in the pop-up.")
+                         "A permission request or a question: answer it right in the pop-up.")
         self._row_switch(page, "agent_open_on_done", "Pop up when one finishes",
-                         "What it did, for a few seconds. Nothing shows while they work.")
-        self._limits_rows(page, facts)
-        # Connecting Claude Code is a setup step: in the basic view too.
-        self._agent_hooks_row = self._row_buttons(
-            page, "Approve from the notch", [(facts["hooks"], 150, self._toggle_hooks,
-                                              facts["hooks"] != "Disconnect")],
-            "Allow, Always or Deny Claude Code's permission requests, and answer its questions, from the notch (adds "
-            "a hook to ~/.claude/settings.json; a backup is kept). The terminal still asks too.", icon="anthropic")
+                         "What it did, for a few seconds.")
+        if advanced:
+            self._agent_more_rows(page, facts)
+        page.end()
+        self._note_link(page, "Live figures only: ask “how much of my limits is left?”" if limits else
+                        "Usage limits show here when they're known for sure.", "Refresh limits", self._refresh_limits)
 
-    def _limits_rows(self, page, facts: dict) -> None:
-        """Usage limits used: per provider (Claude, Codex) a slim bar for the 5-hour and the weekly window - percent
-        used, coloured green / amber / red, and when it resets. Not seen yet when there is nothing to show."""
-        hint = ("Claude's from the Claude app (it notes them while it's open), Codex's from its logs. Ask: \"how "
-                "much Claude do I have left?\"")
-        data = facts.get("limits_data")
-        if data is None:                             # no limits read (older facts): the one-line summary
-            self._row_value(page, "Usage limits used", facts.get("usage") or "Not seen yet", hint, w=250)
+    def _refresh_limits(self) -> None:
+        """Ask Codex again now, and read Claude's again: the section is rebuilt with what comes back."""
+        from mint.tools import agent_watch
+        agent_watch.refresh_live(force=True)
+        AppHelper.callAfter(lambda: self.refresh(keep_scroll=True))
+
+    def _limit_meters(self, page, app: str, x) -> None:
+        """Two slim bars, the 5-hour and the weekly window: percent used, green / amber / red, and when it resets.
+        Nothing at all when the figures aren't known to be true now."""
+        if not x:
             return
-        seen = {app: x for app, x in (data or {}).items() if isinstance(x, dict) and ("5h" in x or "week" in x)}
-        if not seen:
-            self._row_badge(page, "Usage limits used", "Not seen yet", tone="off", hint=hint, w=110)
-            return
-        page.row("Usage limits used", hint)
-        meter_w, gap = 150, 16
         now = time.time()
-        for app, name, brand in (("claude", "Claude", "anthropic"), ("codex", "Codex", "openai")):
-            x = seen.get(app)
-            if x is None:
-                self._row_badge(page, name, "Not seen yet", tone="off", icon=brand, w=110)
+        age = now - float(x.get("at") or now)
+        when = "Live" if x.get("live") else ("Just now" if age < 90 else f"As of {settings_art.ago(x['at'], now)}")
+        meter_w, gap = 150, 16
+        card, top, left, h = page.row("Usage limits", when, height=58, control_w=2 * meter_w + gap)
+        name = {"claude": "Claude", "codex": "Codex"}[app]
+        for i, (key, label) in enumerate((("5h", "5 hours"), ("week", "Week"))):
+            if key not in x:
                 continue
-            when = settings_art.ago(x.get("at") or 0, now)
-            card, top, left, h = page.row(name, f"Seen {when}" if when else "", height=58,
-                                          control_w=2 * meter_w + gap, icon=brand)
-            for i, (key, label) in enumerate((("5h", "5 hours"), ("week", "Week"))):
-                used = x.get(key)
-                meter = settings_art.usage_meter(
-                    AppKit.NSMakeRect(left + i * (meter_w + gap), top + (h - 40) / 2 + 1, meter_w, 40),
-                    label, None if used is None else float(used), x.get(f"{key}_resets") or 0, now)
-                meter.setAccessibilityLabel_(f"{name} {label.lower()} limit")
-                card.addSubview_(meter)
+            meter = settings_art.usage_meter(
+                AppKit.NSMakeRect(left + i * (meter_w + gap), top + (h - 40) / 2 + 1, meter_w, 40),
+                label, float(x[key]), x.get(f"{key}_resets") or 0, now)
+            meter.setAccessibilityLabel_(f"{name} {label.lower()} limit")
+            card.addSubview_(meter)
 
     def _show_tour(self) -> None:
         from mint.ui import onboarding
@@ -1461,32 +1468,33 @@ class SettingsWindow:
         page.end()
 
     def _agent_more_rows(self, page, facts: dict) -> None:
-        """Claude mode, advanced: live progress, Telegram, checks, hooks and the MCP connection."""
-        self._row_popup(page, "agent_mode", "Claude Code and Codex", AGENT_MODES,
+        """Coding agents, all settings: how they show, Telegram, checks, and the connections that apply."""
+        here = facts.get("here") or {}
+        self._row_popup(page, "agent_mode", "Show them in the notch", AGENT_MODES,
                         "Pop-ups only: when one asks or finishes. Live: also step by step while they work.", w=200)
-        self._row_switch(page, "notch_agents_bar", "Agents bar under the notch",
-                         "Live only: a slim bar with the current step while Claude Code or Codex works.")
+        if prefs.get("agent_mode") in ("auto", "on"):
+            self._row_switch(page, "notch_agents_bar", "Agents bar under the notch",
+                             "A slim bar with the current step while one works.")
         self._row_popup(page, "agent_telegram", "Message me on Telegram", AGENT_TELEGRAM,
-                        "When an agent needs you or finishes: Allow / Deny there, or reply to tell it what to do.",
-                        w=200)
-        self._row_switch(page, "agent_checks", "Check agents' work",
+                        "When one needs you or finishes: Allow / Deny there, or reply to tell it what to do.", w=200)
+        self._row_switch(page, "agent_checks", "Check their work",
                          "Reads their test runs, risky steps and changed files; the verdict shows in alerts and answers.")
-        self._row_switch(page, "agent_fix_loop", "Send Claude back to fix failing tests",
-                         "Needs Mint's Claude Code hooks. At most twice per request.")
+        if here.get("claude") and facts.get("hooks"):
+            self._row_switch(page, "agent_fix_loop", "Send Claude back to fix failing tests",
+                             "At most twice per request.")
         mcp = facts.get("mcp") or {}
-        self._mcp_buttons = dict(zip(("claude", "codex"), self._row_buttons(
-            page, "Let agents ask Mint", [(self._mcp_title(app, mcp.get(app)), {"claude": 178, "codex": 132}[app],
-                                           lambda a=app: self._toggle_mcp(a)) for app in ("claude", "codex")],
-            "Claude Code and Codex can check their own work with Mint before saying done (read-only).")))
-        for app, button in self._mcp_buttons.items():
-            if mcp.get(app) is None:
-                button.setEnabled_(False)
-                button.setToolTip_(f"{MCP_NAMES[app]} isn't installed on this Mac.")
+        apps = [app for app in ("claude", "codex") if app in mcp]
+        if apps:
+            buttons = self._row_buttons(
+                page, "Let them ask Mint", [(self._mcp_title(app, mcp[app]), {"claude": 178, "codex": 132}[app],
+                                             lambda a=app: self._toggle_mcp(a)) for app in apps],
+                "They can check their own work with Mint before saying done (read-only).")
+            self._mcp_buttons = dict(zip(apps, buttons))
         self._mcp_state = dict(mcp)
-        self._agent_limits_row = self._row_buttons(
-            page, "Claude's limits in a terminal", [(facts["limits"], 210, self._toggle_limits)],
-            "Only for Claude Code in a terminal (the Claude app's are read without this): a status line passes "
-            "its 5-hour and weekly limits to Mint, and keeps showing yours.")
+        if facts.get("statusline"):
+            self._agent_limits_row = self._row_buttons(
+                page, "Claude's limits from its status line", [("Stop", 90, self._toggle_limits)],
+                "Claude Code passes its 5-hour and weekly limits to Mint while it runs.")
 
     def _meet_setup(self) -> None:
         from mint.app import meet_call
@@ -2321,13 +2329,6 @@ class SettingsWindow:
             page.end()
         self._more_section(page, "The log, and the settings files you can edit by hand.")
 
-    def _hooks_title(self) -> str:
-        try:
-            from mint.tools import agent_hooks
-            return "Disconnect" if agent_hooks.installed() else "Connect Claude Code"
-        except Exception:
-            return "Connect Claude Code"
-
     def _toggle_hooks(self) -> None:
         from mint.tools import agent_hooks
         connected = agent_hooks.installed()
@@ -2340,8 +2341,7 @@ class SettingsWindow:
         if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
             return
         said = agent_hooks.uninstall() if connected else agent_hooks.install()
-        for button in getattr(self, "_agent_hooks_row", None) or []:
-            button.setTitle_(self._hooks_title())
+        AppHelper.callAfter(lambda: self.refresh(keep_scroll=True))
         note = AppKit.NSAlert.alloc().init()
         note.setMessageText_("Claude Code")
         note.setInformativeText_(said)
@@ -2407,13 +2407,6 @@ class SettingsWindow:
             note.runModal()
         self._background(f"mcp-{app}", work, done)
 
-    def _limits_title(self) -> str:
-        try:
-            from mint.tools import agent_hooks
-            return "Stop showing Claude's limits" if agent_hooks.statusline_installed() else "Show Claude's usage limits"
-        except Exception:
-            return "Show Claude's usage limits"
-
     def _toggle_limits(self) -> None:
         from mint.tools import agent_hooks
         on = agent_hooks.statusline_installed()
@@ -2425,8 +2418,7 @@ class SettingsWindow:
         if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
             return
         said = agent_hooks.uninstall_statusline() if on else agent_hooks.install_statusline()
-        for button in getattr(self, "_agent_limits_row", None) or []:
-            button.setTitle_(self._limits_title())
+        AppHelper.callAfter(lambda: self.refresh(keep_scroll=True))
         note = AppKit.NSAlert.alloc().init()
         note.setMessageText_("Claude's usage limits")
         note.setInformativeText_(said)

@@ -15,12 +15,15 @@ target that is not on screen cannot be clicked, because it is not in the list.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import time
 
 from mint.tools import fastinput
 from mint.core import jev
+
+log = logging.getLogger("mint.screen.ocr")
 
 
 def _monitor_for(monitors: list[dict], point) -> dict:
@@ -284,6 +287,11 @@ def click_text(target: str, double: bool = False, app=None) -> str:
     try:
         if running is not None:
             items, area, front = read_window(running)
+            if not items:
+                # A window still opening or redrawing reads blank (seen 9 Oct: "No text is visible in Telegram's
+                # window" a moment after opening it). Give it a moment and read again.
+                time.sleep(0.7)
+                items, area, front = read_window(running)
             rows = None
         else:
             items, area = read_screen()
@@ -311,6 +319,8 @@ def click_text(target: str, double: bool = False, app=None) -> str:
     if len(exact) > 1 and front is not None:
         in_front = [i for i in exact if seen(items[i])]
         exact = in_front or exact
+    if len(exact) > 1:
+        exact = _pick_among_same(exact, items)
     if not exact:
         # The words inside a longer line ("microsoft.com" in "Microsoft microsoft.com 52,882,693"):
         # one such line in the front window needs no model either.
@@ -346,7 +356,12 @@ def click_text(target: str, double: bool = False, app=None) -> str:
     window = _window_at(point)
     if running is not None:
         if window is not None and window.get("pid") and window["pid"] != front["pid"]:
-            return (f"FAILED: '{item['text'][:40]}' is in {front['app']}'s window, but {window['app']} covers that "
+            # Another window lies over the spot - seen: Mint's own Settings window over Telegram's search box. Bring
+            # the app forward (and raise its window) once, then look again.
+            window = _raise_over(running, point) or window
+        if window is not None and window.get("pid") and window["pid"] != front["pid"]:
+            who = "Mint's own window" if window["pid"] == os.getpid() else window["app"]
+            return (f"FAILED: '{item['text'][:40]}' is in {front['app']}'s window, but {who} covers that "
                     f"spot, so nothing was clicked. Bring {front['app']} forward first, or use ui_act (no pointer).")
         window = front
     # Without an app the text was read off the screen as drawn, so it belongs to the window on top
@@ -384,8 +399,10 @@ def click_text(target: str, double: bool = False, app=None) -> str:
         route, delivery, verb = "accessibility", "background", "Pressed"
     else:
         from mint.screen import ground
-        ground.mouse_click(px, py, double=double, label=item["text"], spark=False)
-        route, delivery, verb = "global_input", "foreground", "Double-clicked" if double else "Clicked"
+        route = ground.mouse_click(px, py, double=double, label=item["text"], spark=False,
+                                   pid=(window or {}).get("pid"))
+        delivery = "background" if route == "background_pointer" else "foreground"
+        verb = "Double-clicked" if double else "Clicked"
 
     # Read the screen again: a warm read takes about 0.1s, so there is no
     # excuse for reporting a click as a result. In testing the vision route
@@ -514,13 +531,29 @@ def _layer0() -> list[dict]:
         Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
         Quartz.kCGNullWindowID) or []
     rows = []
+    through = _click_through()
     for window in windows:
         b = window.get("kCGWindowBounds") or {}
         if window.get("kCGWindowLayer", 0) != 0 or not b or float(window.get("kCGWindowAlpha", 1) or 0) <= 0:
             continue
+        if int(window.get("kCGWindowNumber", 0)) in through:
+            continue
         rows.append({"x": b["X"], "y": b["Y"], "w": b["Width"], "h": b["Height"],
                      "app": window.get("kCGWindowOwnerName", ""), "pid": int(window.get("kCGWindowOwnerPID", 0))})
     return rows
+
+
+def _click_through() -> set[int]:
+    """Mint's own windows that clicks pass through: they cover nothing. Seen 9 Oct: the glow Mint draws around the
+    window it works in (window_glow, ordered just above it at the normal level) made every click in Telegram fail
+    with "Mint's own window covers that spot"."""
+    try:
+        import AppKit
+        app = AppKit.NSApp
+        return {int(w.windowNumber()) for w in (app.windows() if app is not None else [])
+                if w.ignoresMouseEvents()}
+    except Exception:
+        return set()
 
 
 def _top_at(rows: list[dict], x: float, y: float) -> dict | None:
@@ -536,6 +569,40 @@ def _seen_in(item: dict, window: dict, rows: list[dict] | None) -> bool:
         return True
     top = _top_at(rows, item["x"] + item["w"] / 2, item["y"] + item["h"] / 2)
     return top is None or top["pid"] == window["pid"]
+
+
+def _pick_among_same(exact: list[int], items: list[dict]) -> list[int]:
+    """The same words in several places. Seen 9 Oct: "BotFather" typed in Telegram's search box and the results under
+    it - asking a model which one opened a lookalike bot. Never the words just typed (inside the focused field); of the
+    rest, the first in reading order - the top result, as a person would pick."""
+    try:
+        from mint.ui.effects import focused_frame
+        box = focused_frame()
+    except Exception:
+        box = None
+    if box is not None:
+        bx, by, bw, bh = box
+        outside = [i for i in exact
+                   if not (bx <= items[i]["x"] + items[i]["w"] / 2 <= bx + bw and by <= items[i]["y"] + items[i]["h"] / 2 <= by + bh)]
+        exact = outside or exact
+    if len(exact) > 1:
+        exact = [min(exact, key=lambda i: (round(items[i]["y"] / 6), items[i]["x"]))]
+    return exact
+
+
+def _raise_over(running, point) -> dict | None:
+    """Bring `running` to the front and raise its focused window; the window now at `point` (None: none there)."""
+    try:
+        from mint.screen import axkit
+        axkit.bring_to_front(running, timeout=1.5)
+        window = axkit.focused_window(running.processIdentifier())
+        if window is not None:
+            import ApplicationServices as AX
+            AX.AXUIElementPerformAction(window, "AXRaise")
+        time.sleep(0.35)
+    except Exception:
+        log.debug("raise over", exc_info=True)
+    return _window_at(point)
 
 
 def _window_at(point) -> dict | None:

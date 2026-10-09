@@ -30,151 +30,249 @@ from google.genai import types
 
 log = logging.getLogger("mint.tools.diet")
 
-# Declared in every voice session. Chosen from tools.log + history (calls over the last weeks) and from
-# latency: things said in passing ("pause the music", "set a timer", "volume down") must not cost a lookup.
+# Declared in every voice session (9 Oct: ~3k tokens with the instruction). Only what a turn needs at once: opening,
+# the mouse and keyboard, reading the window, the background job, the plan, stopping. Everything else is one
+# find_tools away, picked for the request by router.py (hermes-agent's measured lesson: tools that must fire
+# mid-flow - stop, the plan - stay declared).
 CORE = frozenset({
-    # apps, windows, keys
-    "open_app", "open_url", "open_folder", "open_chrome", "switch_to", "quit_app", "list_open",
-    "type_text", "press_key", "scroll", "media_key", "set_volume", "clipboard", "get_selected_text",
-    # the screen
-    "look", "ui_act", "ui_elements", "click_text", "click_at", "read_window", "desktop", "scroll_to", "menu",
-    "screenshot", "verify_state",
-    # files and the web
-    "read_file", "write_file", "find_files", "file_action", "web_search", "read_url", "browser", "web_goal", "run_applescript",
-    # the day
-    "get_status", "set_timer", "create_reminder", "calendar_events", "create_event", "create_note",
-    "compose_email", "list_emails", "system_action", "mac", "music", "calculate", "undo",
-    # the conversation itself
-    "stop_listening", "set_preference", "express", "plan_task", "step_done", "task", "wait_until_done",
-    # memory and skills
-    "remember", "recall", "update_memory", "forget", "find_skill", "skill_result", "recall_history",
-    # parallel work and agents
-    "background_task", "agent_status", "answer_agent", "message_agent", "stop_agent", "delegate_task", "agent_app",
-    "pause_everything",
-    # what is set up, and setting things up (setup_guide.py): "what can you do?", "connect Telegram"
-    "setup_status", "open_setup",
+    "open_app", "open_url", "switch_to", "type_text", "press_key", "scroll", "media_key", "set_volume",
+    "ui_act", "click_text", "click_at", "look", "read_window",
+    "get_status", "recall", "background_task", "plan_task", "step_done", "stop_listening",
 })
 BRIDGE = ("find_tools", "use_tool")
 
-# The hidden tools by family: words people use for them, and the prompt sections that explain them (served by
-# find_tools instead of riding along in every session). `prompts` are module names, or "extra_tools.NAME".
+# Every tool not in CORE, by family: a short label (the prompt lists the labels), words people use for them, and
+# the how-to sections that explain them - modules' PROMPT, or "module.NAME" (guides.py holds the chunks of the old
+# instruction). find_tools and the request's context pack serve them; router.py picks the families per request.
 FAMILIES: dict[str, dict] = {
+    "apps, windows, clicking and checking what happened": {
+        "label": "clicking and app windows",
+        "tools": ("ui_elements", "drag", "scroll_to", "menu", "list_open", "quit_app", "open_folder", "desktop",
+                  "verify_state", "wait_until_done"),
+        "words": "click type button field menu dialog popup window app open folder finder quit close drag drop "
+                 "scroll list controls elements check verify done wait finished loading search box sidebar tab "
+                 "telegram whatsapp slack chatgpt claude vs code electron canvas",
+        "prompts": ("guides.CLICKING",)},
+    "chat apps: finding and opening a chat in Telegram, WhatsApp, Slack, Discord, Messages": {
+        "label": "chat apps",
+        "tools": (),
+        "words": "chat message messages telegram whatsapp slack discord signal bot botfather dm channel group "
+                 "conversation contact send reply",
+        "prompts": ("guides.CHAT_APPS",)},
+    "the web: searching, reading pages, browser tabs, tasks on websites, Chrome accounts": {
+        "label": "web, browser and websites",
+        "tools": ("web_search", "read_url", "browser", "web_goal", "open_chrome"),
+        "words": "web search google look up online internet news price weather site website page url link "
+                 "browser chrome brave safari tab tabs gmail account profile form book flights find out who what "
+                 "when latest research",
+        "prompts": ("guides.WEB",)},
+    "files and folders": {
+        "label": "files",
+        "tools": ("read_file", "write_file", "find_files", "file_action", "run_applescript"),
+        "words": "file files folder document pdf read write save find locate move rename copy trash delete "
+                 "open reveal downloads desktop documents text markdown csv modified yesterday week applescript",
+        "prompts": ("guides.FILES", "extra_tools.FILE_CARE")},
+    "screenshots and the clipboard": {
+        "label": "screenshots and clipboard",
+        "tools": ("screenshot", "clipboard", "get_selected_text"),
+        "words": "screenshot take screen shot capture picture window copy paste clipboard copied history pin "
+                 "secret key password path selected selection highlighted this",
+        "prompts": ("clip_tools",)},
+    "reminders, calendar, notes, email drafts and timers": {
+        "label": "reminders, calendar, notes, email, timers",
+        "tools": ("set_timer", "create_reminder", "calendar_events", "create_event", "create_note",
+                  "compose_email", "list_emails"),
+        "words": "remind reminder timer minutes alarm calendar event meeting schedule today tomorrow note notes "
+                 "email mail draft write inbox appointment",
+        "prompts": ("guides.DAY",)},
+    "music and the Mac's switches: brightness, dark mode, Do Not Disturb, window layouts, Wi-Fi": {
+        "label": "music and Mac switches",
+        "hint": "the Mac's own settings and music, not Mint's look",
+        "tools": ("music", "mac", "system_action"),
+        "words": "music song play pause spotify playlist artist album next skip brightness dark mode lock sleep "
+                 "mute focus do not disturb window layout half maximize split night shift wifi keep awake "
+                 "mission control settings display",
+        "prompts": ("music", "macctl")},
+    "undo and arithmetic": {
+        "label": "undo, calculate",
+        "tools": ("undo", "calculate"),
+        "words": "undo put back revert redo calculate total sum add average percent math plus minus times",
+        "prompts": ("undo", "calc")},
+    "memory: remembering, changing and forgetting facts, and what happened before": {
+        "label": "remembering and the past",
+        "tools": ("remember", "update_memory", "forget", "recall_history"),
+        "words": "remember forget memory memories know about me my name wife manager prefer changed wrong "
+                 "yesterday last week earlier before history what did we",
+        "prompts": ("guides.MEMORY", "journal")},
+    "multi-step tasks: changing the plan, pausing, resuming": {
+        "label": "changing a plan",
+        "tools": ("task",),
+        "words": "task plan step steps continue resume pause where were we abandon replan add",
+        "prompts": ("guides.TASKS", "tasks")},
+    "background jobs: status, changes, answers, stopping": {
+        "label": "background jobs",
+        "tools": ("agent_status", "answer_agent", "message_agent", "stop_agent"),
+        "words": "job jobs background status progress running stop cancel change tell answer task",
+        "prompts": ("guides.JOBS",)},
     "video editing and watching videos": {
+        "label": "videos",
         "tools": ("edit_video", "video_info", "watch_video", "download_video"),
         "words": "video clip movie mp4 mov trim cut join merge speed slow captions subtitles gif reels vertical "
                  "compress mute audio extract rotate export youtube watch summarise transcript frame download "
                  "save grab vimeo instagram tiktok reel embedded stream m3u8 hls",
         "prompts": ("video_edit", "video", "video_download")},
     "documents, PDFs, OCR and conversions": {
+        "label": "documents and PDFs",
         "tools": ("convert_document", "ocr_copy", "data_to_sheet", "create_pdf", "export_doc_pdf"),
         "words": "convert conversion pdf word docx document markdown html epub txt ocr scan text image copy "
                  "table data excel translate file language hindi export google doc",
         "prompts": ("convert",)},
     "spreadsheets": {
+        "label": "spreadsheets",
         "tools": ("make_spreadsheet", "edit_spreadsheet"),
         "words": "spreadsheet sheet excel xlsx csv numbers table rows columns cell formula total sum invoices "
                  "receipts budget",
         "prompts": ("sheets",)},
     "translation": {
+        "label": "translation",
         "tools": ("translate_screen",),
         "words": "translate translation language foreign page window say english hindi spanish french german",
         "prompts": ("translate",)},
     "image generation": {
+        "label": "images",
         "tools": ("make_image",),
         "words": "image picture photo draw drawing generate art sketch illustration logo wallpaper playground",
         "prompts": ("imagegen",)},
     "screen recording and finding screenshots": {
+        "label": "screen recording",
         "tools": ("screen_record", "find_screenshot"),
-        "words": "record recording screen video capture area window screenshot screenshots find old",
+        "words": "record recording screen video capture area screenshots find old earlier",
         "prompts": ("screenrec", "screenshots")},
     "Apple apps: Notes, Reminders lists, calendar changes, Contacts, Maps, Safari, Photos, Pages/Keynote/Numbers": {
+        "label": "Apple apps",
         "tools": ("notes", "reminders_manage", "calendar_manage", "contacts", "maps", "safari", "photos", "iwork"),
         "words": "note notes append grocery list reminders due overdue complete done reschedule calendar move "
                  "event rename contact phone number email birthday address maps directions route eta drive "
                  "safari reading list bookmarks photos album pictures pages keynote numbers presentation slides",
         "prompts": ("apple_apps",)},
     "tidying and merging folders": {
+        "label": "tidying folders",
         "tools": ("tidy", "merge_folders"),
         "words": "tidy clean organise organize sort folder downloads desktop merge folders duplicates",
         "prompts": ("tidy", "merge")},
     "meetings and Google Meet calls": {
+        "label": "meetings",
         "tools": ("meeting", "google_meet"),
         "words": "meeting call record notes transcript zoom teams huddle facetime google meet join share screen "
                  "action items standup",
         "prompts": ("meetings", "meet_call")},
     "automations, routines and Shortcuts": {
-        "tools": ("automation", "run_routine", "shortcut", "make_shortcut"),
+        "label": "automations and Shortcuts",
+        "tools": ("automation", "run_routine", "shortcut", "make_shortcut", "pause_everything"),
         "words": "automation schedule every day daily morning trigger when routine shortcut shortcuts siri "
-                 "recurring later at",
+                 "recurring later at pause resume everything all jobs",
         "prompts": ("automations", "apple_shortcuts", "shortcut_maker")},
     "teaching Mint and tutoring": {
+        "label": "teaching and tutoring",
         "tools": ("teach", "tutor"),
         "words": "teach watch me learn show you how tutor explain lesson practice quiz homework",
         "prompts": ("teach", "tutor")},
     "daily briefing": {
+        "label": "briefing",
         "tools": ("briefing",),
         "words": "briefing brief morning summary day news agenda today",
         "prompts": ("briefing",)},
     "email triage": {
+        "label": "email triage",
         "tools": ("mail", "read_email"),
         "words": "mail email inbox triage unread important reply draft archive read",
         "prompts": ("mailtriage",)},
     "trackers: tell me when something finishes": {
+        "label": "trackers",
         "tools": ("track",),
         "words": "track tracker tell notify ping let me know when finishes done download build upload export",
         "prompts": ("trackers",)},
     "notifications": {
+        "label": "notifications",
         "tools": ("notifications", "notify"),
         "words": "notifications notification center missed dismiss clear reply alert banner",
         "prompts": ("notifications",)},
     "dictation": {
+        "label": "dictation",
         "tools": ("dictation",),
         "words": "dictation dictate type what i say voice typing",
         "prompts": ("dictation",)},
     "connectors to apps and services": {
+        "label": "connectors",
         "tools": ("connector",),
         "words": "connector connect integration integrate service app notion things setup status",
         "prompts": ("connector_maker",)},
+    "delegating to sub-agents (Astra, Luna, Sage, Codex)": {
+        "label": "sub-agents",
+        "tools": ("delegate_task",),
+        "words": "agent agents astra luna sage codex delegate ask give hand research build write sub-agent team",
+        "prompts": ("orchestrator.prompt_text", "orchestrator")},    # the roster (live) and the rules
+    "orb expressions (smile, dance, wave)": {
+        "label": "orb expressions",
+        "tools": ("express",),
+        "words": "express expression smile laugh love heart blush cry angry surprised sleepy dizzy cool thinking "
+                 "wink kiss wave clap praise dance show party perform emotion face",
+        "prompts": ()},                 # its rules are in its own description, so use_tool runs it at once
+    "the ChatGPT and Claude desktop apps": {
+        "label": "ChatGPT and Claude apps",
+        "tools": ("agent_app",),
+        "words": "chatgpt claude desktop app ask tell send prompt reply answer read latest chat chats project "
+                 "projects session sessions busy doing writing stop new",
+        "prompts": ("agentapps",)},
     "coding agents and sub-agents": {
+        "label": "coding agents",
         "tools": ("claude_mode", "delegate_tasks", "create_agent", "list_agents"),
         "words": "claude code codex agent agents coding session terminal delegate sub-agent job jobs stop "
                  "message tell tests test passed failing green broke usage limits left standup recap handoff "
                  "hand off continue",
         "prompts": ("notch_agents",)},
     "handing files to an app": {
+        "label": "files to an app",
         "tools": ("hand_to_app",),
         "words": "open with keka zip compress unzip extract unarchiver preview drop drag into app files",
         "prompts": ("handoff",)},
-    "your orb, notch, voice, cards and showing things on screen": {
-        "tools": ("show_on_screen", "mark_area", "clear_marks", "move_orb", "display_mode", "notch_files",
-                  "screen_share_visibility", "set_voice", "show_card"),
+    "your settings, orb, notch, voice, cards and showing things on screen": {
+        "label": "your settings and orb",
+        "hint": "how Mint itself looks, sounds and behaves: its colour theme ('make it pink'), where it sits, chat "
+                "only or speaking, the mic, reply language, its voice; pointing things out on screen",
+        "tools": ("set_preference", "show_on_screen", "mark_area", "clear_marks", "move_orb", "display_mode",
+                  "notch_files", "screen_share_visibility", "set_voice", "show_card"),
         "words": "show point highlight underline circle box arrow mark where orb move up down left right "
                  "circle notch island dynamic orb mode voice deeper cheerful accent card count list tiles "
-                 "screen share hide visible",
-        "prompts": ("cards",)},         # SHOWING stays in the prompt: without it "a little down" went to set_preference
+                 "screen share hide visible speak talk chat mic microphone theme color pink purple position "
+                 "language reply hindi setting preference spoken",
+        "prompts": ("guides.SETTINGS", "extra_tools.SHOWING", "extra_tools.EXPRESSIVE", "cards")},
     "rewriting selected text": {
+        "label": "rewriting text",
         "tools": ("edit_selection",),
         "words": "selected selection rewrite formal grammar shorten bullets polish rephrase",
         "prompts": ("rewrite",)},
-    "skills, memory admin and the history of what happened": {
-        "tools": ("create_skill", "update_skill", "list_skills", "delete_skill", "skill_history", "learn_skill",
-                  "list_memories", "memory_used", "show_skills_and_memory"),
-        "words": "skill skills save how to learned memory memories brain history yesterday last week earlier "
-                 "undo learn this page clipboard",
-        "prompts": ()},
+    "skills: learned how-tos, and memory admin": {
+        "label": "skills (how-tos)",
+        "tools": ("find_skill", "skill_result", "create_skill", "update_skill", "list_skills", "delete_skill",
+                  "skill_history", "learn_skill", "list_memories", "memory_used", "show_skills_and_memory"),
+        "words": "skill skills save how to learned memory memories brain history learn this page clipboard teach "
+                 "next time steps",
+        "prompts": ("guides.SKILLS",)},
     "hearing fixes": {
+        "label": "hearing fixes",
         "tools": ("fix_hearing",),
         "words": "mishear misheard hearing word wrong pronounce",
         "prompts": ()},
     "your own setup: what is set up, connecting accounts, keys and permissions": {
-        "tools": ("setup_status", "open_setup"),        # both in CORE: find_tools names them as already there
+        "label": "your setup",
+        "tools": ("setup_status", "open_setup"),
         "words": "setup set connect connected telegram gmail google account meet openai gemini typesafe key keys "
                  "permission permissions access accessibility microphone calendar shortcuts claude hooks voice "
                  "train trained capabilities features what can you do settings",
-        "core_when": "setup connect connected configure permission access key keys capabilities features telegram "
-                     "gmail openai typesafe",
-        "prompts": ()},
+        "prompts": ("setup_guide",)},
     "Mac and Mint odds and ends": {
+        "label": "odds and ends",
         "tools": ("frontmost_app", "list_windows", "open_slack", "list_accounts", "chat_action", "show_chat",
                   "quit_mint", "update", "pointer", "wait_for_text", "preview_site"),
         "words": "front window windows slack workspace channel accounts chat clear summarize new session quit "
@@ -182,8 +280,61 @@ FAMILIES: dict[str, dict] = {
         "prompts": ()},
 }
 
+# Sections whose content guides.py now carries: dropped from the voice prompt even though no family serves them.
+REPLACED = ("extra_tools.PROMPT", "harness_tools")
+
+# Short descriptions for the declared tools (the full ones stay in their modules for the background worker and
+# find_tools(<the tool's name>)).
+LIVE: dict[str, str] = {
+    "open_app": "Open or switch to a Mac app by name.",
+    "open_url": "Open a web address in a new tab; the browser is picked for you.",
+    "switch_to": "Bring an open app, Chrome tab or window to the front by words from its title.",
+    "type_text": "Type text at the cursor in the focused field of any app.",
+    "press_key": "Press a key, with modifiers.",
+    "scroll": "Scroll the window under the pointer.",
+    "media_key": "Play/pause, next or previous track.",
+    "set_volume": "Set the Mac's volume.",
+    "ui_act": "Click, type into or pick a control in an app's window, described in plain words; reports what "
+              "changed. One control per call.",
+    "click_text": "Click text you can see on screen, when ui_act can't find the control.",
+    "click_at": "Last resort: click something in the latest look, named by target; x, y (0-1000) are hints.",
+    "look": "See the screen: images, charts, layouts, why an action didn't work. Not routinely.",
+    "read_window": "Read ALL the text in the front window exactly, off-screen parts too.",
+    "get_status": "The local time and date, battery and volume.",
+    "recall": "Look up saved memories about the user (instant) before answering anything personal.",
+    "background_task": "Run a job needing several tool calls in the BACKGROUND (research, drafts, files, apps on "
+                       "screen) while you keep talking. Write the whole job.",
+    "plan_task": "Start a task of three or more steps: the goal and ordered steps first.",
+    "step_done": "Mark a plan step finished (or failed) with what you checked.",
+    "stop_listening": "Go back to sleep when the user is done. Say a short goodbye first.",
+}
+LIVE_ARGS: dict[str, dict[str, str]] = {
+    "open_app": {"name": "The app's name."},
+    "open_url": {"browser": "Only when the user named one."},
+    "type_text": {"press_return": "Press Return after; never to send a message unless asked.",
+                  "field": "A box to type into if not the focused one ('search box')."},
+    "press_key": {"key": "return, escape, tab, space, arrows, a letter or digit."},
+    "scroll": {"amount": "Steps; about 5 is one screen."},
+    "ui_act": {"action": "dismiss closes the open dialog, menu or popup.",
+               "target": "The control in plain words: 'Create project button in the dialog'.",
+               "text": "For type: what to type.", "press_return": "For type: press Return after.",
+               "app": "Optional: its app if not the front one."},
+    "click_text": {"text": "The label as it appears.", "app": "Optional: its app if not the front one."},
+    "click_at": {"target": "Its visible text or a short description.", "x": "0-1000 from the left.",
+                 "y": "0-1000 from the top.", "button": "left or right."},
+    "look": {"display": "0 = all, 1 = main."},
+    "read_window": {"max_chars": "Default 12000."},
+    "recall": {"question": "What you need to know.", "deep": "Also search archived memories."},
+    "background_task": {"task": "The whole job, in full sentences.", "title": "3-6 words for it.",
+                        "context": "What it needs from the conversation."},
+    "plan_task": {"steps": "Short steps in order."},
+    "step_done": {"step": "'2', or '3.1'.", "result": "What you checked and saw."},
+    "set_volume": {"level": "0 to 100."},
+    "media_key": {"action": "playpause, next or previous."},
+}
+
 BUDGET = 6000              # chars one find_tools answer may use
-GUIDE_MAX = 2600           # of which a family's how-to guidance
+GUIDE_MAX = 3000           # of which a family's how-to guidance
 RESULT_CAP = 20000         # a tool result longer than this is cut for the model ...
 RESULT_HEAD, RESULT_TAIL = 14000, 4000      # ... to its start and end; the whole text goes to a file
 SPILL_DIR = Path.home() / "Library" / "Logs" / "Mint" / "results"
@@ -224,22 +375,17 @@ def declarations() -> list[types.FunctionDeclaration]:
     return [
         types.FunctionDeclaration(
             name="find_tools",
-            description=("Find one of your less used tools (listed under 'More tools' in your instructions): "
-                         "describe the job in a few words ('trim a video', 'translate a document', 'move my "
-                         "orb'). Returns the matching tools with their exact arguments and how to use them; "
-                         "then call use_tool. Call it before saying you can't do something."),
+            description=("The tools and how-to for a request beyond your own tools: the request in a few words "
+                         "('trim a video', 'add a reminder'), or a tool's name. Then use_tool."),
             parameters=types.Schema(type=types.Type.OBJECT, properties={
-                "query": types.Schema(type=S, description="The job, in plain words, or a tool's name."),
+                "query": types.Schema(type=S, description="The job in plain words."),
             }, required=["query"])),
         types.FunctionDeclaration(
             name="use_tool",
-            description=("Run a tool that find_tools showed you (or that your instructions name but your tool "
-                         "list does not have). It runs exactly like a direct call: same checks, same result."),
+            description="Run a tool find_tools showed you, or one your instructions name.",
             parameters=types.Schema(type=types.Type.OBJECT, properties={
-                "name": types.Schema(type=S, description="The tool's exact name, e.g. edit_video."),
-                "args": types.Schema(type=S, description="Its arguments as a JSON object, e.g. "
-                                                         "{\"instruction\": \"cut the first 10 seconds\"}. "
-                                                         "{} for none."),
+                "name": types.Schema(type=S, description="The tool's exact name."),
+                "args": types.Schema(type=S, description="Its arguments as a JSON object; {} for none."),
             }, required=["name"])),
     ]
 
@@ -249,12 +395,14 @@ def live_tools(full: list[types.Tool]) -> list[types.Tool]:
     Also remembers the full list, for find_tools and use_tool."""
     remember(full)
     _served.clear()                    # a new session: the model has read nothing yet
+    _shown.clear()
+    _kits.clear()
     if not enabled():
         return full
     hidden = {n for n in _catalog if n not in CORE}
     kept = []
     for tool in full:
-        decls = [_with_hints(d, hidden) for d in tool.function_declarations or [] if d.name in CORE]
+        decls = [_with_hints(_short(d), hidden) for d in tool.function_declarations or [] if d.name in CORE]
         if decls:
             kept.append(types.Tool(function_declarations=decls))
         elif not tool.function_declarations:
@@ -287,6 +435,27 @@ def _mention(name: str) -> str:
     return rf"`{n}`|\b(?:use|call|the) {n} (?:tool|action)|\b{n} (?:tool\b|action=)|\b{n}\("
 
 
+def _arg(schema, path: str):
+    """The argument schema at 'name' or 'name.inner' (inside an array's items), or None."""
+    for part in path.split("."):
+        if schema is not None and schema.items is not None and not schema.properties:
+            schema = schema.items
+        schema = (schema.properties or {}).get(part) if schema is not None else None
+    return schema
+
+
+def _short(decl: types.FunctionDeclaration) -> types.FunctionDeclaration:
+    """A declared tool with its short live description and argument notes (LIVE, LIVE_ARGS)."""
+    if decl.name not in LIVE and decl.name not in LIVE_ARGS:
+        return decl
+    copy = decl.model_copy(deep=True)
+    copy.description = LIVE.get(decl.name, copy.description)
+    for path, text in LIVE_ARGS.get(decl.name, {}).items():
+        if (found := _arg(copy.parameters, path)) is not None:
+            found.description = text
+    return copy
+
+
 def _with_hints(decl: types.FunctionDeclaration, hidden: set[str]) -> types.FunctionDeclaration:
     """A declared tool whose description sends the model to a hidden one says how to reach it."""
     text = decl.description or ""
@@ -300,84 +469,110 @@ def _with_hints(decl: types.FunctionDeclaration, hidden: set[str]) -> types.Func
 
 # --- the prompt -------------------------------------------------------------------------------------
 
+def clip(text: str, limit: int, more: str = "") -> str:
+    """`text` within `limit` characters, cut at a line end where it can be: the parts of the voice prompt that grow
+    with the user's data (memory notes, accounts, history) keep the fixed per-step prompt small (9 Oct: under ~5k
+    tokens even for a heavy user; the rest is one recall / find_tools away)."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = cut.rfind("\n")
+    if end > limit * 0.6:
+        cut = cut[:end]
+    return cut.rstrip() + " …" + (f" ({more})" if more else "")
+
+
+
 def _sources() -> dict:
     """The modules whose prompt sections the families carry (imported here so the export can move them)."""
+    from mint.tools import agentapps
     from mint.tools import apple_apps
     from mint.tools import shortcuts as apple_shortcuts
     from mint.tools import automations
     from mint.tools import briefing
+    from mint.tools import calc
     from mint.tools import cards
+    from mint.tools import clipboard as clip_tools
     from mint.tools import connector_maker
     from mint.tools import convert
     from mint.voice import dictation
     from mint.tools import extra as extra_tools
+    from mint.core import guides
     from mint.tools import handoff
+    from mint.tools import harness as harness_tools
     from mint.tools import imagegen
     from mint.knowledge import journal
+    from mint.tools import mac as macctl
     from mint.tools import mailtriage
     from mint.app import meet_call
     from mint.tools import meetings
     from mint.tools import merge
+    from mint.tools import music
     from mint.ui import notch_agents
     from mint.tools import notifications
     from mint.tools import rewrite
     from mint.tools import screenrec
     from mint.tools import screenshots
+    from mint.tools import setup_guide
     from mint.tools import sheets
     from mint.tools import shortcut_maker
+    from mint.app import tasks
     from mint.knowledge import teach
     from mint.tools import tidy
     from mint.tools import trackers
     from mint.tools import translate
     from mint.ui import tutor
+    from mint.tools import undo
     from mint.tools import video
     from mint.tools import video_download
     from mint.tools import video_edit
-    return {"apple_apps": apple_apps, "apple_shortcuts": apple_shortcuts, "automations": automations,
-            "briefing": briefing, "cards": cards, "connector_maker": connector_maker, "convert": convert,
-            "dictation": dictation, "extra_tools": extra_tools, "handoff": handoff, "imagegen": imagegen,
-            "journal": journal, "mailtriage": mailtriage, "meet_call": meet_call, "meetings": meetings,
-            "merge": merge, "notch_agents": notch_agents, "notifications": notifications, "rewrite": rewrite,
-            "screenrec": screenrec, "screenshots": screenshots, "sheets": sheets, "shortcut_maker": shortcut_maker,
-            "teach": teach, "tidy": tidy, "trackers": trackers, "translate": translate, "tutor": tutor,
-            "video": video, "video_download": video_download, "video_edit": video_edit}
+    from mint.agents import orchestrator
+    found = dict(locals())
+    return {name: module for name, module in found.items() if not name.startswith("_")}
 
 
 def _section(source: str) -> str:
-    """'video_edit' -> video_edit.PROMPT; 'extra_tools.SHOWING' -> that constant."""
+    """'video_edit' -> video_edit.PROMPT; 'extra_tools.SHOWING' -> that constant; 'orchestrator.prompt_text' ->
+    what that function says now."""
     module, _, attr = source.partition(".")
     try:
         found = _sources().get(module)
-        return str(getattr(found, attr or "PROMPT", "") or "") if found is not None else ""
+        value = getattr(found, attr or "PROMPT", "") if found is not None else ""
+        return str((value() if callable(value) else value) or "")
     except Exception:
         log.debug("no prompt section %s", source, exc_info=True)
         return ""
 
 
+def _live_section(source: str) -> bool:
+    module, _, attr = source.partition(".")
+    return bool(attr) and callable(getattr(_sources().get(module), attr, None))
+
+
 def guide(family: str) -> str:
-    if family not in _guides:
-        parts = [_section(s).strip() for s in FAMILIES.get(family, {}).get("prompts", ())]
-        _guides[family] = "\n".join(p for p in parts if p)
-    return _guides[family]
+    sources = FAMILIES.get(family, {}).get("prompts", ())
+    if family in _guides:
+        return _guides[family]
+    text = "\n".join(p for p in (_section(s).strip() for s in sources) if p)
+    if not any(_live_section(s) for s in sources):
+        _guides[family] = text
+    return text
 
 
 def prompt_line() -> str:
-    families = "; ".join(FAMILIES)
-    return ("More tools (not in your list: find_tools finds them, use_tool runs them): " + families + ". "
-            "Any tool these instructions name that is not in your list is one of them - call use_tool with that "
-            "name (find_tools first if you don't know its arguments). Before saying you can't do something, "
-            "find_tools. One of them doing the whole job in one call (convert or translate a document, edit a "
-            "video, make an image) is quick: do it yourself, not as a background_task. They follow the same rules: never send, share, record, post or start a call unless "
-            "the user asked; never say you did something without a tool result that shows it.")
+    labels = "; ".join(info.get("label") or family for family, info in FAMILIES.items())
+    return ("find_tools also covers: " + labels + ". A tool these instructions name that is not in your list: "
+            "use_tool with its name.")
 
 
 def prompt_parts(parts: list[str]) -> list[str]:
-    """The prompt sections for a voice session: the families' own sections leave (find_tools serves them)
-    and one line says what else there is."""
+    """The prompt sections for a voice session: the families' own sections leave (find_tools serves them),
+    and so do the ones guides.py now carries; one line says what find_tools brings."""
     if not enabled():
         return parts
-    moved = {guide_text for family in FAMILIES for s in FAMILIES[family]["prompts"]
-             if (guide_text := _section(s).strip())}
+    sources = [s for family in FAMILIES for s in FAMILIES[family]["prompts"] if not _live_section(s)]
+    moved = {text for s in (*sources, *REPLACED) if (text := _section(s).strip())}
     return [p for p in parts if p.strip() not in moved] + [prompt_line()]
 
 
@@ -464,6 +659,12 @@ def find(query: str, budget: int = BUDGET) -> str:
     """The find_tools answer: matching hidden tools with their arguments, and their family's guidance,
     within `budget` characters."""
     query = " ".join(str(query or "").split())[:200]
+    own = query.lower().strip("`'\" ")
+    if enabled() and own in CORE and own in _all():
+        # One of the declared tools by name: its full notes (the declared description is the short one, LIVE).
+        decl = _all()[own]
+        return (f"{own} is already one of your tools - call it directly, not through use_tool. Its full notes: "
+                f"{_named(decl.description or '')}\n  args: {_schema(decl)}")[:budget]
     best = rank(query)
     core_hits = [n for n in CORE if n in _all() and (n == query.lower() or set(_words(n)) & set(_words(query))
                                                     and n.replace("_", " ") in query.lower())]
@@ -508,14 +709,116 @@ def find(query: str, budget: int = BUDGET) -> str:
     return "".join(out)[:budget]
 
 
+# --- the request's toolkit (router.py picks the groups) --------------------------------------------------------
+
+PACK_BUDGET = 6500
+_shown: set[str] = set()           # tools whose arguments the model has been given in this session
+
+
+def pack(groups: list[str], about: str = "", budget: int = PACK_BUDGET) -> str:
+    """The tools and how-to of `groups` for one request, within `budget` characters: each group's how-to (once
+    a session), then its tools - the ones `about` names first - with their arguments (once a session; later just
+    named). What doesn't fit is named, for find_tools."""
+    groups = [g for g in groups if g in FAMILIES]
+    if not groups:
+        return ""
+    wanted = set(_words(about))
+    head = "Picked for this request - run these with use_tool(name, args=JSON object):"
+    out, used, left_out, known = [head], len(head), [], []
+    for i, family in enumerate(groups):
+        info = FAMILIES[family]
+        share = (budget - used) // (len(groups) - i)
+        spent = 0
+        title = f"\n## {info.get('label') or family}"
+        out.append(title)
+        spent += len(title)
+        text = guide(family)
+        if text and family not in _served:
+            room = min(GUIDE_MAX, max(300, share // 2))
+            out.append("\n" + text[:room] + ("…" if len(text) > room else ""))
+            spent += min(len(text), room) + 2
+            _served.add(family)
+        names = [n for n in info["tools"] if n in _all() and not (enabled() and n in CORE)]
+        names.sort(key=lambda n: -len(wanted & set(_words(f"{n} {_all()[n].description or ''}"))))
+        for name in names:
+            if name in _shown:
+                known.append(name)
+                continue
+            decl = _all()[name]
+            entry = f"\n- {name}: {_named(decl.description or '')[:400]}\n  args: {_schema(decl)}"
+            if spent + len(entry) > share:
+                left_out.append(name)
+                continue
+            out.append(entry)
+            spent += len(entry)
+            _shown.add(name)
+        used += spent
+    if known:
+        out.append(f"\n(Given earlier: {', '.join(known)}.)")
+    if left_out:
+        out.append(f"\nAlso: {', '.join(left_out)} (find_tools with the name for its arguments).")
+    return "".join(out)
+
+
+def find_for_request(query: str, request: str | None = None) -> str:
+    """find_tools for the voice session: the groups router.py picked for the request in progress, plus the
+    families of what the query itself names - their how-to and tools in one answer."""
+    query = " ".join(str(query or "").split())[:200]
+    if not enabled() or query.lower().strip("`'\" ") in _all():
+        return find(query)                        # a tool by name: its full notes and arguments
+    from mint.app import live
+    from mint.tools import router
+    request = live.request() if request is None else request
+    groups = list(router.route(request).groups) if request else []
+    for name in rank(query)[:3]:
+        family = family_of(name)
+        if family and family not in groups:
+            groups.append(family)
+    if not groups:
+        return find(query)
+    answer = pack(groups[:4], f"{query} {request}")
+    if answer and request:
+        _kits.add(_request_key(request))
+    return answer or find(query)
+
+
+_kits: set[str] = set()            # requests whose toolkit find_tools already handed over
+
+
+def _request_key(request: str) -> str:
+    return " ".join(str(request or "").lower().split())[:300]
+
+
+def kit_given(request: str) -> bool:
+    """find_tools already gave this request its toolkit: the first tool result need not repeat it (9 Oct live run:
+    a second pack of the same groups' other tools cost ~1.2k tokens on every later step)."""
+    return _request_key(request) in _kits
+
+
 # --- use_tool -------------------------------------------------------------------------------------------
+
+# The screen tools a misnamed call is taken for. Seen 9 Oct: Gemini Live called 'pressed_key' (cmd+F) four times in
+# one Telegram request and got "There is no tool called" each time.
+_ALIASABLE = ("press_key", "type_text", "click_text", "click_at", "ui_act", "ui_elements", "scroll", "look",
+              "read_window", "open_app", "switch_to")
+
+
+def _alias(name: str) -> str:
+    if name in _ALIASABLE or not name:
+        return name
+    near = difflib.get_close_matches(name, _ALIASABLE, n=1, cutoff=0.85)
+    if near and name not in _all():
+        log.info("tool %s taken for %s", name, near[0])
+        return near[0]
+    return name
+
 
 def unwrap(name: str, args: dict | None) -> tuple[str, dict, str]:
     """(the real tool, its arguments, '') for a use_tool call - or (name, args, why not). Any other call
     comes back as it is. The caller runs the real tool through its normal path."""
     args = dict(args or {})
     if name != "use_tool":
-        return name, args, ""
+        return _alias(name), args, ""
     inner = " ".join(str(args.get("name") or args.get("tool") or "").split()).strip("`'\"")
     raw = args.get("args", args.get("arguments", {}))
     if not inner:
@@ -595,4 +898,6 @@ def reset() -> None:
         _catalog.clear()
     _guides.clear()
     _served.clear()
+    _shown.clear()
+    _kits.clear()
 

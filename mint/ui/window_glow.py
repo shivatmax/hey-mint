@@ -39,8 +39,8 @@ from mint.core import prefs
 log = logging.getLogger("mint.ui.window_glow")
 
 PREF = "window_glow"
-PAD = 28.0              # room round the window for the soft outer glow
-LINE = 3.0              # the bright border's width
+PAD = 16.0              # room round the window for the soft outer glow
+LINE = 2.0              # the bright border's width (halved with the halo, 9 Oct: "too glowy")
 FADE_IN = 0.25
 FADE_OUT = 0.6
 TRACK = 0.1             # seconds between follow-the-window checks
@@ -313,14 +313,14 @@ class Glow:
 
         # Back to front: the soft glow outside, a tint washing in from the edge, the bright border,
         # and a hairline of light just inside it.
-        outer = _masked(root, 0.9)
+        outer = _masked(root, 0.5)
         inside = Quartz.CALayer.layer()               # clips the wash to the window itself
         clip = Quartz.CAShapeLayer.layer()
         clip.setFillColor_(Quartz.CGColorCreateSRGB(0, 0, 0, 1))
         inside.setMask_(clip)
         root.addSublayer_(inside)
-        wash = _masked(inside, 0.35)
-        border = _masked(root, 1.0)
+        wash = _masked(inside, 0.14)
+        border = _masked(root, 0.8)
         edge = Quartz.CAShapeLayer.layer()
         edge.setFillColor_(None)
         edge.setStrokeColor_(Quartz.CGColorCreateSRGB(1, 1, 1, 0.38))
@@ -332,7 +332,7 @@ class Glow:
         for i, (_, g, _, _) in enumerate(self.parts):
             _turn(g, phase=0.0)
         if not kinetics.reduce_motion():
-            kinetics.pulse(outer[0], key="breathe", seconds=2.6, low=0.7, high=1.0)
+            kinetics.pulse(outer[0], key="breathe", seconds=2.6, low=0.35, high=0.5)
         self.ticker = MintGlowTicker.alloc().initWithOwner_(self)
 
     def _layout(self, w: float, h: float) -> None:
@@ -347,9 +347,9 @@ class Glow:
             g.setFrame_(bounds)
             mask.setFrame_(bounds)
             if kind == "outer":
-                _bands(mask, w, h, 0.5, 20.0, 0.85)               # the halo outside the window
+                _bands(mask, w, h, 0.5, 10.0, 0.5)                # the halo outside the window
             elif kind == "wash":
-                _bands(mask, w, h, -LINE, -34.0, 0.7, step=3.0)   # colour washing in from the edge
+                _bands(mask, w, h, -LINE, -14.0, 0.45, step=3.0)  # colour washing in from the edge
             else:
                 border = Quartz.CAShapeLayer.layer()
                 border.setFrame_(bounds)

@@ -16,7 +16,7 @@ Esc, the × or a click on the face closes it.
 * Rest the pointer on a clip and its preview opens beside the card: the picture large, or the whole text
   (scrollable). Space shows or hides it for the selected clip.
 
-The history is clip_tools.HISTORY (on this Mac, secrets never kept); this card shows it and acts
+The history is clip_tools.HISTORY (on this Mac; a copied key or token only masked, in memory, for a few minutes); this card shows it and acts
 on it. Like all of Mint's windows it never appears in screen shares.
 """
 
@@ -498,6 +498,7 @@ class ClipboardWindow:
 
     def clips(self) -> list[dict]:
         clip_tools._load()
+        clip_tools.drop_old_secrets()
         if self.filter == "pinned":
             rows = [dict(p, id="pin:" + p["name"].lower(), source="pinned")
                     for p in sorted(clip_tools._pins().values(), key=lambda p: -p.get("at", 0))]
@@ -506,7 +507,7 @@ class ClipboardWindow:
         else:
             rows = list(clip_tools.HISTORY)
         if self.search:
-            rows = [h for h in rows if self.search in (h.get("label", "") + " " + h.get("text", "") + " "
+            rows = [h for h in rows if self.search in (h.get("label", "") + " " + ("" if h.get("secret") else h.get("text", "")) + " "
                                                         + h.get("name", "") + " " + " ".join(h.get("files", []))).lower()]
         return rows
 
@@ -621,6 +622,8 @@ class ClipboardWindow:
     def _words(h: dict) -> tuple[str, str]:
         if h.get("source") == "pinned":
             return h.get("name", "Pinned"), h.get("label", "")[:60]
+        if h.get("secret"):
+            return h.get("label", "Secret"), f"key or token · copy works · gone in {clip_tools.SECRET_MINUTES} min, never saved"
         if h["kind"] == "text":
             text = " ".join(h.get("text", "").split())
             return text[:80] or "(blank)", f"{len(h.get('text', ''))} characters"
@@ -888,8 +891,8 @@ class ClipboardWindow:
         else:
             if c["kind"] == "files":
                 text = "\n".join(c.get("files", [])[:40])
-            elif c.get("source") == "pinned" and c["kind"] != "text":
-                text = c.get("label", "")
+            elif c.get("source") == "pinned" and c["kind"] != "text" or c.get("secret"):
+                text = c.get("label", "")         # a key or token is never shown in full
             else:
                 text = c.get("text", "") or c.get("label", "")
             text = text[:20000]

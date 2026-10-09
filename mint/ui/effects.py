@@ -2,7 +2,9 @@
 (it morphs into the task - see orb.set_badge), so the screen only gets
 
 * click     - a small soft ripple where a click lands (the orb's eyes glance there);
-* highlight - a thin outline round the field being typed into.
+* highlight - a thin outline round the field being typed into;
+* the Mint cursor - Mint's own pointer, in its colour, that glides to each spot it acts on (click, type,
+  scroll, drag) so you see what it is doing; it never moves your pointer, and fades when Mint stops.
 
 Scrolling only turns the orb's eyes. The overlays are excluded from screen
 capture (NSWindowSharingNone), ignore the mouse, and do nothing until build()
@@ -44,6 +46,9 @@ class Effects:
         self.origin = None                 # callable -> (x, y) Cocoa global, the orb
         self.on_target = None              # callable((x, y) Cocoa global): the orb looks there
         self.built = False
+        self._cursor = None                # (root, arrow layer, label layer) on the screen it is on
+        self._at = None                    # where the Mint cursor is, Quartz global (x, y)
+        self._token = 0                    # each action's number: only the last one hides the cursor
 
     # --- construction (main thread) ---------------------------------------------
 
@@ -89,13 +94,30 @@ class Effects:
 
     def click(self, x: float, y: float, label: str = "") -> float:
         """A click is about to land at (x, y), in screen points from the top
-        left (Quartz). Returns how long the caller should wait so the spark
-        arrives as the click does."""
+        left (Quartz). Returns how long the caller should wait so the Mint
+        cursor arrives (and the ripple starts) as the click does."""
         _glow(point=(x, y))
         if not self.enabled():
             return 0.0
-        AppHelper.callAfter(self._click, x, y, label)
-        return 0.08
+        glide = self.glide_time(x, y)
+        AppHelper.callAfter(self._click, x, y, label, glide)
+        return glide + 0.06
+
+    def glide_time(self, x: float, y: float) -> float:
+        """Seconds the Mint cursor takes to glide to (x, y): quick for a short hop, never slow."""
+        if self._at is None or _still():
+            return CURSOR_APPEAR
+        return glide_seconds(self._at, (x, y))
+
+    def drag(self, x0: float, y0: float, x1: float, y1: float, seconds: float = 0.6, label: str = "") -> float:
+        """A drag from (x0, y0) to (x1, y1) (Quartz): the cursor goes to the start, presses, and draws a
+        fading trail to the end. Returns how long until it has reached the start."""
+        _glow(point=(x0, y0), seconds=max(2.5, seconds + 1.0))
+        if not self.enabled():
+            return 0.0
+        glide = self.glide_time(x0, y0)
+        AppHelper.callAfter(self._drag, x0, y0, x1, y1, seconds, label, glide)
+        return glide + 0.06
 
     def highlight(self, x: float, y: float, w: float, h: float, seconds: float = 2.2,
                   label: str = "") -> None:
@@ -111,12 +133,14 @@ class Effects:
         frame = focused_frame()
         if frame is not None:
             self.highlight(*frame, seconds=seconds, label=label)
+            AppHelper.callAfter(self._typing, frame[0] + min(frame[2] - 4, 18), frame[1] + frame[3] / 2,
+                                seconds, label or "Typing")
 
     def scroll(self, x: float, y: float, direction: str) -> None:
-        """Nothing drawn: the orb's eyes glance at the pane being scrolled."""
+        """The Mint cursor goes to the pane being scrolled and shows the way it goes."""
         _glow(point=(x, y))
         if self.enabled():
-            AppHelper.callAfter(self._locate, x, y)
+            AppHelper.callAfter(self._scroll, x, y, direction)
 
     # --- drawing (main thread) -------------------------------------------------------
 
@@ -198,12 +222,290 @@ class Effects:
         layers.append(flash)
         self._later(delay + 1.2, layers)
 
-    def _click(self, x, y, label):
+    def _click(self, x, y, label, glide=0.0):
         found = self._locate(x, y)
         if found is None:
             return
         root, end, _, _ = found
-        self._ripple(root, end, gfx.accent(), radius=9, rings=1)
+        self._move_cursor(found, x, y, glide, label)
+        self._press(glide)
+        self._ripple(root, end, gfx.accent(), delay=glide, radius=9, rings=2)
+
+    # --- the Mint cursor (main thread) -----------------------------------------------------
+
+    def _cursor_on(self, root):
+        """The cursor's layers, on `root`'s screen (made, or moved there, as needed)."""
+        if self._cursor is not None and self._cursor[0] is root:
+            return self._cursor
+        if self._cursor is not None:
+            for layer in self._cursor[1:]:
+                layer.removeFromSuperlayer()
+        rgb = gfx.accent()
+        arrow = Quartz.CAShapeLayer.layer()
+        arrow.setBounds_(Quartz.CGRectMake(0, 0, 15 * ARROW, 22 * ARROW))
+        arrow.setAnchorPoint_(Quartz.CGPointMake(0.0, 1.0))           # the tip is the point
+        arrow.setPath_(_arrow_path())
+        arrow.setFillColor_(gfx.cg(rgb))
+        arrow.setStrokeColor_(gfx.cg((1.0, 1.0, 1.0), 0.95))
+        arrow.setLineWidth_(1.4)
+        arrow.setLineJoin_(Quartz.kCALineJoinRound)
+        arrow.setShadowColor_(gfx.cg(rgb))
+        arrow.setShadowOpacity_(0.55)
+        arrow.setShadowRadius_(5)
+        arrow.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+        arrow.setOpacity_(0)
+        arrow.setZPosition_(10)
+        label = Quartz.CATextLayer.layer()
+        label.setFontSize_(11)
+        label.setFont_(AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightSemibold))
+        label.setForegroundColor_(gfx.cg((1.0, 1.0, 1.0)))
+        label.setBackgroundColor_(gfx.cg((0.08, 0.09, 0.1), 0.82))
+        label.setBorderColor_(gfx.cg(rgb, 0.9))
+        label.setBorderWidth_(1.0)
+        label.setCornerRadius_(9)
+        label.setAlignmentMode_(Quartz.kCAAlignmentCenter)
+        label.setAnchorPoint_(Quartz.CGPointMake(0.0, 1.0))
+        label.setOpacity_(0)
+        label.setZPosition_(9)
+        try:
+            label.setContentsScale_(AppKit.NSScreen.mainScreen().backingScaleFactor())
+        except Exception:
+            label.setContentsScale_(2.0)
+        root.addSublayer_(arrow)
+        root.addSublayer_(label)
+        self._cursor = (root, arrow, label)
+        return self._cursor
+
+    def _move_cursor(self, found, x, y, glide, label=""):
+        """Glide the cursor to (x, y) over `glide` s (it fades in where it is first needed), show what it is
+        doing in a small tag beside it, and fade it out a while after the last action."""
+        root, (lx, ly), _, _ = found
+        _, arrow, tag = self._cursor_on(root)
+        self._token += 1
+        token = self._token
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        start = arrow.position() if arrow.opacity() > 0 and self._at is not None else None
+        arrow.setPosition_(Quartz.CGPointMake(lx, ly))
+        arrow.setOpacity_(1.0)
+        Quartz.CATransaction.commit()
+        if start is not None and glide > 0.02 and not _still():
+            move = Quartz.CABasicAnimation.animationWithKeyPath_("position")
+            move.setFromValue_(AppKit.NSValue.valueWithPoint_(start))
+            move.setToValue_(AppKit.NSValue.valueWithPoint_(Quartz.CGPointMake(lx, ly)))
+            move.setDuration_(glide)
+            move.setTimingFunction_(Quartz.CAMediaTimingFunction.functionWithControlPoints____(0.3, 0.0, 0.15, 1.0))
+            arrow.addAnimation_forKey_(move, "glide")
+        else:
+            appear = Quartz.CABasicAnimation.animationWithKeyPath_("opacity")
+            appear.setFromValue_(0.0)
+            appear.setToValue_(1.0)
+            appear.setDuration_(min(glide, CURSOR_APPEAR) or 0.12)
+            arrow.addAnimation_forKey_(appear, "appear")
+            if not _still():
+                grow = Quartz.CABasicAnimation.animationWithKeyPath_("transform.scale")
+                grow.setFromValue_(0.4)
+                grow.setToValue_(1.0)
+                grow.setDuration_(CURSOR_APPEAR)
+                grow.setTimingFunction_(_ease(Quartz.kCAMediaTimingFunctionEaseOut))
+                arrow.addAnimation_forKey_(grow, "grow")
+        self._at = (x, y)
+        self._tag(tag, label, lx, ly, glide)
+        AppHelper.callLater(glide + CURSOR_LINGER, lambda: self._hide_cursor(token))
+
+    def _tag(self, tag, text, lx, ly, delay):
+        text = " ".join(str(text or "").split())[:32]
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        if not text:
+            tag.setOpacity_(0)
+            Quartz.CATransaction.commit()
+            return
+        tag.setString_(text)
+        width = AppKit.NSAttributedString.alloc().initWithString_attributes_(
+            text, {AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(
+                11, AppKit.NSFontWeightSemibold)}).size().width + 18
+        tag.setBounds_(Quartz.CGRectMake(0, 0, width, 18))
+        tag.setPosition_(Quartz.CGPointMake(lx + 19, ly - 22))
+        tag.setOpacity_(0.0)
+        Quartz.CATransaction.commit()
+        show = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+        show.setValues_([0.0, 1.0, 1.0, 0.0])
+        show.setKeyTimes_([0.0, 0.15, 0.8, 1.0])
+        show.setDuration_(1.6)
+        show.setBeginTime_(Quartz.CACurrentMediaTime() + delay)
+        show.setFillMode_(Quartz.kCAFillModeBackwards)
+        tag.addAnimation_forKey_(show, "show")
+
+    def _press(self, delay):
+        """The cursor dips as it presses."""
+        if self._cursor is None or _still():
+            return
+        arrow = self._cursor[1]
+        press = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.scale")
+        press.setValues_([1.0, 0.78, 1.06, 1.0])
+        press.setKeyTimes_([0.0, 0.35, 0.7, 1.0])
+        press.setDuration_(0.3)
+        press.setBeginTime_(Quartz.CACurrentMediaTime() + delay)
+        arrow.addAnimation_forKey_(press, "press")
+
+    def _hide_cursor(self, token):
+        if token != self._token or self._cursor is None:
+            return                      # another action came since: it stays
+        arrow, tag = self._cursor[1], self._cursor[2]
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setAnimationDuration_(0.5)
+        arrow.setOpacity_(0.0)
+        tag.setOpacity_(0.0)
+        Quartz.CATransaction.commit()
+        self._at = None
+
+    def _typing(self, x, y, seconds, label):
+        """Typing: the cursor waits at the field, a caret blinks beside it and three dots ripple in its tag."""
+        found = self._locate(x, y)
+        if found is None:
+            return
+        glide = self.glide_time(x, y)
+        self._move_cursor(found, x, y, glide, "")
+        root, (lx, ly), _, _ = found
+        rgb = gfx.accent()
+        chip = Quartz.CALayer.layer()
+        chip.setBounds_(Quartz.CGRectMake(0, 0, 40, 16))
+        chip.setAnchorPoint_(Quartz.CGPointMake(0.0, 0.5))
+        chip.setPosition_(Quartz.CGPointMake(lx + 19, ly - 30))
+        chip.setCornerRadius_(8)
+        chip.setBackgroundColor_(gfx.cg((0.08, 0.09, 0.1), 0.82))
+        chip.setBorderColor_(gfx.cg(rgb, 0.9))
+        chip.setBorderWidth_(1.0)
+        chip.setOpacity_(0)
+        layers = [chip]
+        for i in range(3):
+            dot = Quartz.CALayer.layer()
+            dot.setBounds_(Quartz.CGRectMake(0, 0, 5, 5))
+            dot.setCornerRadius_(2.5)
+            dot.setBackgroundColor_(gfx.cg(gfx.light(rgb)))
+            dot.setPosition_(Quartz.CGPointMake(11 + i * 9, 8))
+            if not _still():
+                hop = Quartz.CAKeyframeAnimation.animationWithKeyPath_("transform.translation.y")
+                hop.setValues_([0.0, 2.5, 0.0, 0.0])
+                hop.setKeyTimes_([0.0, 0.2, 0.4, 1.0])
+                hop.setDuration_(0.9)
+                hop.setRepeatCount_(float("inf"))
+                hop.setBeginTime_(Quartz.CACurrentMediaTime() + i * 0.15)
+                dot.addAnimation_forKey_(hop, "hop")
+            chip.addSublayer_(dot)
+        show = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+        show.setValues_([0.0, 1.0, 1.0, 0.0])
+        show.setKeyTimes_([0.0, 0.08, 0.9, 1.0])
+        show.setDuration_(max(0.8, seconds))
+        show.setBeginTime_(Quartz.CACurrentMediaTime() + glide)
+        show.setFillMode_(Quartz.kCAFillModeBackwards)
+        chip.addAnimation_forKey_(show, "show")
+        root.addSublayer_(chip)
+        self._later(glide + max(0.8, seconds) + 0.1, layers)
+        # Keep the cursor at the field while the typing lasts.
+        token = self._token
+        AppHelper.callLater(glide + max(0.8, seconds) + CURSOR_LINGER, lambda: self._hide_cursor(token))
+
+    def _scroll(self, x, y, direction):
+        found = self._locate(x, y)
+        if found is None:
+            return
+        glide = self.glide_time(x, y)
+        self._move_cursor(found, x, y, glide, "")
+        root, (lx, ly), _, _ = found
+        if _still():
+            return
+        rgb = gfx.accent()
+        down = str(direction).lower() in ("down", "d")
+        up = str(direction).lower() in ("up", "u")
+        dx, dy = (0, -1) if down else (0, 1) if up else ((1, 0) if str(direction).lower().startswith("r") else (-1, 0))
+        layers = []
+        for i in range(2):
+            mark = Quartz.CAShapeLayer.layer()
+            mark.setBounds_(Quartz.CGRectMake(0, 0, 12, 12))
+            mark.setPosition_(Quartz.CGPointMake(lx - 10 + dx * 6, ly - 30 + dy * 6))
+            mark.setPath_(_chevron_path(dx, dy))
+            mark.setFillColor_(None)
+            mark.setStrokeColor_(gfx.cg(gfx.light(rgb)))
+            mark.setLineWidth_(2.0)
+            mark.setLineCap_(Quartz.kCALineCapRound)
+            mark.setOpacity_(0)
+            go = Quartz.CABasicAnimation.animationWithKeyPath_("transform.translation")
+            go.setFromValue_(AppKit.NSValue.valueWithSize_(AppKit.NSMakeSize(0, 0)))
+            go.setToValue_(AppKit.NSValue.valueWithSize_(AppKit.NSMakeSize(dx * 14, dy * 14)))
+            fade = Quartz.CAKeyframeAnimation.animationWithKeyPath_("opacity")
+            fade.setValues_([0.0, 0.95, 0.0])
+            group = Quartz.CAAnimationGroup.animation()
+            group.setAnimations_([go, fade])
+            group.setDuration_(0.55)
+            group.setBeginTime_(Quartz.CACurrentMediaTime() + glide + i * 0.14)
+            mark.addAnimation_forKey_(group, "scroll")
+            root.addSublayer_(mark)
+            layers.append(mark)
+        self._later(glide + 1.0, layers)
+
+    def _drag(self, x0, y0, x1, y1, seconds, label, glide):
+        found = self._locate(x0, y0)
+        if found is None:
+            return
+        self._move_cursor(found, x0, y0, glide, label)
+        self._press(glide)
+        root, (lx0, ly0), frame, _ = found
+        lx1, ly1 = x1 - frame.origin.x, (_primary_height() - y1) - frame.origin.y
+        rgb = gfx.accent()
+        begin = Quartz.CACurrentMediaTime() + glide + 0.12
+        trail = Quartz.CAShapeLayer.layer()
+        path = Quartz.CGPathCreateMutable()
+        Quartz.CGPathMoveToPoint(path, None, lx0, ly0)
+        Quartz.CGPathAddLineToPoint(path, None, lx1, ly1)
+        trail.setPath_(path)
+        trail.setFillColor_(None)
+        trail.setStrokeColor_(gfx.cg(rgb, 0.85))
+        trail.setLineWidth_(3.0)
+        trail.setLineCap_(Quartz.kCALineCapRound)
+        trail.setLineDashPattern_([2, 7])
+        trail.setShadowColor_(gfx.cg(rgb))
+        trail.setShadowOpacity_(0.6)
+        trail.setShadowRadius_(4)
+        trail.setShadowOffset_(Quartz.CGSizeMake(0, 0))
+        trail.setStrokeEnd_(0.0)
+        draw = Quartz.CABasicAnimation.animationWithKeyPath_("strokeEnd")
+        draw.setFromValue_(0.0)
+        draw.setToValue_(1.0)
+        draw.setDuration_(seconds)
+        draw.setBeginTime_(begin)
+        draw.setFillMode_(Quartz.kCAFillModeForwards)
+        draw.setRemovedOnCompletion_(False)
+        draw.setTimingFunction_(_ease())
+        fade = Quartz.CABasicAnimation.animationWithKeyPath_("opacity")
+        fade.setFromValue_(1.0)
+        fade.setToValue_(0.0)
+        fade.setDuration_(0.5)
+        fade.setBeginTime_(begin + seconds + 0.25)
+        fade.setFillMode_(Quartz.kCAFillModeForwards)
+        fade.setRemovedOnCompletion_(False)
+        trail.addAnimation_forKey_(draw, "draw")
+        trail.addAnimation_forKey_(fade, "fade")
+        root.addSublayer_(trail)
+        arrow = self._cursor[1]
+        Quartz.CATransaction.begin()
+        Quartz.CATransaction.setDisableActions_(True)
+        arrow.setPosition_(Quartz.CGPointMake(lx1, ly1))
+        Quartz.CATransaction.commit()
+        move = Quartz.CABasicAnimation.animationWithKeyPath_("position")
+        move.setFromValue_(AppKit.NSValue.valueWithPoint_(Quartz.CGPointMake(lx0, ly0)))
+        move.setToValue_(AppKit.NSValue.valueWithPoint_(Quartz.CGPointMake(lx1, ly1)))
+        move.setDuration_(seconds)
+        move.setBeginTime_(begin)
+        move.setFillMode_(Quartz.kCAFillModeBackwards)
+        move.setTimingFunction_(_ease())
+        arrow.addAnimation_forKey_(move, "drag")
+        self._at = (x1, y1)
+        self._ripple(root, (lx1, ly1), rgb, delay=glide + 0.12 + seconds, radius=9, rings=1)
+        self._later(glide + seconds + 1.2, [trail])
+        token = self._token
+        AppHelper.callLater(glide + seconds + CURSOR_LINGER, lambda: self._hide_cursor(token))
 
     def _highlight(self, x, y, w, h, seconds, label):
         found = self._locate(x, y + h)          # bottom-left corner in Cocoa terms
@@ -238,6 +540,50 @@ class Effects:
         root.addSublayer_(box)
         layers = [box]
         self._later(seconds + 0.1, layers)
+
+
+ARROW = 1.2              # the arrow's size against a 15 x 22 pt pointer
+CURSOR_APPEAR = 0.18     # the cursor fading in where it is first needed
+CURSOR_LINGER = 2.4      # how long it stays after Mint's last action
+
+
+def glide_seconds(start, end) -> float:
+    """A short hop is quick, a long one never slow: 0.16-0.34 s."""
+    distance = math.hypot(end[0] - start[0], end[1] - start[1])
+    return round(min(0.34, max(0.16, 0.12 + distance / 3200)), 3)
+
+
+def _still() -> bool:
+    try:
+        from mint.ui import kinetics
+        return bool(kinetics.reduce_motion())
+    except Exception:
+        return False
+
+
+def _arrow_path():
+    """A pointer arrow, tip at the top left of a 15 x 22 box (times ARROW), y up."""
+    path = Quartz.CGPathCreateMutable()
+    points = [(px * ARROW, py * ARROW) for px, py in
+              [(0.5, 21.5), (0.5, 4.0), (4.8, 8.0), (7.8, 1.0), (10.8, 2.2), (7.9, 9.0), (13.8, 9.0)]]
+    Quartz.CGPathMoveToPoint(path, None, *points[0])
+    for p in points[1:]:
+        Quartz.CGPathAddLineToPoint(path, None, *p)
+    Quartz.CGPathCloseSubpath(path)
+    return path
+
+
+def _chevron_path(dx, dy):
+    path = Quartz.CGPathCreateMutable()
+    if dx == 0:
+        Quartz.CGPathMoveToPoint(path, None, 1, 6 - 3 * dy)
+        Quartz.CGPathAddLineToPoint(path, None, 6, 6 + 3 * dy)
+        Quartz.CGPathAddLineToPoint(path, None, 11, 6 - 3 * dy)
+    else:
+        Quartz.CGPathMoveToPoint(path, None, 6 - 3 * dx, 1)
+        Quartz.CGPathAddLineToPoint(path, None, 6 + 3 * dx, 6)
+        Quartz.CGPathAddLineToPoint(path, None, 6 - 3 * dx, 11)
+    return path
 
 
 def _glow(**where) -> None:

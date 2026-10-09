@@ -297,8 +297,8 @@ def main() -> int:
 
     from mint.tools import fastinput
     if not args.text and not fastinput.has_accessibility():
-        print("Note: no Accessibility permission, so instant typing, scrolling and key presses\n"
-              "will not work. Run ./run.sh --grant to fix. Everything else works.\n",
+        print("Note: no Accessibility permission yet, so clicking, typing, scrolling and key presses in\n"
+              "other apps wait for it. Mint asks for it the first time a request needs it.\n",
               file=sys.stderr)
 
     from mint.app.session import Mint

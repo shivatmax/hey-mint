@@ -37,7 +37,7 @@ _KIND = {
     "open_app": "open", "open_folder": "open", "open_chrome": "open", "open_slack": "open",
     "run_routine": "open", "quit_app": "system",
     "open_url": "web",
-    "desktop": "click", "click_text": "click", "click_at": "click", "press_key": "type",
+    "desktop": "click", "click_text": "click", "click_at": "click", "drag": "click", "press_key": "type",
     "type_text": "type", "write_clipboard": "type",
     "notifications": "read", "update": "system", "agent_app": "read",
     "read_window": "read", "get_selected_text": "read", "read_clipboard": "read",
@@ -122,6 +122,8 @@ def phrase(name: str, args: dict) -> str:
             return f"Clicking “{_quote(a.get('text', ''), 40)}”"
         case "click_at":
             return "Clicking"
+        case "drag":
+            return f"Dragging “{_quote(a.get('from_target', ''), 30)}”"
         case "press_key":
             mods = "+".join(a.get("modifiers") or [])
             return f"Pressing {mods + '+' if mods else ''}{a.get('key', '')}"
@@ -313,10 +315,10 @@ def phrase(name: str, args: dict) -> str:
                     "volume": f"Music volume · {a.get('value', '')}".rstrip(" ·")}.get(
                 str(a.get("action") or "play"), "Music")
         case "claude_mode":
-            return {"on": "Claude mode on", "auto": "Claude mode on Auto", "off": "Claude mode off",
+            return {"on": "Coding agents on", "auto": "Coding agents on Live", "off": "Coding agents off",
                     "status": "Checking your coding agents",
                     "send": f"Telling {_quote(a.get('session') or 'the agent', 20)}: {_quote(a.get('text') or '', 30)}"
-                    }.get(str(a.get("action") or "open"), "Claude mode")
+                    }.get(str(a.get("action") or "open"), "Coding agents")
         case "google_meet":
             return {"start": "Starting a Google Meet", "end": "Leaving the call", "share": "Sharing the screen",
                     "unshare": "Stopping the screen share", "setup": "Setting up Google Meet",

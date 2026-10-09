@@ -298,11 +298,10 @@ def prompt_text() -> str:
             f"otherwise do not bring them up unless relevant:\n{lines}")
 
 
-PROMPT = """Long tasks: plan_task for anything with three or more steps. Before step_done, check the step \
-really happened (read the window, list the files, look) and say in `result` what you saw; if it did not, \
-failed=true and try another way. When a step turns out bigger than planned, split it: task action=add_steps \
-under=<step>. When the plan stops fitting, task action=replan. Keep facts later steps need (paths, names, \
-numbers) with task action=note. A stopped task is paused, not lost: "continue" resumes it."""
+PROMPT = """Long tasks: before step_done, check the step really happened (window, files, look) and say what you saw in \
+`result`; if not, failed=true and try another way. A step bigger than planned: task action=add_steps \
+under=<step>; plan no longer fits: task action=replan; facts later steps need: task action=note. A stopped \
+task is paused: "continue" resumes it."""
 
 
 def declarations():

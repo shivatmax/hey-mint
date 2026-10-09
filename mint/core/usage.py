@@ -94,6 +94,10 @@ def _from_gemini(model: str, meta) -> None:
 def live(model: str, meta) -> None:
     """A Live server message's usage_metadata: one per model turn, with the turn's totals."""
     if meta is not None and (getattr(meta, "total_token_count", 0) or 0):
+        # One line per turn in mint.log: the prompt tokens summed over the turn's tool steps (what the
+        # tokens-a-minute limit counts), to compare with the fixed prompt (bench/prompt_size.py).
+        print(f"  [live turn: {getattr(meta, 'prompt_token_count', None)} prompt tokens, "
+              f"{getattr(meta, 'total_token_count', None)} total]", flush=True)
         _from_gemini(model, meta)
 
 

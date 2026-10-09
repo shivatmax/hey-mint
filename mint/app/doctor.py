@@ -285,7 +285,7 @@ def check_claude_hooks():
         return WARN, "Claude Code not found (~/.claude)", "only needed to follow Claude Code from the notch"
     if agent_hooks.installed():
         return OK, "hooks installed (approvals from the notch)", ""
-    return WARN, "hooks not installed", "Settings ▸ Appearance & Sound ▸ Claude mode ▸ Connect Claude Code"
+    return WARN, "hooks not installed", "Settings ▸ Models & agents ▸ Coding agents ▸ Claude Code ▸ Connect"
 
 
 def check_statusline():
@@ -295,7 +295,7 @@ def check_statusline():
         return WARN, "this version of Mint has no status line", "update Mint"
     if installed():
         return OK, "Mint's status line installed (Claude's usage limits)", ""
-    return WARN, "not installed", "Settings ▸ Appearance & Sound ▸ Claude mode ▸ Show Claude's usage limits"
+    return WARN, "not installed", "Settings ▸ Models & agents ▸ Coding agents ▸ Its usage limits ▸ Show"
 
 
 def check_codex():
@@ -321,7 +321,7 @@ def check_mcp():
         return OK, f"{' and '.join(on)} can ask Mint about their work (check_my_work)", ""
     return WARN, (f"connected to {', '.join(on)}; not to {', '.join(off)}" if on else
                   f"not connected to {' or '.join(off)}"), \
-        "optional: Settings ▸ Appearance & Sound ▸ Claude mode ▸ Let agents ask Mint"
+        "optional: Settings ▸ Models & agents ▸ Coding agents (all settings) ▸ Let them ask Mint"
 
 
 def check_downloads():

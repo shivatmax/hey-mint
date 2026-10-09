@@ -249,7 +249,8 @@ def limits_line() -> str:
 
 
 def _limits() -> str:
-    lim = agent_watch.limits()
+    agent_watch.refresh_live(block=True)          # (a question: off the main thread, worth a second for live figures)
+    lim = agent_watch.limits(live=False)
     parts = []
     for app, name in (("claude", "Claude"), ("codex", "Codex")):
         x = lim.get(app)
@@ -262,12 +263,11 @@ def _limits() -> str:
                 reset = x.get(k + "_resets")
                 when = f", resets {time.strftime('%a %H:%M', time.localtime(reset))}" if reset else ""
                 bits.append(f"{left}% of the {label} limit left{when}")
-        parts.append(f"{name}: " + "; ".join(bits) + f" (as of {_ago(x.get('at') or 0)})")
+        parts.append(f"{name}: " + "; ".join(bits) + (" (live)" if x.get("live") else f" (as of {_ago(x.get('at') or 0)})"))
     if "claude" not in lim:
-        parts.append("Claude's limits aren't known yet: the Claude app records them while it's open (or, for "
-                     "Claude Code in a terminal, Settings > Appearance & Sound > Show more > Claude mode > "
-                     "Show Claude's usage limits)")
-    return ". ".join(parts) + "." if parts else "No usage limits seen yet."
+        parts.append("Claude's limits aren't known right now: Claude Code passes them to Mint while it runs (Settings "
+                     "▸ Models & agents ▸ Coding agents), and the Claude app notes them while it's open")
+    return ". ".join(parts) + "." if parts else "No usage limits known right now."
 
 
 # --- hand-off ----------------------------------------------------------------------------------------------

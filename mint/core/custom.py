@@ -87,34 +87,38 @@ def prompt_addendum() -> str:
         parts.append(f"Your personality, chosen by the user: {personality}. Let it show in how you speak and "
                      "react - wording, humour, attitude - while you still do what is asked, follow every rule "
                      "above, and keep replies as short as before.")
+    from mint.tools.diet import clip
     for about in (str(prefs.get("about_me") or "").strip(), settings.get("about_me")):
         if about:
-            parts.append(f"About the user: {about}")
+            parts.append(f"About the user: {clip(str(about), 400, 'recall has more')}")
+    # Each list is capped: the tools resolve the user's names themselves (jev.resolve), so the prompt only needs
+    # the gist (9 Oct: the fixed prompt stays small however much is set up).
     if accounts := settings.get("accounts"):
-        parts.append("The user's accounts, by the names they use: " +
-                     "; ".join(f"'{k}' = {v}" for k, v in accounts.items()) +
-                     ". Pass the name or the address to open_chrome as `account`.")
+        parts.append(clip("The user's accounts, by the names they use: " +
+                          "; ".join(f"'{k}' = {v}" for k, v in accounts.items()) +
+                          ". Pass the name or the address to open_chrome as `account`.", 300))
     if workspaces := settings.get("slack_workspaces"):
-        parts.append("Slack workspaces by the user's names: " +
-                     "; ".join(f"'{k}' = {v}" for k, v in workspaces.items()) + ".")
+        parts.append(clip("Slack workspaces by the user's names: " +
+                          "; ".join(f"'{k}' = {v}" for k, v in workspaces.items()) + ".", 250))
     if aliases := settings.get("aliases"):
-        parts.append("The user's own words: " +
-                     "; ".join(f"'{k}' means {v}" for k, v in aliases.items()) + ".")
+        parts.append(clip("The user's own words: " +
+                          "; ".join(f"'{k}' means {v}" for k, v in aliases.items()) + ".", 250))
     if found := routines():
-        parts.append("Routines (run with run_routine when the user asks for one by name or "
-                     "clearly means it): " +
-                     "; ".join(f"'{n}'" + (f" - {s['description']}" if s.get("description") else "")
-                               for n, s in found.items()) + ".")
+        parts.append(clip("Routines (use_tool run_routine when the user asks for one by name or clearly means "
+                          "it): " + "; ".join(f"'{n}'" + (f" - {s['description']}" if s.get("description") else "")
+                                             for n, s in found.items()) + ".", 300))
     if extra := settings.get("instructions"):
-        parts.append(f"The user's standing instructions: {extra}")
+        parts.append(f"The user's standing instructions: {clip(str(extra), 500)}")
     try:
         from mint.tools import extra as extra_tools
         parts.append(extra_tools.prompt_text())      # skills, memories, reachable apps
     except Exception as error:
         print(f"  [skills/memories unavailable: {error}]", file=sys.stderr, flush=True)
     try:
+        from mint.tools import diet as tool_diet
         from mint.agents import orchestrator
-        parts.append(orchestrator.prompt_text())
+        if not tool_diet.enabled():                  # with the diet on, find_tools serves the roster and rules
+            parts += [orchestrator.prompt_text(), orchestrator.PROMPT]
     except Exception:
         pass
     return "\n".join(parts)

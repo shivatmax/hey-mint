@@ -41,7 +41,7 @@ PAGE_TITLES = {"general": "General", "voice": "Microphone & voice", "speaking": 
 # Parts of a page a feature would like to scroll to, but Settings has no anchor for (yet): the page opens at
 # the top. {feature: (page, anchor wanted)}.
 ANCHORS_WANTED = {"google": ("accounts", "google"), "google_meet": ("accounts", "meet"),
-                  "claude_code": ("looks", "claude_code"), "apps": ("accounts", "connectors"),
+                  "claude_code": ("models", "claude_code"), "apps": ("accounts", "connectors"),
                   "voice_training": ("voice", "voice"), "typesafe_key": ("accounts", "keys")}
 
 READY, PARTIAL, MISSING, UNAVAILABLE, UNKNOWN = "ready", "partial", "missing", "unavailable", "unknown"
@@ -274,8 +274,7 @@ FEATURES: list[Feature] = [
             _email_control),
     Feature("claude_code", "Claude Code", ("claude code", "claude hooks", "claude code hooks", "coding agent",
                                            "approve from the notch", "claude in the notch", "claude"),
-            "looks", "", "Switch to All settings at the top right, then under Claude mode click Connect Claude Code "
-                         "next to Approve from the notch.",
+            "models", "", "Under Coding agents, click Connect next to Claude Code.",
             "Claude Code's questions and permission requests come to the notch: Allow or Deny from there.",
             "connect Claude Code", _claude_code),
     Feature("apple_shortcuts", "Apple Shortcuts", ("shortcut", "shortcuts", "apple shortcuts", "shortcuts app",
@@ -643,16 +642,10 @@ def open_setup(args: dict) -> str:
 
 HANDLERS = {"setup_status": setup_status, "open_setup": open_setup}
 
-PROMPT = """Your own setup (setup_status, open_setup): you know what is set up on this Mac - permissions, keys \
-(Gemini, TypeSafe, OpenAI and other model providers), Google/Gmail through macOS accounts, Google Meet sign-in, \
-Telegram, Email control, Claude Code, Apple Shortcuts, voice training. "What can you do?" -> setup_status(card=true), \
-then one or two short sentences (the card has the rest). "Is X connected?", "what's set up?", "what access do you \
-have?" -> setup_status(feature). "Connect / set up / add / how do I set up X" -> open_setup(feature, reason=their \
-words): if X is already set up nothing opens and you just say so; otherwise Settings opens at the right place and \
-you say the steps in at most two short sentences. NEVER open Settings on your own initiative or to fix a failure: \
-when something fails because it isn't set up, say what's missing and offer; open only once they say yes. A \
-specific app's connector (Notion, Things) is the connector tool; making a shortcut that does something is \
-make_shortcut."""
+PROMPT = """Your own setup: "what can you do?" -> setup_status card=true, then one or two short sentences. "Connect / set \
+up / how do I set up X" -> open_setup with reason=their words. NEVER open Settings on your own or to fix a \
+failure: say what's missing and offer; open only after their yes. An app's connector (Notion, Things) is the \
+connector tool; a shortcut that does something is make_shortcut."""
 
 
 def declarations():

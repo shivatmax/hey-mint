@@ -167,6 +167,72 @@ def _snapshot(pid: int | None) -> tuple:
     return (_looks, pid, title, frame)
 
 
+def drag(from_target: str = "", to_target: str = "", from_x=None, from_y=None, to_x=None, to_y=None,
+         seconds: float = 0.6) -> str:
+    """Drag from one thing to another (a file onto a folder, a card to a column, a slider's knob): each end
+    found like click_at's target (by name, the screen's text, then the vision model), x/y 0-1000 across the
+    latest look as a hint or, with no name, the place itself."""
+    import time
+
+    from mint.app import control
+    from mint.tools import fastinput
+    from mint.screen import ground
+    from mint.ui.effects import fx
+
+    if not fastinput.has_accessibility():
+        return "Cannot drag: Mint lacks Accessibility permission."
+
+    def where(target, x, y):
+        target = (target or "").strip()
+        pointed = to_point(x, y, _last_area) if x is not None and y is not None and _last_area else None
+        if target:
+            try:
+                located = find_target(target, pointed)
+            except Exception:
+                located = None
+            if located is not None:
+                return located.point, located.label or target
+        return pointed, target or (f"({int(x)}, {int(y)})" if pointed else "")
+
+    start, a = where(from_target, from_x, from_y)
+    end, b = where(to_target, to_x, to_y)
+    if start is None or end is None:
+        missing = "start" if start is None else "end"
+        return (f"NOT DRAGGED: could not find the {missing} ('{from_target if start is None else to_target}'). Look, "
+                "then name both ends by their text, or give their rough 0-1000 x, y from the screenshot.")
+    seconds = min(2.0, max(0.25, float(seconds or 0.6)))
+    time.sleep(fx.drag(start[0], start[1], end[0], end[1], seconds, label=f"{a} → {b}"[:40]))
+    if control.stopped():
+        return "STOPPED by the user before dragging; nothing was moved."
+    route = ground.mouse_drag(start[0], start[1], end[0], end[1], seconds)
+    how = ("with Mint's own pointer (the user's cursor did not move; the window changed)" if route ==
+           "background_pointer" else "with the real pointer (foreground), and put the pointer back")
+    return (f"Dragged '{a}' to '{b}' {how}. Not verified: look or read_window to check it landed where it "
+            "should.")
+
+
+def _other_app_at(x: float, y: float) -> str:
+    """The name of the app whose window is at (x, y), when it isn't the app in front (and isn't Mint); else ''."""
+    import os
+
+    import AppKit
+    try:
+        from mint.screen import ground
+        owner = ground.owner_at(x, y)
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        if owner is None:
+            # No window there at all: the bare desktop (seen 9 Oct: four clicks on "the desktop in Finder" while
+            # Telegram's window wasn't on screen yet).
+            return "the desktop (no window there)" if front is not None and front.processIdentifier() != os.getpid() \
+                else ""
+        if front is None or owner in (front.processIdentifier(), os.getpid()):
+            return ""
+        app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(owner)
+        return (app.localizedName() or "another app") if app is not None else ""
+    except Exception:
+        return ""
+
+
 def find_target(target: str, pointed: tuple | None = None):
     """Where `target` is, with `pointed` (screen points) as a hint of where to search:
     Accessibility by name, then the screen's text near the hint, then the vision model over the
@@ -249,6 +315,15 @@ def click_at(x: float | None = None, y: float | None = None, button: str = "left
                 "Look, then give its rough x, y as well - or use ui_act / click_text with its exact label.")
     if pointed is None:
         pointed = (px, py)
+    if located is None:
+        # Only the model's rough point: it must at least be in the app being worked in. Seen 9 Oct: a point meant
+        # for Telegram landed on Finder's "Recents" behind it, Finder came forward, and typing went there next.
+        stray = _other_app_at(px, py)
+        if stray:
+            where = stray if stray.startswith("the desktop") else f"{stray}'s window"
+            return (f"NOT CLICKED: '{target or 'that spot'}' was not found by name, and ({int(px)}, {int(py)}) is on "
+                    f"{where}, not the app in front. If its window isn't showing, open_app it again; else use "
+                    "click_text with the words you see, or look again.")
     # Self-check: the point is on the screen the screenshot showed.
     if area is not None and how not in ("accessibility", "vision", "cache") and not (
             area["left"] <= px <= area["left"] + area["width"] and area["top"] <= py <= area["top"] + area["height"]):
@@ -296,9 +371,9 @@ def click_at(x: float | None = None, y: float | None = None, button: str = "left
         axkit.note_click(owner, px, py, found or target)
         route, delivery = "accessibility", "background"
     else:
-        ground.mouse_click(px, py, button="right" if button == "right" else "left", double=double,
-                           label=found or target, spark=False)
-        route, delivery = "global_input", "foreground"
+        route = ground.mouse_click(px, py, button="right" if button == "right" else "left", double=double,
+                                   label=found or target, spark=False, pid=owner)
+        delivery = "background" if route == "background_pointer" else "foreground"
     time.sleep(0.5)
     evidence += effect.window_changes(windows_before, effect.window_snapshot(), pids=(owner,))
     what = "Double-clicked" if double else ("Right-clicked" if button == "right" else "Clicked")

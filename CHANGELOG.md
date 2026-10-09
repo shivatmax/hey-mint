@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.6.14 (2026-10-09)
+
+- **Each step is about 3-4k tokens, not 26k.** The voice model keeps a short core instruction and about twenty
+  everyday tools (open, click, type, scroll, read, look, plan, background jobs, stop); everything else - the other
+  tools and the how-to for them - is picked for each request and handed over in one step: by Jev when a TypeSafe
+  key is set (about 0.4 s), otherwise by a small Gemini model, else by word match. Long multi-step jobs no longer hit
+  Google's per-minute token limit, which rested or switched the model mid-job and made it forget.
+- **The basics are built in, not skills.** How to work any app, the browser, chat apps, files, the web and Mint's own
+  settings is know-how Mint carries; a new install starts with no starter skills - skills are what Mint learns as it
+  works and in teach mode. Starter skills from earlier versions that were never used or edited are archived.
+- **Big skill libraries stay fast:** with thousands of skills the best word matches are short-listed and Jev (or
+  Gemini, without a TypeSafe key) picks one in a second or two; the list is never part of the prompt.
+- **The prompt stays small for heavy users too:** memory notes, accounts, routines and the recent conversation are
+  capped (under about 6.5k tokens for the heaviest setups); the rest is one recall away.
+- **Long conversations are summarised once the context passes about 60k tokens** (at a quiet moment), well before
+  Google's window starts dropping the oldest turns.
+- **Mint has a mouse of its own.** A click on a spot (apps that list nothing to accessibility, like Telegram for
+  Mac, canvases, some Qt and Java apps), a double or right click, a scroll and a drag inside one window are sent
+  straight to that window: your pointer doesn't move and the window isn't raised. Mint checks the window changed;
+  an app that ignores its pointer gets your real one (for the rest of the run), and every answer says which was
+  used. Nothing is sent when the window has gone, moved off the spot, been minimised or is on another desktop.
+- **Mint no longer forgets mid-job.** A turn's token count adds up every tool step, so ten clicks looked like a full
+  memory and Mint compacted - starting over from a summary - right after the user spoke. It now judges the context
+  by one step's share. The user's words during a job are pinned to every step ("they override your plan").
+- **Corrections while Mint works are heard:** "you opened the wrong one, go back" was dropped as "not for me". While
+  a job is under way, anything the user says is for Mint unless it surely isn't.
+- **The main voice model stays:** "session not found" (an expired resume handle) set the best models aside for a
+  week, so everything ran on the fallback. It now just starts a fresh session.
+- **Changes method instead of retrying, checks before saying done, doesn't give up early:** after two misses each
+  screen result says the next way to try; "the window changed" isn't success - Mint reads back what it opened;
+  "try it yourself" sends it back to try another way (twice) first; a look now lists the words on screen with their
+  positions; a rough click on the bare desktop is refused; a window still opening is read again.
+- **A key or token you copy shows in the clipboard window** (it was silently left out, so "copy the bot token"
+  looked like it did nothing): masked as *Secret · 7840…qmGa*, never previewed in full, never written to disk or
+  pinned, gone after 15 minutes - and Copy still works.
+- **Fewer retries, no stray typing:** the same words in a search box and its results pick the top result, not the
+  words just typed; a rough click that would land in another app's window (Finder behind Telegram) is refused; the
+  app being worked in stays the target while Mint keeps working in it, and Mint never types or clicks into its own
+  window (the clipboard card's search box got a token once); typing that went on in the background is never typed
+  again.
+- **Mint's own cursor:** a pointer in Mint's colour glides to each place it clicks, types, scrolls or drags, with a
+  ripple and a name tag on a click, bouncing dots while typing, chevrons for a scroll and a dotted trail for a drag.
+  Your own pointer never moves for it; it fades after Mint's last action.
+- **Drag and drop** (the new `drag` tool): both ends found by name like a click, dragged with the pointer, which
+  goes back where you had it.
+- **The glow round the window Mint works in is half as strong and thinner.**
+- **Finding your way in apps:** Mint's own click-through glow no longer counts as a window over the app (every
+  click in Telegram failed with "Mint's own window covers that spot"); named clicks are allowed in chat apps (only
+  unnamed ones or Send are refused); the same words are never typed twice into a field; a misnamed tool call
+  (`pressed_key`) is taken for the right one; and "switch to Telegram" opens it when it isn't running.
+- **Mint asks for a permission the moment it needs it.** It knows which permissions it has from the start of every
+  conversation. A request that needs a missing one (typing in Telegram needs Accessibility) brings up macOS's box at
+  once, or System Settings at the right switch, with one plain sentence on what to switch on - and Mint carries on by
+  itself once it's on. Asked again after a no, it says plainly it can't without it and opens the switch again. A
+  macOS permission box on screen is now named to the user instead of silently blocking.
+- **Clicking and typing in Telegram for Mac:** Mint's own Settings window lying over the app no longer blocks a
+  click (Mint brings the app forward and checks again); search boxes are found by their placeholder even when the
+  app shares nothing with Accessibility ("Search (⌘K)"); a refused Return no longer counts as a sent message.
+- **Coding agents moved to Settings ▸ Models & agents** (it was "Claude mode" under Appearance & Sound - it covers
+  Codex too). It shows only the tools on this Mac and only rows that apply: Claude Code with its Connect button,
+  Codex, their usage limits, and the two pop-up switches; the rest under All settings, again only what applies.
+- **Usage limits you can trust:** Codex's are asked from Codex itself, live (they were read from its logs and could
+  be hours old - 7% shown while 43% was used). Claude's come from Claude Code while it runs, or the Claude app. A
+  figure that may be wrong now is not shown at all: the 5 hours after 20 minutes, the week after an hour, and never
+  a window that has reset since. "Live" or "As of 5 min ago" says how fresh it is.
+
 ## 0.6.13 (2026-10-09)
 
 - **Setting up from the notch, smoothly:** click a "Set up" chip and it shows it's on it (a ring spins round its

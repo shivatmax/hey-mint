@@ -533,7 +533,7 @@ def test_only_input_tokens_count_toward_the_limit(models, monkeypatch):
     m = _mint()
     seen = []
     monkeypatch.setattr(live_models, "tokens", lambda model, n, now=None: seen.append(n) or False)
-    m._watch_context = lambda meta: None
+    m._watch_context = lambda meta, steps=1: None
 
     class Meta:
         prompt_token_count, response_token_count, total_token_count = 24_000, 3_000, 27_000

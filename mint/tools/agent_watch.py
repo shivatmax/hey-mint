@@ -1120,8 +1120,9 @@ def _limit_pair(five, week, used_key: str, when: float) -> dict:
             resets = w.get("resets_at")
             resets = float(resets) / (1000 if resets and resets > 1e12 else 1) if isinstance(resets, (int, float)) \
                 else 0.0
-            expired = bool(resets) and resets < time.time()
-            out[name], out[name + "_resets"] = (0.0 if expired else float(w[used_key])), (0.0 if expired else resets)
+            if resets and resets < time.time():
+                continue                 # that window has started over since: how much of the new one is used isn't known
+            out[name], out[name + "_resets"] = float(w[used_key]), resets
     return out
 
 
@@ -1188,19 +1189,165 @@ def _claude_app_usage() -> dict:
     return out if ("5h" in out or "week" in out) else {}
 
 
-def limits() -> dict:
-    """Usage limits, percent used: {"codex": {...}, "claude": {...}} with "5h", "week", "5h_resets", "week_resets"
-    (epoch seconds) and "at". Codex's come from its logs; Claude's from a status line (agent_hooks) or the Claude
-    app's own usage samples, whichever is newer."""
-    out = {k: dict(v) for k, v in LIMITS.items()}
+# --- usage limits: only numbers that are true now ----------------------------------------------------------
+# Codex: asked live (`codex app-server`, JSON-RPC account/rateLimits/read - the numbers Codex itself shows), at most
+# every LIVE_EVERY seconds while someone looks (a Settings page, the notch, a question); its session logs only
+# when that can't run. Claude: what Claude Code passed to Mint's status line, or the Claude app's own samples.
+# A figure older than LIMITS_FRESH (per window), or from a window that has reset since, is not shown at all.
+LIMITS_FRESH = {"5h": 20 * 60, "week": 60 * 60}      # (the Claude app notes them every ~15 min)
+LIVE_EVERY = 120.0
+LIVE: dict = {}              # "codex" -> the live reading ({"5h", "5h_resets", "week", "week_resets", "at", "live"})
+_live = {"wanted": 0.0, "at": -1e9, "busy": False, "failed": -1e9}
+
+
+def codex_cli() -> str:
+    """The codex command: the CLI, or the one inside the Codex app."""
+    try:
+        from mint.tools import agent_mcp
+        cli = agent_mcp._cli("codex")
+    except Exception:
+        cli = ""
+    if cli:
+        return cli
+    for app in CODEX_APPS:
+        inside = os.path.join(app, "Contents", "Resources", "codex")
+        if os.access(inside, os.X_OK):
+            return inside
+    return ""
+
+
+def codex_live(timeout: float = 8.0) -> dict | None:
+    """Codex's limits right now, from Codex itself (its app server), or None (not installed, signed in with an API
+    key, too old, offline). Blocks up to `timeout` seconds: not on the main thread."""
+    cli = codex_cli()
+    if not cli:
+        return None
+    import select
+    import subprocess
+    try:
+        proc = subprocess.Popen([cli, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+    except Exception:
+        log.debug("codex app-server", exc_info=True)
+        return None
+    try:
+        for msg in ({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                     "params": {"clientInfo": {"name": "mint", "title": "Mint", "version": "1"}}},
+                    {"jsonrpc": "2.0", "method": "initialized"},
+                    {"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"}):
+            proc.stdin.write(json.dumps(msg) + "\n")
+        proc.stdin.flush()
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            ready, _, _ = select.select([proc.stdout], [], [], max(0.05, end - time.monotonic()))
+            if not ready:
+                break
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("id") == 2:
+                return _codex_reading((msg.get("result") or {}).get("rateLimits"))
+    except Exception:
+        log.debug("codex limits", exc_info=True)
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(2)
+        except Exception:
+            proc.kill()
+    return None
+
+
+def _codex_reading(rl) -> dict | None:
+    if not isinstance(rl, dict):
+        return None
+    now = time.time()
+    out = {"at": now, "live": True, "plan": rl.get("planType") or ""}
+    for name, w in (("5h", rl.get("primary")), ("week", rl.get("secondary"))):
+        if isinstance(w, dict) and isinstance(w.get("usedPercent"), (int, float)):
+            resets = float(w.get("resetsAt") or 0)
+            if resets > 1e12:
+                resets /= 1000
+            mins = w.get("windowDurationMins")
+            key = name if not isinstance(mins, (int, float)) else ("5h" if mins <= 24 * 60 else "week")
+            out[key], out[key + "_resets"] = float(w["usedPercent"]), resets
+    return out if ("5h" in out or "week" in out) else None
+
+
+def refresh_live(block: bool = False, force: bool = False) -> None:
+    """Ask Codex again if the last reading is older than LIVE_EVERY (on a thread unless `block`); `force`: the next
+    read asks whatever the last one said (Settings' Refresh limits)."""
+    now = time.monotonic()
+    _live["wanted"] = now
+    if force:
+        _live["at"] = _live["failed"] = -1e9
+        return
+    if _live["busy"] or now - _live["at"] < LIVE_EVERY or now - _live["failed"] < 10 * 60:
+        return
+    _live["busy"] = True
+
+    def run():
+        try:
+            reading = codex_live()
+            if reading is not None:
+                LIVE["codex"] = reading
+                _live["at"] = time.monotonic()
+            else:                                      # (an older reading ages out by itself: _fresh)
+                _live["failed"] = time.monotonic()     # not again for a while: no CLI, an API key, offline
+        finally:
+            _live["busy"] = False
+    if block:
+        run()
+    else:
+        threading.Thread(target=run, daemon=True, name="codex-limits").start()
+
+
+def _fresh(x, now: float | None = None):
+    """Only the windows still true: read recently enough, and not reset since. None when nothing is left."""
+    if not isinstance(x, dict):
+        return None
+    now = time.time() if now is None else now
+    age = now - float(x.get("at") or 0)
+    out = {k: v for k, v in x.items() if k not in ("5h", "5h_resets", "week", "week_resets")}
+    for name in ("5h", "week"):
+        if not isinstance(x.get(name), (int, float)) or age > LIMITS_FRESH[name] or age < -60:
+            continue
+        resets = float(x.get(name + "_resets") or 0)
+        if resets and resets < now:
+            continue
+        out[name], out[name + "_resets"] = float(x[name]), resets
+    out["live"] = bool(x.get("live")) and age < LIVE_EVERY + 60
+    return out if ("5h" in out or "week" in out) else None
+
+
+def limits(live: bool = True) -> dict:
+    """Usage limits that are true now, percent used: {"codex": {...}, "claude": {...}} with "5h", "week",
+    "5h_resets", "week_resets" (epoch seconds), "at" and "live"; an app is left out when nothing about it is known
+    for sure. Cheap (any thread): a live Codex reading is fetched in the background (`live`)."""
+    if live:
+        refresh_live()
+    out = {}
+    codex = LIVE.get("codex") or LIMITS.get("codex")
+    if LIVE.get("codex") and LIMITS.get("codex") and LIMITS["codex"].get("at", 0) > LIVE["codex"]["at"] + 5:
+        codex = LIMITS["codex"]                          # a Codex turn just logged newer numbers
+    claude = None
     saved = _claude_saved()
     rl = saved.get("rate_limits") or {}
     if rl:
-        out["claude"] = _limit_pair(rl.get("five_hour"), rl.get("seven_day"), "used_percentage",
-                                    float(saved.get("updatedAt") or 0) / 1000)
+        claude = _limit_pair(rl.get("five_hour"), rl.get("seven_day"), "used_percentage",
+                             float(saved.get("updatedAt") or 0) / 1000)
+        claude["live"] = True
     app = _claude_app_usage()
-    if app and app["at"] > float((out.get("claude") or {}).get("at") or 0):
-        out["claude"] = app
+    if app and app["at"] > float((claude or {}).get("at") or 0):
+        claude = app
+    for name, x in (("codex", codex), ("claude", claude)):
+        x = _fresh(x)
+        if x is not None:
+            out[name] = x
     return out
 
 

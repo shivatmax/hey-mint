@@ -26,6 +26,13 @@ _CONTINUE = re.compile(r"^\s*(next( one)?|continue|go on|keep going|carry on|mor
                        r"(next|continue|go on|keep going|carry on|do it|please|more|it)?[\s.!?,]*$", re.I)
 _UNBOUNDED = re.compile(r"\b(all|every|each|one by one|one after (another|the other)|in turn|every one|"
                         r"all of them|the rest|everything|whole list|each of)\b", re.I)
+# Giving up on the user ("I'm having some trouble... want to try it yourself?") after a few failed tries. Seen 9 Oct
+# in Telegram, twice, with ways still untried.
+_GAVE_UP = re.compile(r"\b(having (some |a bit of )?trouble|can'?t seem to|couldn'?t (find|get|seem)|unable to|"
+                      r"(try|do) it yourself|you (could|can|might) try|on your own|isn'?t (cooperating|working)|"
+                      r"not (able|managing) to|i'?m stuck|no luck)\b", re.I)
+GIVE_UP_NUDGES = 2         # times Mint is sent back to try another way before it may hand over
+
 _DONE = re.compile(r"\b(all (done|finished|set|complete)|that'?s (all|everything|it)|finished (all|everything)|"
                    r"(completed|did|done) (all|everything)|every (one|trick|step) (is )?done|"
                    r"that was the last|last one)\b", re.I)
@@ -46,7 +53,7 @@ _state = {"request": "", "latest": "", "nudges": 0, "tools_total": 0, "tools_sin
 def _reset(request: str) -> None:
     _state["changed"] = False
     _state.update(request=request, latest=request, nudges=0, tools_total=0, tools_since=0,
-                  last_name="", waiting=False, sent=False, off=False, finished=False)
+                  last_name="", waiting=False, sent=False, off=False, finished=False, gave_up=0)
 
 
 def _sync_request() -> str:
@@ -125,6 +132,17 @@ def decide(said: str, task_step: str = "", agent_asking: bool = False) -> str:
         if st["waiting"] or st["sent"] or agent_asking:
             return ""
         said = " ".join((said or "").split())
+        if _GAVE_UP.search(said) and st["tools_total"] and st.get("gave_up", 0) < GIVE_UP_NUDGES:
+            st["gave_up"] = st.get("gave_up", 0) + 1
+            st["nudges"] += 1
+            st["tools_since"] = 0
+            return (f"(Mint autopilot - this is not the user speaking. Don't hand it back yet: the user asked "
+                    f"\"{request[:300]}\", and there are ways you haven't tried. Try a different way now - not a "
+                    "call that already failed: if the app's window may not be showing, open_app it again; look or "
+                    "read_window to see what is really on screen; click_text the words you see (a search box by its "
+                    "placeholder, an item by its name); after opening something, read_window to check it is the "
+                    "right one, and if not, go back and pick the next one. Only if this try fails too, tell the user "
+                    "plainly what you tried and what you see.)")
         offer = bool(_OFFERS.search(said))
         if said.endswith("?") and not offer:
             return ""                        # a real question for the user

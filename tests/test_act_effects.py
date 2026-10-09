@@ -373,7 +373,8 @@ def world(monkeypatch, quick):
         return True
 
     monkeypatch.setattr(ground, "bring_forward", bring_forward)
-    monkeypatch.setattr(ground, "mouse_click", lambda x, y, **k: w.clicks.append((x, y, k.get("double", False))))
+    monkeypatch.setattr(ground, "mouse_click",
+                        lambda x, y, **k: w.clicks.append((x, y, k.get("double", False))) or "global_input")
     monkeypatch.setattr(ground, "ground", lambda target, action, inv: (w.chosen, inv, "label match"))
 
     def inventory(app=None):

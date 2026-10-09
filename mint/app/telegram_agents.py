@@ -242,7 +242,7 @@ def command(bridge) -> None:
     mode = str(bridge.setting("agent_telegram") or "away")
     lines.append({"away": "\n<i>They message you here while you're away from the Mac.</i>",
                   "always": "\n<i>They message you here whenever they need you or finish.</i>",
-                  "off": "\n<i>Agent messages are off (Settings ▸ Claude mode).</i>"}.get(mode, ""))
+                  "off": "\n<i>Agent messages are off (Settings ▸ Models & agents ▸ Coding agents).</i>"}.get(mode, ""))
     sent = bridge.html("\n".join(lines), markup=keys(*rows, [("📸 Screen", "shot")]) if rows else
                        keys([("📸 Screen", "shot")]))
     if len(items) == 1:

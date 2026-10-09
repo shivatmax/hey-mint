@@ -179,8 +179,18 @@ def scroll(direction: str = "down", amount: int = 3) -> str:
     # front window instead, without moving the visible pointer.
     target = _front_window_point()
     if target is not None:
+        from mint.screen import bg_pointer
         from mint.ui.effects import fx
         fx.scroll(target.x, target.y, direction)
+        # Mint's own pointer first: the wheel goes to that window only, whatever the user's pointer is over.
+        mine = bg_pointer.scroll(target.x, target.y, vertical, horizontal, amount)
+        if mine.landed:
+            return f"Scrolled {direction} {amount} times (Mint's own pointer; the user's cursor did not move)"
+        if mine.sent and mine.checked and bg_pointer.proven(mine.target.pid):
+            return (f"Scrolled {direction} {amount} times (Mint's own pointer), but nothing moved - it is probably at "
+                    f"its end; try the other direction")
+    from mint.screen import effect
+    was = effect.pointer_at()
     for _ in range(amount):
         event = Quartz.CGEventCreateScrollWheelEvent(
             None, Quartz.kCGScrollEventUnitLine, 2, vertical, horizontal
@@ -189,6 +199,10 @@ def scroll(direction: str = "down", amount: int = 3) -> str:
             Quartz.CGEventSetLocation(event, target)
         _post(event)
         time.sleep(0.02)
+    if target is not None:
+        # A wheel event placed with a location takes the pointer there (seen 9 Oct, macOS 27): put it back.
+        time.sleep(0.05)
+        effect.give_pointer_back(was, (target.x, target.y))
     return f"Scrolled {direction} {amount} times"
 
 

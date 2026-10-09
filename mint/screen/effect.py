@@ -42,13 +42,14 @@ log = logging.getLogger("mint.screen.effect")
 
 CONFIRMED, PARTIAL, UNVERIFIABLE, NOOP, REFUSED = "confirmed", "partial", "unverifiable", "suspected_noop", "refused"
 KINDS = (CONFIRMED, PARTIAL, UNVERIFIABLE, NOOP, REFUSED)
-ROUTES = ("accessibility", "synthetic_events", "global_input", "dom")
+ROUTES = ("accessibility", "synthetic_events", "global_input", "dom", "background_pointer")
 DELIVERIES = ("background", "foreground")
 
 _HEADS = {CONFIRMED: "CONFIRMED", PARTIAL: "PARTIAL", UNVERIFIABLE: "UNVERIFIED", NOOP: "SUSPECTED NO-OP",
           REFUSED: "FAILED"}
 _ROUTE_WORDS = {"accessibility": "accessibility", "synthetic_events": "key events sent to the app",
-                "global_input": "the real mouse/keyboard", "dom": "the page's script"}
+                "global_input": "the real mouse/keyboard", "dom": "the page's script",
+                "background_pointer": "Mint's own pointer (the user's cursor did not move)"}
 # Results that already say they failed, written by older code paths.
 _FAIL_WORDS = ("FAILED", "REFUSED", "STOPPED", "NOT ", "Cannot", "Could not", "Nothing")
 

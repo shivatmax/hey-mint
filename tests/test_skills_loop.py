@@ -25,6 +25,7 @@ def library(tmp_path, monkeypatch):
     monkeypatch.setattr(skillbook, "_seed", lambda: None)
     monkeypatch.setattr(skillbook, "_choose_category", lambda *a: "general")
     monkeypatch.setattr(skillbook.jev, "choose", lambda *a, **k: None)       # Jev unreachable: word match only
+    monkeypatch.setattr(skillbook.jev, "available", lambda: True)           # (no key would ask Gemini instead)
 
     def no_llm(prompt):
         raise AssertionError("the LLM was called without a fake")

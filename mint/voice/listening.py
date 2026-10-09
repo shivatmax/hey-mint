@@ -278,22 +278,28 @@ def echoes(text: str, mint_said: str) -> bool:
     return bool(said & {w for w in _words(text) if len(w) >= 4 and w not in _COMMON})
 
 
-def judge(kind: str, pick: str | None, probability: float, mint_said: str = "", text: str = "") -> str:
+def judge(kind: str, pick: str | None, probability: float, mint_said: str = "", text: str = "",
+          working: bool = False) -> str:
     """Jev's verdict ("mint" / "other" / "scrap", with its probability) as "act" or "ignore".
     After a wake word only a sure "not for Mint" is ignored; in a follow-up only a sure
-    "for Mint" acts - looser when Mint just asked something or the words are about its reply."""
+    "for Mint" acts - looser when Mint just asked something or the words are about its reply.
+    `working`: Mint is in the middle of the user's request - then what the user says is about it unless it is surely
+    not (seen 9 Oct: "you opened the wrong one, go back" was dropped as "other 0.51", twice, and Mint carried on)."""
     if kind != "follow":
         return "ignore" if pick in ("other", "scrap") and probability >= 0.6 else "act"
+    if working and len(_words(text)) >= 3:
+        return "ignore" if pick in ("other", "scrap") and probability >= 0.8 else "act"
     if text and echoes(text, mint_said) and not (pick in ("other", "scrap") and probability >= 0.75):
         return "act"
     need = 0.4 if mint_asked(mint_said) else 0.55
     return "act" if pick == "mint" and probability >= need else "ignore"
 
 
-def fallback(kind: str, text: str, mint_said: str = "") -> str:
+def fallback(kind: str, text: str, mint_said: str = "", working: bool = False) -> str:
     """No verdict from Jev (no key, offline, too slow). After the wake word: act. A follow-up acts
-    only if it looks like a question or request to someone listening."""
-    if kind != "follow":
+    only if it looks like a question or request to someone listening - or, while Mint works on the
+    user's request, if it is a sentence at all."""
+    if kind != "follow" or (working and len(_words(text)) >= 3 and _latin(text)):
         return "act"
     words = _words(text)
     if mint_asked(mint_said) and 0 < len(words) <= 8:
@@ -307,7 +313,8 @@ def fallback(kind: str, text: str, mint_said: str = "") -> str:
 
 OPTIONS = {
     "mint": "Said TO Mint, the voice assistant: asks it to do, open, find, check, play, send, change or stop "
-            "something; asks it a question; or answers / reacts to what Mint just said or asked.",
+            "something; asks it a question; answers / reacts to what Mint just said or asked; or corrects what it "
+            "is doing ('that's the wrong one', 'go back', 'not that', 'try again').",
     "other": "NOT said to Mint: talk with another person in the room or on a call (often Hindi or Hinglish chat), "
              "a name called out to someone, a remark, swearing, a video or music playing, reading aloud.",
     "scrap": "A scrap with nothing to act on: one or two stray words, a half sentence that trails off, a bare "

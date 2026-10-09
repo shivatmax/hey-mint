@@ -662,14 +662,8 @@ watch_settings()
 
 # --- the tool ------------------------------------------------------------------------------------------
 
-PROMPT = """Undo: Mint keeps a journal of what it changed in the last 24 hours. "Undo that" / "put it back" -> \
-undo action=last; "undo the last 3 things" -> count=3; "undo the brightness change" / "undo the rename" -> \
-action=last match=<those words>; "what can you undo?" -> action=list; "redo" right after an undo -> action=redo. \
-It covers brightness, volume, mute, dark mode, Do Not Disturb, Night Shift, keep awake, Wi-Fi, window layouts, text \
-you typed or rewrote, clipboard changes, files you moved, renamed, trashed, created or edited, tidy-ups, reminders \
-and notes you created, notes you edited, moved or deleted, reminders and calendar events you changed or deleted, \
-and your own settings. Say in one line what was reversed. A sent message or email, a \
-purchase or anything done on a web page can't be undone - say so plainly, never pretend."""
+PROMPT = """Undo ("undo that", "put it back"): say in one line what was reversed. A sent message or email, a purchase or \
+anything done on a web page can't be undone - say so plainly, never pretend."""
 
 
 def declarations():

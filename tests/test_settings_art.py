@@ -105,26 +105,44 @@ def test_popups_and_buttons_grow_to_fit_their_titles():
     assert settings_art.button_width("Connect Claude Code", 100) > 100
 
 
+def _coding(win, facts):
+    column = settings_window._SettingsFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 500, 10))
+    page = settings_window._Page(win, column, 480)
+    win._coding_section(page, facts)
+    return column
+
+
 def test_usage_limits_rows(fresh_prefs, monkeypatch):
     import time
     now = time.time()
-    facts = {"hooks": "Connect Claude Code", "limits": "Show Claude's usage limits", "mcp": {}, "usage": "",
-             "agents_here": True,
-             "limits_data": {"claude": {"5h": 23.0, "week": 91.0, "5h_resets": now + 3600, "at": now - 60}}}
-    monkeypatch.setattr(settings_window.SettingsWindow, "_facts_looks", lambda self: dict(facts))
+    facts = {"here": {"claude": True, "codex": True}, "hooks": False, "statusline": False, "mcp": {},
+             "limits": {"claude": {"5h": 23.0, "week": 91.0, "5h_resets": now + 3600, "at": now - 60, "live": True}}}
     win = _window()
-    win.page_key = "looks"
-    column = settings_window._SettingsFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 500, 10))
-    doc = win._build_page(column, 480).doc
+    doc = _coding(win, facts)
     meters = [v for v in _views(doc) if isinstance(v, settings_art.UsageMeter)]
     assert [(m.label, m.used) for m in meters] == [("5 hours", 23.0), ("Week", 91.0)]
     assert meters[0].note.startswith("resets in") and str(meters[1].accessibilityValue()).startswith("91% used")
     texts = [str(v.stringValue()) for v in _views(doc) if isinstance(v, AppKit.NSTextField)]
-    assert "Codex" in texts and "Not seen yet" in texts       # Codex not seen yet: said so
+    assert "Codex" in texts and "Live" in texts
+    assert "Not seen yet" not in texts                         # Codex's limits unknown: no row, no old number
     assert settings_art.tone_rgb(10) == settings_art.GREEN and settings_art.tone_rgb(70) == settings_art.AMBER
     assert settings_art.tone_rgb(90) == settings_art.RED
     assert settings_art.until(now + 90 * 60, now) == "resets in 1 h 30 min"
     assert settings_art.until(now - 5, now) == "has reset"
+
+
+def test_coding_agents_only_what_is_here(fresh_prefs, monkeypatch):
+    win = _window()
+    texts = lambda doc: [str(v.stringValue()) for v in _views(doc) if isinstance(v, AppKit.NSTextField)]
+    buttons = lambda doc: [str(v.title()) for v in _views(doc) if isinstance(v, AppKit.NSButton)]
+    doc = _coding(win, {"here": {"claude": False, "codex": False}, "limits": {}})
+    assert "Not on this Mac" in texts(doc) and "Pop up when one finishes" not in texts(doc)
+    doc = _coding(win, {"here": {"claude": False, "codex": True}, "limits": {}, "hooks": False})
+    assert "Codex" in texts(doc) and "Claude Code" not in texts(doc) and "Connect" not in buttons(doc)
+    doc = _coding(win, {"here": {"claude": True, "codex": False}, "limits": {}, "hooks": True, "statusline": False})
+    assert "Disconnect" in buttons(doc) and "Its usage limits" in texts(doc) and "Codex" not in texts(doc)
+    doc = _coding(win, {"here": {"claude": True, "codex": False}, "limits": {}, "hooks": False, "statusline": True})
+    assert "Connect" in buttons(doc) and "Its usage limits" not in texts(doc)    # set up, nothing fresh: nothing
 
 
 def test_every_drawn_picture_draws(monkeypatch):
