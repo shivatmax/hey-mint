@@ -484,7 +484,7 @@ class Notch:
                                 ("eye.slash", "Visible in screen sharing", self._eye),
                                 ("arrow.up.to.line", "Hide Mint: the notch stays, the little Mint and its icons go (⌃⌥H)",
                                  lambda: self.hud.set_hidden(not self.hud.hidden)),
-                                ("slider.horizontal.3", "Settings", self._menu_from_button)):
+                                ("slider.horizontal.3", "Settings", self._settings_from_button)):
             act = MintNotchAct.alloc().initWithFn_(fn)
             self._acts.append(act)
             button = MintNotchButton.buttonWithImage_target_action_(gfx.symbol(symbol, 14), act, "fire:")
@@ -1346,7 +1346,7 @@ class Notch:
                                      left + 108, top_y)
         h["tabs"]["compose"] = button("plus", "Type to Mint here (Enter sends, Esc cancels)", self.compose,
                                       left + 144, top_y)
-        h["gear"] = button("gearshape.fill", "Menu and Settings", self._menu_from_button, right - 32, top_y)
+        h["gear"] = button("gearshape.fill", "Settings", self._settings_from_button, right - 32, top_y)
         h["chat"] = button("bubble.left.and.bubble.right.fill", "Open the chat", self._chat, right - 64, top_y)
         battery = self._mod("notch_battery") if prefs.get("notch_battery") is not False else None
         h["badge"] = None
@@ -2995,43 +2995,19 @@ class Notch:
         from mint.ui import sharing
         sharing.set_visible(not sharing.visible())
 
-    def _menu_from_button(self) -> None:
-        """The gear (open notch) or the small row's settings button: the menu rolls down right under it."""
-        factory = getattr(self.hud, "menu_factory", None)
-        menu = factory() if factory else None
-        button = self._menu_button()
-        if menu is None or button is None or button.window() is None:
-            self._popup(None)
-            return
-        from mint.ui.notch_menu import menu as dropdown
-        if dropdown.is_open():
-            dropdown.close()
-            return
-        rect = button.window().convertRectToScreen_(button.convertRect_toView_(button.bounds(), None))
-        self._menus = getattr(self, "_menus", 0) + 1          # the notch stays open while it's down
-
-        def closed():
-            self._menus = max(0, self._menus - 1)
-
-        def settings():
-            self.st.close(time.monotonic())                  # opened only to get to Settings: fold the notch
-        dropdown.show(menu, rect, LEVEL, on_close=closed, on_settings=settings)
-
-    def _menu_button(self):
-        """The settings button the pointer is on (or nearest): the open notch's gear, or the small row's."""
-        mouse = AppKit.NSEvent.mouseLocation()
-        found = []
-        home = getattr(self, "home", None) or {}
-        candidates = [home.get("gear")] + [b for sym, b in getattr(self, "buttons", []) if sym == "slider.horizontal.3"]
-        for b in candidates:
-            if b is None or b.isHidden() or b.alphaValue() < 0.05 or b.window() is None:
-                continue
-            r = b.window().convertRectToScreen_(b.convertRect_toView_(b.bounds(), None))
-            cx, cy = r.origin.x + r.size.width / 2, r.origin.y + r.size.height / 2
-            found.append(((cx - mouse.x) ** 2 + (cy - mouse.y) ** 2, b))
-        return min(found, key=lambda f: f[0])[1] if found else None
-
-    # --- drag the little Mint out: the notch gives way to the orb ---------------------------------
+    def _settings_from_button(self) -> None:
+        """The gear (open notch) or the small row's settings button: Settings opens at once, and the notch folds (it
+        was only opened to get there). Mic, voice, sleep and the rest have their own buttons right beside it."""
+        try:
+            from mint.ui.notch_menu import menu as dropdown
+            if dropdown.is_open():
+                dropdown.close()
+        except Exception:
+            pass
+        self._put_away_scene()
+        self.st.close(time.monotonic())
+        _sfx("close")
+        self.hud._fire("open_settings")
 
     def on_face(self, point) -> bool:
         x, y, scale = self._face_spot

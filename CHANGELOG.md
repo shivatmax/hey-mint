@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.15 (2026-10-09)
+
+- **Settings' Install button always answers:** the progress row shows the moment you press it; the page follows
+  the updater by itself (it went on showing "Install now" while the update was already being swapped in, and every
+  press failed silently); a failure is shown on the page. After you press Install, the update installs as soon as
+  it's downloaded - Mint being awake or an old plan no longer makes it wait for a second press.
+
+- **The notch's settings button opens Settings** straight away (no menu first) and the notch folds. Mic, spoken
+  replies and sleep have their own buttons right beside it; Show / Hide stays in the menu bar and on ⌃⌥H.
+
 ## 0.6.14 (2026-10-09)
 
 - **Each step is about 3-4k tokens, not 26k.** The voice model keeps a short core instruction and about twenty

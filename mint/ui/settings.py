@@ -2277,13 +2277,14 @@ class SettingsWindow:
                              "Your permissions stay.")
         words = info.get("detail") or (f"Version {latest} is ready." if newer else
                                        f"You have the newest version ({current})." if latest else "")
-        moving = bool(info.get("can_update")) and _updating(info.get("status"), info.get("requested"),
-                                                            info.get("ready"))
+        moving = bool(info.get("can_update")) and (_updating(info.get("status"), info.get("requested"),
+                                                             info.get("ready")) or self._update_clicked(info))
         if moving:
             self._update_progress(page)          # the progress row says it all, live
             buttons = []
         else:
-            status = page.text(words or " ", size=11, alpha=0.6)
+            said = getattr(self, "_upd_said", "")
+            status = page.text((said if said else words) or " ", size=11, alpha=0.6)
             buttons = [("Check for updates", 150, lambda: self._check_updates(status))]
         if moving:
             pass                                 # (no Install button while it's on its way)
@@ -2301,6 +2302,7 @@ class SettingsWindow:
             page.text("This copy doesn't update itself. Press Download when a new version is out, open it, and drag "
                       "Hey Mint into Applications - your settings and permissions stay.", size=11, alpha=0.55)
         page.end("Free and open source (GPL-3.0).")
+        self._watch_update(info)
 
         page.section("Help")
         self._row_buttons(page, "The guide", [("Open the guide", 140, lambda: _open("https://hey-mint.pages.dev/docs"))],
@@ -2437,17 +2439,56 @@ class SettingsWindow:
 
     def _install_update(self, status) -> None:
         """Downloading, checking the signature and swapping the app take a while: on a thread. The page shows the
-        progress row at once (not the same button again)."""
+        progress row at once (not the same button again), and once downloaded it installs by itself."""
         from mint.app import updater
+        self._upd_clicked, self._upd_said = time.monotonic(), ""
         status.setStringValue_("Starting the download…")
-        self._background("update-install", updater.install, lambda said: (status.setStringValue_(said),
-                                                                          self.refresh(keep_scroll=True)))
-        AppHelper.callLater(0.4, lambda: self.window is not None and self.refresh(keep_scroll=True))
+        self._background("update-install", lambda: updater.install(now=True), self._update_said)
+        self.refresh(keep_scroll=True)
 
     def _install_now(self) -> None:
         """Downloaded and checked: swap it in and restart now (the user asked; otherwise it waits for idle)."""
         from mint.app import updater
-        self._background("update-now", updater.install_now)
+        self._upd_clicked, self._upd_said = time.monotonic(), ""
+        self._background("update-now", updater.install_now, self._update_said)
+        self.refresh(keep_scroll=True)
+
+    def _update_clicked(self, info: dict) -> bool:
+        """Install was pressed a moment ago and the updater hasn't caught up yet: show progress, not the button."""
+        recent = time.monotonic() - getattr(self, "_upd_clicked", 0.0) < 20
+        return recent and info.get("status") not in ("error", "installed", "current") \
+            and not getattr(self, "_upd_said", "").startswith("Couldn't")
+
+    def _update_said(self, said: str) -> None:
+        """What the updater answered a button with; a failure is shown on the page, never swallowed."""
+        if str(said).startswith("Couldn't"):
+            self._upd_said, self._upd_clicked = str(said), 0.0
+        self.refresh(keep_scroll=True)
+
+    def _watch_update(self, info: dict) -> None:
+        """While Updates is on screen: when the updater moves on by itself (downloaded, installing, failed), the
+        page follows within a second - seen 9 Oct, it went on showing "Install now" while the update was already
+        being swapped in."""
+        from mint.app import updater
+        seen = (info.get("status"), info.get("ready"), info.get("requested"), info.get("latest"))
+        old = getattr(self, "_upd_watch", None)
+        if old is not None:
+            old.invalidate()
+
+        def look(timer):
+            if self.window is None or not self.window.isVisible():
+                timer.invalidate()
+                self._upd_watch = None
+                return
+            p = updater.progress()
+            if p["status"] in ("downloading", "verifying", "installing") and getattr(self, "_upd_timer", None):
+                return                         # the progress row is already following it
+            now = (p["status"], p["ready"], p["requested"], seen[3])
+            if now != seen:
+                timer.invalidate()
+                self._upd_watch = None
+                self.refresh(keep_scroll=True)
+        self._upd_watch = AppKit.NSTimer.scheduledTimerWithTimeInterval_repeats_block_(1.0, True, look)
 
     def _update_progress(self, page) -> None:
         """While an update downloads, checks and installs: a spinner, what it's doing with the percent and the
@@ -2499,6 +2540,10 @@ class SettingsWindow:
             bar.startAnimation_(None)
         elif _updating(status, p["requested"], p["ready"]):
             label.setStringValue_(f"Getting Hey Mint {version}…")
+            bar.setIndeterminate_(True)
+            bar.startAnimation_(None)
+        elif time.monotonic() - getattr(self, "_upd_clicked", 0.0) < 20 and status not in ("error", "installed"):
+            label.setStringValue_(f"Starting - getting Hey Mint {version}…")
             bar.setIndeterminate_(True)
             bar.startAnimation_(None)
         else:                                   # ready, installed or failed: the page says it with its buttons

@@ -128,3 +128,14 @@ def test_settings_shows_update_progress_only_while_it_is_on_its_way():
     assert not on_way("ready", True, True) and not on_way("available", False, False)
     p = updater.progress()
     assert {"status", "progress", "version", "size", "ready", "requested"} <= set(p)
+
+
+def test_install_pressed_installs_once_downloaded_even_while_mint_is_awake(monkeypatch):
+    try:
+        from mint.app import updater
+    except ImportError:
+        from mint import updater
+    assert {"talking", "working on a task"} <= set(updater.SOFT_BUSY)
+    assert "running a tool" not in updater.SOFT_BUSY and "speaking" not in updater.SOFT_BUSY
+    monkeypatch.setitem(updater._state, "status", "installing")
+    assert updater.install_now().startswith("Already installing")       # a second press: no error, no swallow

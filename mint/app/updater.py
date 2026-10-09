@@ -74,6 +74,10 @@ _staged: Path | None = None     # its app, downloaded and verified, ready to swa
 _worker: threading.Thread | None = None
 _waiter: threading.Thread | None = None     # an update the user asked for: download, wait for idle, install
 _requested: float = 0.0         # when the user asked for the update (0: not asked)
+_asked_now: bool = False        # asked with Settings' Install button: install once downloaded unless truly busy
+# What doesn't stop an install the user asked for just now: being awake, an old plan with steps left, a report
+# waiting. (Seen 9 Oct: "Install" downloaded, then sat waiting "Mint is busy" until the user pressed it again.)
+SOFT_BUSY = ("talking", "working on a task", "a sub-agent's report is waiting", "about to answer")
 _waiting = ""                   # why the asked-for update is not installing yet ("" when it isn't waiting)
 _failures = 0                   # failed tries in a row (the backoff)
 _next_try = 0.0                 # no new try before this time
@@ -606,7 +610,9 @@ def install_now(relaunch: bool = True, quit_after: float = 6.0) -> str:
     loop and a request's waiter may both find the moment."""
     global _installing
     with _lock:
-        if _installing:
+        if _installing or _state["status"] in ("installing", "installed"):
+            # Seen 9 Oct: "Install now" pressed four times while the waiter was already swapping it in - each
+            # press failed with "no update is ready to install" and the page showed nothing.
             return "Already installing the update."
         _installing = True
     try:
@@ -655,7 +661,7 @@ def _install_now(relaunch: bool, quit_after: float) -> str:
     return f"Updating to Hey Mint {offer['version']}. I'll be back in a few seconds."
 
 
-def install(wait: bool = False) -> str:
+def install(wait: bool = False, now: bool = False) -> str:
     """The user asked for the update (Settings' Install button, "update yourself"): download it now and
     install it by itself at the first moment Mint is idle - at once when it already is. `wait`: download
     and install right here, idle or not (no caller uses it any more; kept for scripts)."""
@@ -664,7 +670,7 @@ def install(wait: bool = False) -> str:
     if not ok:
         return why
     if not wait:
-        return request()
+        return request(now=now)
     with _lock:
         offer = _offer
     if offer is None:
@@ -689,10 +695,13 @@ def requested() -> bool:
         return bool(_requested)
 
 
-def request() -> str:
+def request(now: bool = False) -> str:
     """Remember that the user asked, start the waiter (download, then install once Mint is idle) and say
-    what happens. Never restarts mid-conversation or mid-task; the waiter waits as long as it takes."""
-    global _requested, _failures, _next_try
+    what happens. Never restarts mid-conversation or mid-task; the waiter waits as long as it takes.
+    `now` (Settings' button): once downloaded it installs unless Mint is truly mid-action (SOFT_BUSY ignored)."""
+    global _requested, _failures, _next_try, _asked_now
+    if now:
+        _asked_now = True
     app = running_app()
     ok, why = packaged(app)
     if not ok:
@@ -872,6 +881,8 @@ def _tick() -> str:
             _failures, _waiting = 0, ""
         _save(requested={"version": offer["version"], "at": _requested})
     reason = busy_reason()
+    if reason in SOFT_BUSY and _asked_now:
+        reason = ""                                 # the user pressed Install: being awake isn't a reason to wait
     if reason:
         if reason != _waiting:
             log.info("update: %s downloaded; waiting (%s)", offer["version"], reason)
