@@ -149,3 +149,15 @@ def test_set_up_pill_brings_the_chips_over_a_song(monkeypatch):
     n._setup_until = 0.0
     n._tip_hovered("calendar")                               # on a chip: it stays up
     assert n._setup_until > time.monotonic() + 15
+
+
+def test_spinning_stops_after_ten_seconds_but_a_late_yes_still_lands(monkeypatch):
+    n, strip, asked, later = _notch(monkeypatch)
+    assert n.TIP_WAIT <= 10
+    n._tip_clicked("screen")
+    n._tip_gave_up("screen")                               # 10 s, no answer (the box was closed)
+    assert ("busy", "screen", False) in strip.calls and "screen" not in n._tip_wait
+    assert "screen" in n._tip_watch and not n._holding()   # the notch may fold; the chip can be clicked again
+    n._tip_watch.pop("screen")
+    n._tip_success("screen")                               # turned on later in System Settings
+    assert ("done", "screen") in strip.calls

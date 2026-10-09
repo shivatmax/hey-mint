@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 log = logging.getLogger("mint.screen.capture")
 
@@ -259,24 +260,32 @@ def _region(area) -> dict:
 def window(window_id: int) -> dict:
     """A picture of exactly one window (no other window, Mint's notch and orb included), pixel-checked.
     Raises CaptureError / FrameMismatch."""
-    bounds = window_bounds(window_id)
-    if bounds is None:
-        raise CaptureError(f"window {window_id} is not on screen")
     last = None
-    for method, take in (("window", lambda: _cg([int(window_id)], bounds)), ("sck", lambda: _sck(window_id)),
-                         ("screencapture", lambda: _screencapture(window_id))):
-        try:
-            image = take()
-        except Exception as error:
-            log.debug("capture %s failed: %s", method, error)
-            image = None
-        if image is None:
-            continue
-        try:
-            return _shot(image, bounds, int(window_id), method)
-        except FrameMismatch as error:
-            last = error
-            log.info("%s (%s)", error, method)
+    # Twice: a window that was just opened, unhidden or brought from another Space can give no picture for a moment
+    # (seen 9 Oct: "could not capture window 3783" for Telegram a second after open_app, and Mint was blind).
+    for attempt in range(2):
+        bounds = window_bounds(window_id)
+        if bounds is None:
+            if attempt == 0:
+                time.sleep(0.6)
+                continue
+            raise CaptureError(f"window {window_id} is not on screen")
+        for method, take in (("window", lambda: _cg([int(window_id)], bounds)), ("sck", lambda: _sck(window_id)),
+                             ("screencapture", lambda: _screencapture(window_id))):
+            try:
+                image = take()
+            except Exception as error:
+                log.debug("capture %s failed: %s", method, error)
+                image = None
+            if image is None:
+                continue
+            try:
+                return _shot(image, bounds, int(window_id), method)
+            except FrameMismatch as error:
+                last = error
+                log.info("%s (%s)", error, method)
+        if attempt == 0:
+            time.sleep(0.6)
     raise last or CaptureError(f"could not capture window {window_id}")
 
 

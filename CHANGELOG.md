@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.18 (2026-10-09)
+
+- **What you ask to see done on screen, Mint does in front of you:** "open Telegram and search BotFather" was handed
+  to a background job that waited minutes "for you to pause typing" while Mint went to sleep. Opening, searching,
+  clicking and typing that you just asked for now happen step by step where you see them (background jobs are for
+  research, files and drafts - or when you say "in the background").
+- **A window that gives no picture for a moment is read again** (Telegram right after opening it: "could not capture
+  window", and Mint couldn't see it).
+- **A "Set up" chip spins 10 seconds at most:** close macOS's box without answering and the chip is clickable again
+  after 10 s (it used to spin for a minute). Mint still watches quietly for a minute and a half, so turning it on in
+  System Settings a bit later still lands as the green tick.
+
 ## 0.6.17 (2026-10-09)
 
 - **Settings' apps list never freezes on a quit app:** macOS's check of whether Mint may control an app can hang

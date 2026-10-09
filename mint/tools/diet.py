@@ -302,8 +302,9 @@ LIVE: dict[str, str] = {
     "read_window": "Read ALL the text in the front window exactly, off-screen parts too.",
     "get_status": "The local time and date, battery and volume.",
     "recall": "Look up saved memories about the user (instant) before answering anything personal.",
-    "background_task": "Run a job needing several tool calls in the BACKGROUND (research, drafts, files, apps on "
-                       "screen) while you keep talking. Write the whole job.",
+    "background_task": "Run a long job in the BACKGROUND (research, drafts, files, mail) while you keep talking. "
+                       "Not for something the user asked to see on screen now (open an app, search, click, type): "
+                       "do that yourself, step by step. Write the whole job.",
     "plan_task": "Start a task of three or more steps: the goal and ordered steps first.",
     "step_done": "Mark a plan step finished (or failed) with what you checked.",
     "stop_listening": "Go back to sleep when the user is done. Say a short goodbye first.",

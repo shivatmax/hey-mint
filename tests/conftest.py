@@ -54,3 +54,19 @@ def _no_background_pointer(monkeypatch):
     monkeypatch.setattr(bg_pointer, "_no_reach", {})
     monkeypatch.setattr(bg_pointer, "_reached", set())
     yield
+
+
+@pytest.fixture(autouse=True)
+def _private_tool_log(tmp_path, monkeypatch):
+    """Tool calls run by a test (fake jobs calling web_search "A") went into the user's real
+    ~/Library/Logs/Mint/tools.log, mixed in with real requests: keep them in tmp."""
+    try:
+        from mint.app import session
+    except ImportError:
+        try:
+            from mint import session
+        except ImportError:
+            yield
+            return
+    monkeypatch.setattr(session, "TRACE", str(tmp_path / "tools.log"))
+    yield

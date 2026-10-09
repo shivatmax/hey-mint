@@ -147,3 +147,33 @@ def test_a_mid_job_model_switch_carries_the_job_on():
     note = session._carry_on_note(mint)
     assert note.startswith("(Mint - not the user") and "Carry on" in note
     assert "find botfather" in note and "don't search with @" in note
+
+
+def test_something_asked_for_on_screen_is_done_in_front_not_in_the_background(monkeypatch):
+    try:
+        from mint.app import background
+    except ImportError:
+        from mint import background
+    monkeypatch.setattr(background, "running_note", lambda: "")
+    asked = "open the Telegram then search the text bot father, don't use @"
+    task = 'Open Telegram, search for "botfather" in the search bar, and select the BotFather contact.'
+    assert background.keep_in_front(task, asked).startswith("NOT STARTED in the background")
+    assert background.keep_in_front("Research the best laptops and put them in a note", "research laptops") == ""
+    assert background.keep_in_front("Open Telegram and search BotFather", "do it in the background") == ""
+    monkeypatch.setattr(background, "running_note", lambda: "Background jobs still running: task-2")
+    assert background.keep_in_front(task, asked) == ""                 # another job runs: this one may queue
+
+
+def test_a_window_that_gives_no_picture_at_first_is_tried_again(monkeypatch):
+    try:
+        from mint.screen import capture
+    except ImportError:
+        from mint import capture
+    tries = []
+    monkeypatch.setattr(capture, "window_bounds", lambda wid: (0, 0, 400, 300))
+    monkeypatch.setattr(capture, "_cg", lambda ids, area: tries.append("cg") or (None if len(tries) < 2 else "img"))
+    monkeypatch.setattr(capture, "_sck", lambda wid: None)
+    monkeypatch.setattr(capture, "_screencapture", lambda wid: None)
+    monkeypatch.setattr(capture, "_shot", lambda image, bounds, wid, method: {"image": image, "method": method})
+    monkeypatch.setattr(capture.time, "sleep", lambda s: None)
+    assert capture.window(3783)["image"] == "img" and len(tries) == 2

@@ -347,6 +347,7 @@ class Notch:
         self._scene = None                   # (kind, view, controller): the one scene in the body (notch_fx/composer)
         # "Set up" chips (notch_tips): waiting for macOS's answer since, just set up until, what the Mint pane says.
         self._tip_wait: dict = {}
+        self._tip_watch: dict = {}           # chips that stopped spinning, still looked at quietly until
         self._tip_prompted: set = set()      # ... the ones macOS showed its own box for (it can say "denied")
         self._tip_party: dict = {}
         self._tip_say = None                 # (title, words, until)
@@ -1958,15 +1959,18 @@ class Notch:
         for delay in (1.0, 3.0, 8.0):
             AppHelper.callLater(delay, lambda: self._tips_check(time.monotonic(), force=True))
 
-    TIP_WAIT = 60.0                             # how long a chip waits for macOS's answer (and holds the notch open)
+    TIP_WAIT = 10.0                             # how long a chip spins for macOS's answer (and holds the notch open)
+    TIP_WATCH = 90.0                            # ... then it looks quietly this long more (a switch flipped later)
 
     def _tip_poll(self) -> None:
         """Twice a second while a chip waits: is it set up yet? (Read on a thread; never prompts.)"""
-        if not self._tip_wait or self._tip_polling:
+        now = time.monotonic()
+        self._tip_watch = {k: until for k, until in self._tip_watch.items() if until > now and k not in self._tip_wait}
+        if not (self._tip_wait or self._tip_watch) or self._tip_polling:
             return
         self._tip_polling = True
         tips = self._mod("notch_tips")
-        waiting = dict(self._tip_wait)
+        waiting = {**self._tip_watch, **self._tip_wait}
 
         def read():
             answers = {}
@@ -1988,6 +1992,11 @@ class Notch:
                 self._tip_polling = False
                 now = time.monotonic()
                 for key, answer in answers.items():
+                    if key in self._tip_watch:              # stopped spinning: only a yes still counts
+                        if answer == "allowed":
+                            self._tip_watch.pop(key, None)
+                            self._tip_success(key)
+                        continue
                     if key not in self._tip_wait:
                         continue
                     if answer == "allowed":
@@ -1997,8 +2006,8 @@ class Notch:
                         self._tip_failed(key)          # (Calendars and Reminders say so; the rest can't tell)
                     elif now - self._tip_wait[key] > self.TIP_WAIT:
                         self._tip_gave_up(key)
-                if self._tip_wait:
-                    AppHelper.callLater(0.5, self._tip_poll)
+                if self._tip_wait or self._tip_watch:
+                    AppHelper.callLater(0.5 if self._tip_wait else 1.5, self._tip_poll)
             AppHelper.callAfter(apply)
         import threading
         threading.Thread(target=read, daemon=True, name="notch-tip-poll").start()
@@ -2070,7 +2079,10 @@ class Notch:
         self._cursor_back()
 
     def _tip_gave_up(self, key: str) -> None:
+        """No answer in TIP_WAIT: the chip stops spinning (it can be clicked again), and Mint keeps an eye on it a
+        while longer - a switch turned on in System Settings later still lands as the green tick."""
         self._tip_wait.pop(key, None)
+        self._tip_watch[key] = time.monotonic() + self.TIP_WATCH
         self._tip_say = ("Not set up yet", "No rush: click it again whenever you like.", time.monotonic() + 5.0)
         self._tip_hold = 0.0
         strip = (self.home or {}).get("tips")
@@ -2155,6 +2167,7 @@ class Notch:
         if tips is not None:
             tips.dismiss(key)
         self._tip_wait.pop(key, None)
+        self._tip_watch.pop(key, None)
         if self._tip_hover == key:
             self._tip_hover = None
 

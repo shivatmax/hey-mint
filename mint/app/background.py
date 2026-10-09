@@ -700,6 +700,28 @@ async def until_quiet(mint, limit: float = QUIET_WAIT) -> None:
 
 # --- what the conversation is told about jobs ---------------------------------------------
 
+_ON_SCREEN = re.compile(r"\b(open|click|tap|type|search|select|scroll|paste|press|switch to|go to)\b", re.I)
+_OFF_SCREEN = re.compile(r"\b(research|compare|draft|summari[sz]e|report|spreadsheet|sheet|note|notes|email|mail|"
+                         r"tidy|organi[sz]e|files?|folder|download|find out|look up|web|article|pdf|doc)\b", re.I)
+_ASKED_BACKGROUND = re.compile(r"\b(background|meanwhile|in parallel|while (i|you)|later|when you can|don'?t wait)\b",
+                               re.I)
+
+
+def keep_in_front(task: str, request: str = "") -> str:
+    """A job the user just asked for on screen, while they are here - open an app, search in it, click, type - is
+    done by the voice model itself, step by step, where they see it and can correct it. Seen 9 Oct: "open Telegram
+    and search BotFather" went to a background job that waited two minutes "for you to pause typing" while Mint
+    fell asleep. '' = fine to run in the background (research, files, drafts; the user said so; jobs running)."""
+    words = f"{task} {request}"
+    if _ASKED_BACKGROUND.search(request or "") or running_note():
+        return ""
+    if not _ON_SCREEN.search(words) or _OFF_SCREEN.search(task):
+        return ""
+    return ("NOT STARTED in the background: the user is here and asked for something on screen. Do it yourself now, "
+            "step by step, where they can see it - open_app, then click_text / type_text / read_window (plan_task "
+            "first if it has three or more steps). Say one short line first, like 'Opening Telegram'.")
+
+
 def running_note() -> str:
     """One line for the conversation: the jobs still running (or '')."""
     try:
@@ -718,10 +740,11 @@ def declaration():
     return types.FunctionDeclaration(
         name="background_task",
         description=(
-            "The DEFAULT for any request that needs several tool calls: hand it over here as your only call and "
-            "it runs in the BACKGROUND - Mint's own worker with your Mac tools (web, files, Mail, Notes, and apps "
-            "on screen: open, click, type, read windows) - "
-            "while you stay free to talk and take more requests. E.g. 'find the best X and put it in a note', "
+            "For a request that needs several tool calls and NOT the user's eyes: hand it over here as your only "
+            "call and it runs in the BACKGROUND - Mint's own worker with your Mac tools (web, files, Mail, Notes, "
+            "apps) - while you stay free to talk and take more requests. Something the user asked to see done on "
+            "screen now (open an app, search in it, click, type) you do yourself, step by step - unless they say "
+            "'in the background' or another job is already running. E.g. 'find the best X and put it in a note', "
             "'research…', 'compare…', 'draft…', 'tidy my Downloads', 'make a spreadsheet of…'. ALWAYS use it "
             "for a new request while something else is in progress ('also…', 'meanwhile…'). Several jobs run at "
             "once; jobs needing the screen take turns by themselves. Do it yourself only for a quick answer or "

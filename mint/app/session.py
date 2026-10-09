@@ -2746,6 +2746,12 @@ class Mint:
             refused = telegram.send_guard(name, args, live.request() or "")    # no sending unless asked, ever
         if refused:
             return refused, None
+        if name == "background_task":
+            from mint.app import background
+            from mint.app import live
+            refused = background.keep_in_front(str(args.get("task", "")), live.request() or "")
+            if refused:
+                return refused, None
         from mint.core import permit
         lacking = permit.missing(name, args)         # needs a permission Mint lacks: ask for it now, not fail quietly
         if lacking:
