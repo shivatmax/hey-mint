@@ -604,12 +604,13 @@ class SettingsWindow:
         card, top, x, h = page.row(title, hint, control_w=w, icon=icon)
         return _badge(card, words, x + w, top + h / 2, tone, max_w=w)
 
-    def _key_row(self, page, title, hint, value, on_add, icon="", test=None, words=None):
+    def _key_row(self, page, title, hint, value, on_add, icon="", test=None, words=None, on_remove=None):
         """A key or a secret: a badge (Set ••••1234 ✓ / Not set), Add key… (the prominent main action) or
-        Change…, and optionally Test. `value`: the key (only its last four characters are shown) or a bool.
-        -> the Test button (or None)."""
-        badge_w, add_w, test_w = 132, 100, 64
-        control_w = badge_w + 10 + add_w + (8 + test_w if test else 0)
+        Change…, Remove (with `on_remove`, once set) and optionally Test. `value`: the key (only its last four
+        characters are shown) or a bool. -> the Test button (or None)."""
+        badge_w, add_w, test_w, remove_w = 132, 100, 64, 84
+        removable = on_remove is not None and bool(value)
+        control_w = badge_w + 10 + add_w + (8 + test_w if test else 0) + (8 + remove_w if removable else 0)
         card, top, x, h = page.row(title, hint, control_w=control_w, icon=icon)
         is_set = bool(value)
         if words is None:
@@ -620,11 +621,44 @@ class SettingsWindow:
         bx = x + badge_w + 10
         self._button(card, "Change…" if is_set else "Add key…", bx, top + (h - 28) / 2, add_w, on_add,
                      primary=not is_set)
+        bx += add_w + 8
+        if removable:
+            self._button(card, "Remove", bx, top + (h - 28) / 2, remove_w, on_remove)
+            bx += remove_w + 8
         if not test:
             return None
-        button = self._button(card, "Test", bx + add_w + 8, top + (h - 28) / 2, test_w, test)
+        button = self._button(card, "Test", bx, top + (h - 28) / 2, test_w, test)
         button.setEnabled_(is_set)
         return button
+
+    def _remove_key(self, env: str, title: str) -> None:
+        """Remove a saved key, after a plain yes: from .env and from this run. A Gemini key's place is taken by the
+        next one (key 2 becomes key 1)."""
+        from mint.core import config
+        from mint.core import gemini_keys
+        from mint.agents import catalog
+        gemini = env in gemini_keys.ENVS
+        last_gemini = gemini and len(gemini_keys.keys()) <= 1
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_(f"Remove the {title} key?")
+        alert.setInformativeText_(
+            f"{prefs.name()}'s voice and thinking stop until you add a Gemini key again." if last_gemini else
+            "The other Gemini keys carry on; the next one takes its place." if gemini else
+            "It is deleted from this Mac. What needs it stops working until you add a key again.")
+        alert.addButtonWithTitle_("Remove")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
+            return
+        catalog.write_key(env, "")
+        if gemini:
+            gemini_keys.compact(catalog.write_key)
+        if env == config.API_KEY_ENV or gemini:
+            from mint.core import llm
+            llm._client_cache = None
+        if env == "TELEGRAM_BOT_TOKEN":
+            from mint.app import telegram
+            telegram.refresh()
+        self.refresh(keep_scroll=True)
 
     def _row_value(self, page, title, value, hint="", w=280):
         card, top, x, h = page.row(title, hint, control_w=w)
@@ -1779,7 +1813,7 @@ class SettingsWindow:
             if more and not advanced:
                 continue
             self._key_row(page, title, hint, os.environ.get(env, ""), lambda e=env, t=title: self._change_key(e, t),
-                          icon=icons.get(env, "key"))
+                          icon=icons.get(env, "key"), on_remove=lambda e=env, t=title: self._remove_key(e, t))
         page.end("Keys stay on this Mac, in a file only you can read. Nothing goes through any Hey Mint server - "
                  "there isn't one.")
 

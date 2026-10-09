@@ -1,11 +1,12 @@
-"""One or two Gemini API keys, each the other's backup.
+"""Up to five Gemini API keys, each the others' backup.
 
-GEMINI_API_KEY is required; GEMINI_API_KEY_2 is optional (Settings ▸ Models & agents). With two keys the
-free-tier limits are per key, so:
+GEMINI_API_KEY is required; GEMINI_API_KEY_2 ... _5 are optional (Settings ▸ Models & agents ▸ Add another key).
+Google's limits (tokens a minute, requests a day) are per key, so each key adds its own:
 
   - "split" (the default): the Live voice session uses key 1, every other Gemini call (memory, chat
-    summaries, pointing at the screen, agents) uses key 2 - the voice never waits behind background work.
-  - "primary": key 1 for everything; key 2 only when key 1 is rate-limited or refused.
+    summaries, pointing at the screen, agents) the other keys - the voice never waits behind background work.
+  - "primary": key 1 for everything; the others only when it is rate-limited or refused.
+  - The voice itself moves to the next key when its key nears the per-minute limit (session.py, live_models).
 
 Either way, when a key answers 429 / RESOURCE_EXHAUSTED for a model, or is refused, that key is set aside
 for a while and the same call is retried at once on the other key. `client()` returns a stand-in for
@@ -21,7 +22,8 @@ import time
 
 log = logging.getLogger("mint.core.gemini_keys")
 
-ENVS = ("GEMINI_API_KEY", "GEMINI_API_KEY_2")
+MAX_KEYS = 5
+ENVS = ("GEMINI_API_KEY",) + tuple(f"GEMINI_API_KEY_{n}" for n in range(2, MAX_KEYS + 1))
 _bench: dict[tuple[str, str], tuple[float, str]] = {}      # (env, model or "*") -> (until, why)
 _lock = threading.Lock()
 _clients: dict[tuple, object] = {}
@@ -30,6 +32,35 @@ _clients: dict[tuple, object] = {}
 def keys() -> list[tuple[str, str]]:
     """[(env name, key)] of the keys that are set, key 1 first."""
     return [(env, os.environ[env].strip()) for env in ENVS if os.environ.get(env, "").strip()]
+
+
+def label(env: str) -> str:
+    """'Key 1' ... 'Key 5'."""
+    return f"Key {ENVS.index(env) + 1}" if env in ENVS else env
+
+
+def next_free() -> str | None:
+    """The env name a new key goes into (after the last one set), or None when all five are set."""
+    have = [env for env, _ in keys()]
+    return ENVS[len(have)] if len(have) < MAX_KEYS else None
+
+
+def compact(write) -> None:
+    """Renumber the keys that are set into GEMINI_API_KEY, _2, _3... with no gaps (after one is removed: removing
+    key 1 makes key 2 the voice's key). `write(env, value)` saves one (catalog.write_key)."""
+    values = [key for _, key in keys()]
+    for i, env in enumerate(ENVS):
+        want = values[i] if i < len(values) else ""
+        if os.environ.get(env, "").strip() != want:
+            write(env, want)
+    with _lock:
+        _bench.clear()
+        _clients.clear()
+
+
+def other_free(env: str, model: str = "live") -> bool:
+    """Another key is set and not set aside for `model` right now."""
+    return any(other != env and not _benched(other, model) for other, _ in keys())
 
 
 def mode() -> str:

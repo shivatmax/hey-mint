@@ -138,3 +138,14 @@ def test_a_no_in_the_box_is_a_no(monkeypatch):
     n._tip_clicked("reminders")
     n._tip_answer("reminders", False)
     assert ("nope", "reminders") in strip.calls and "reminders" not in n._tip_wait
+
+
+def test_set_up_pill_brings_the_chips_over_a_song(monkeypatch):
+    n, strip, asked, later = _notch(monkeypatch)
+    n.st.keep = lambda now: None
+    assert n._setup_until < time.monotonic()
+    n._show_setup()                                          # the header's "Set up · 2" over the player
+    assert n._setup_until > time.monotonic() + 15
+    n._setup_until = 0.0
+    n._tip_hovered("calendar")                               # on a chip: it stays up
+    assert n._setup_until > time.monotonic() + 15

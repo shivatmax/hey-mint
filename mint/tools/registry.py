@@ -74,8 +74,10 @@ def declarations() -> list[types.FunctionDeclaration]:
             ["key"]),
         _fn("set_volume", "Instantly set the Mac's output volume.",
             {"level": {**INTEGER, "description": "0 to 100."}}, ["level"]),
-        _fn("media_key", "Instantly send a media key: play/pause, next or previous track.",
-            {"action": {**STRING, "description": "playpause, next or previous."}}, ["action"]),
+        _fn("media_key", "Instantly play, pause, skip or go back a track (Spotify / Music, else the media keys). Use "
+            "pause for stop.",
+            {"action": {**STRING, "description": "play, pause, next or previous (playpause only to toggle)."}},
+            ["action"]),
         _fn("frontmost_app", "Which application is in front right now.", {}),
         _fn("list_windows", "List the visible windows as app name and title.", {}),
         _fn("read_clipboard", "Read the text currently on the clipboard.", {}),
@@ -569,7 +571,7 @@ def _fallback_goal(name: str, args: dict) -> str | None:
     if name == "press_key" and not args.get("modifiers"):
         key = _KEY_WORDS.get(str(args.get("key", "")).lower())
         return f"press {key}" if key else None
-    if name == "media_key" and str(args.get("action", "")).lower() == "playpause":
+    if name == "media_key" and str(args.get("action", "")).lower() in ("playpause", "play", "pause"):
         return "press Space to play or pause"
     if name == "type_text":
         goal = f"type {args.get('text', '')} into the focused text field"

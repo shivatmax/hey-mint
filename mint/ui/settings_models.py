@@ -5,7 +5,7 @@ More providers… to open the rest right there, and the agents. All settings (th
 every provider, how two Gemini keys share the work, your own endpoints, and the backups for every agent.
 Each provider row: its brand tile, what it gives, a Set / Not set badge, Add key… and Test.
 
-- Gemini: key 1 (required, the voice) and an optional key 2; how the two share the work (gemini_keys.py).
+- Gemini: key 1 (required, the voice) and up to four more (Add another key), each with Change and Remove; how they share the work (gemini_keys.py).
 - OpenAI, Anthropic, OpenRouter, Groq, xAI: add / change / remove a key, and Test it (lists its models).
 - Ollama: its address on this Mac, and Test. Custom OpenAI-compatible endpoints: add, test, remove.
 - Backups for every agent: up to three models tried after an agent's own, and Gemini as the last resort.
@@ -109,21 +109,32 @@ def page(win, page, facts: dict) -> None:
 # --- Gemini ----------------------------------------------------------------------------------------
 
 def _gemini_section(win, page, facts: dict) -> None:
+    """Key 1 (required) and every other key that is set, each with Change and Remove; then Add another key, up to
+    five. Google's limits are per key, so each key adds its own (gemini_keys.py)."""
+    from mint.core import gemini_keys
     page.section("Gemini")
     status = facts["gemini_status"]
-    for env, title, hint in (("GEMINI_API_KEY", "Key 1", "Required - Mint's voice runs on it. Free at aistudio.google.com/apikey."),
-                             ("GEMINI_API_KEY_2", "Key 2 (optional)",
-                              "A second free key doubles the free limits: when one key is rate-limited, the other "
-                              "takes over - for the voice and for everything else.")):
-        value = os.environ.get(env, "")
+    have = [env for env, _ in gemini_keys.keys()] or ["GEMINI_API_KEY"]
+    for env in have:
+        title = gemini_keys.label(env)
+        hint = ("Required - Mint's voice runs on it. Free at aistudio.google.com/apikey." if env == "GEMINI_API_KEY"
+                else "Another free key: its own limits, used for everything else and whenever another key is busy.")
         resting = status.get(env, "")
-        win._key_row(page, title, hint + (f"\nResting now: {resting[:90]}" if resting else ""), value,
+        win._key_row(page, title, hint + (f"\nResting now: {resting[:90]}" if resting else ""),
+                     os.environ.get(env, ""),
                      lambda e=env, t=f"Gemini {title}": _ask_key(win, e, t, required=e == "GEMINI_API_KEY"),
-                     icon="gemini")
+                     icon="gemini", on_remove=lambda e=env, t=f"Gemini {title}": win._remove_key(e, t))
+    nxt = gemini_keys.next_free()
+    if nxt and os.environ.get("GEMINI_API_KEY", "").strip():
+        win._row_buttons(page, "Add another key",
+                         [("Add key…", 110, lambda e=nxt: _ask_key(win, e, f"Gemini {gemini_keys.label(e)}"), True)],
+                         hint=f"Up to {gemini_keys.MAX_KEYS} keys. Google's limits are per key, so each one adds its own "
+                              "- fewer pauses on long jobs. Make more free at aistudio.google.com/apikey.",
+                         icon="gemini")
     if facts["gemini_keys"] > 1 and win._advanced():
-        win._row_popup(page, "gemini_key_mode", "Using two keys",
-                       [("split", "Voice on key 1, the rest on key 2"), ("primary", "Key 1 first, key 2 as backup")],
-                       hint="Either way each key covers for the other when it is rate-limited or refused.", w=280)
+        win._row_popup(page, "gemini_key_mode", "Using several keys",
+                       [("split", "Voice on key 1, the rest on the others"), ("primary", "Key 1 first, the others as backup")],
+                       hint="Either way each key covers for the others when it is rate-limited or refused.", w=280)
     page.end("Keys stay on this Mac, in a file only you can read.")
 
 
@@ -150,7 +161,8 @@ def _providers_section(win, page, facts: dict) -> None:
         where = {}
         win._key_row(page, spec["label"], GIVES.get(provider, spec["hint"]), keys.get(provider, ""),
                      lambda p=provider: _ask_key(win, catalog.PROVIDERS[p]["env"], catalog.PROVIDERS[p]["label"]),
-                     icon=provider, test=lambda p=provider, w=where: _test(p, w.get("label")))
+                     icon=provider, test=lambda p=provider, w=where: _test(p, w.get("label")),
+                     on_remove=lambda p=provider: win._remove_key(catalog.PROVIDERS[p]["env"], catalog.PROVIDERS[p]["label"]))
         where["label"] = page.hint
 
     if every:

@@ -208,7 +208,7 @@
     <tr id="set-live-tpm-limit"><td><code>live_tpm_limit</code></td><td><code>65000</code></td><td>Each voice model's tokens-a-minute limit, used to spread the load.</td></tr>
     <tr id="set-auto-compact"><td><code>auto_compact</code></td><td>on</td><td>Near the voice model's context limit, shorten the conversation at a quiet moment instead of letting the oldest turns drop.</td></tr>
     <tr id="set-tool-diet"><td><code>tool_diet</code></td><td>on</td><td>The voice session declares only the everyday tools and finds the rest when needed. Off = declare every tool (from the next start).</td></tr>
-    <tr id="set-gemini-key-mode"><td><code>gemini_key_mode</code></td><td><code>split</code></td><td>With two Gemini keys: <code>split</code> (the voice on key 1, everything else on key 2) or <code>primary</code> (key 1 first, key 2 as backup). Either way each key covers for the other when it is rate-limited.</td></tr>
+    <tr id="set-gemini-key-mode"><td><code>gemini_key_mode</code></td><td><code>split</code></td><td>With several Gemini keys: <code>split</code> (the voice on key 1, everything else on the others) or <code>primary</code> (key 1 first, the others as backup). Either way each key covers for the others when it is rate-limited, and the voice moves to the next key when its key nears the per-minute limit.</td></tr>
   </table></div>
 </section>
 
@@ -226,7 +226,7 @@
   <h3>Keys</h3>
   <div class="table"><table><tr><th>Variable</th><th>Default</th><th>What it's for</th></tr>
     <tr id="env-gemini-api-key"><td><code>GEMINI_API_KEY</code></td><td><i>not set</i></td><td>Required: Mint's voice and most of its work. Free at <a href="https://aistudio.google.com/apikey">Google AI Studio</a>.</td></tr>
-    <tr id="env-gemini-api-key-2"><td><code>GEMINI_API_KEY_2</code></td><td><i>not set</i></td><td>Optional second Gemini key: doubles the free limits, and each key covers for the other.</td></tr>
+    <tr id="env-gemini-api-key-2"><td><code>GEMINI_API_KEY_2</code></td><td><i>not set</i></td><td>Optional extra Gemini keys - <code>GEMINI_API_KEY_2</code> to <code>GEMINI_API_KEY_5</code>, added in Settings ▸ Models &amp; agents ▸ Add another key: Google's limits are per key, so each adds its own, and each key covers for the others.</td></tr>
     <tr id="env-openai-api-key"><td><code>OPENAI_API_KEY</code></td><td><i>not set</i></td><td>Agents on OpenAI models.</td></tr>
     <tr id="env-anthropic-api-key"><td><code>ANTHROPIC_API_KEY</code></td><td><i>not set</i></td><td>Agents on Claude models.</td></tr>
     <tr id="env-openrouter-api-key"><td><code>OPENROUTER_API_KEY</code></td><td><i>not set</i></td><td>Agents on any model OpenRouter offers.</td></tr>

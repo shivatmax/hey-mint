@@ -983,6 +983,33 @@ class Mint:
         except Exception:
             log.debug("the stall watch failed", exc_info=True)
 
+    def _move_key(self, why: str) -> None:
+        """Reconnect on the same model with the next Gemini key (gemini_keys.live_key skips the one set aside) - at a
+        quiet moment, carrying the job on if one is under way."""
+        if self.loop is None or getattr(self, "_speed_switching", False):
+            return
+        self._speed_switching = True
+
+        async def go():
+            from mint.core import gemini_keys
+            try:
+                await self._quiet_for(1.5, time.monotonic() + 60)
+                session = self.session
+                if session is None:
+                    return
+                nxt = gemini_keys.live_key()[0]
+                self._print(f"[Gemini {gemini_keys.label(_live_env)}: {why} - the voice moves to {gemini_keys.label(nxt)}]")
+                if self._working_on_request():
+                    self._carry_note = _carry_on_note(self)
+                self._resume_handle = None          # a resumption handle may not carry across keys
+                self._restarting = True
+                await session.close()
+            except Exception:
+                log.debug("moving to the next Gemini key failed", exc_info=True)
+            finally:
+                self._speed_switching = False
+        self.loop.create_task(go())
+
     async def _switch_model(self, why: str, at_once: bool = False) -> None:
         """Reconnect on the model live_models chooses - at a quiet moment (never mid-reply), or at once when the
         user is waiting on a request that got nothing back. A fresh session: the prompt carries the last turns
@@ -1668,9 +1695,16 @@ class Mint:
             self._watch_context(meta, steps=getattr(self, "_turn_steps", 0) + 1)
             from mint.voice import live_models
             spent = getattr(meta, "prompt_token_count", None) or getattr(meta, "total_token_count", 0) or 0
-            if live_models.tokens(config.MODEL, spent):
-                # Near this model's input-tokens-a-minute limit (where it starts stalling): another model for a bit.
-                self._move_model("near its per-minute token limit", strike=False)
+            from mint.core import gemini_keys
+            if live_models.tokens(config.MODEL, spent, key=_live_env, rest_model=False):
+                # Near this key's input-tokens-a-minute limit for this model (where it starts stalling). The limit
+                # is per key: another Gemini key carries on with the same model; else another model for a bit.
+                if _live_env and gemini_keys.other_free(_live_env, "live"):
+                    gemini_keys.bench(_live_env, 60, "near its per-minute token limit", model="live")
+                    self._move_key("near its per-minute token limit")
+                else:
+                    live_models.rest(config.MODEL)
+                    self._move_model("near its per-minute token limit", strike=False)
         if update := getattr(response, "session_resumption_update", None):
             if getattr(update, "resumable", False) and getattr(update, "new_handle", None):
                 self._resume_handle = update.new_handle
@@ -3236,9 +3270,9 @@ class Mint:
         from mint.core import gemini_keys
         if gemini_keys.failed(_live_env, message, "live"):
             # Rate-limited or refused, and a second Gemini key is set: reconnect on it at once, same model.
-            print(f"  [Gemini key {_live_env[-1] if _live_env.endswith('2') else '1'} "
+            print(f"  [Gemini {gemini_keys.label(_live_env)} "
                   f"{'refused' if gemini_keys.classify(message) == 'key' else 'is rate-limited'}; "
-                  "switching to the other key]", flush=True)
+                  f"switching to {gemini_keys.label(gemini_keys.live_key()[0])}]", flush=True)
             self._resume_handle = None         # a resumption handle may not carry across keys
             return
         if "suspended" in message or "API key" in message or "PERMISSION_DENIED" in message:

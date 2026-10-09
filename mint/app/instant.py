@@ -69,7 +69,8 @@ def match(said: str) -> tuple[str, dict, str] | None:
         return "media_key", {"action": "previous"}, "Previous track"
     if full(r"(?:pause|stop|resume|play)(?: (?:the )?(?:music|song|track|it))?|(?:pause|play) music"):
         if not t.startswith(("stop",)) or "music" in t or "song" in t:     # a bare "stop" stops Mint, not music
-            return "media_key", {"action": "playpause"}, "Play/pause"
+            play = bool(re.search(r"\b(?:play|resume)\b", t))           # never a blind toggle: "stop" played it
+            return "media_key", {"action": "play" if play else "pause"}, "Play" if play else "Pause"
     if full(r"(?:brighter|(?:turn (?:the )?)?brightness up|increase (?:the )?brightness|(?:make (?:the |my )?)?screen brighter)"):
         return "mac", {"control": "brightness", "value": "up"}, "Brighter"
     if full(r"(?:dimmer|dim (?:the |my )?screen|(?:turn (?:the )?)?brightness down|decrease (?:the )?brightness|"

@@ -67,6 +67,11 @@ def _r(state: str, detail: str = "", **more) -> dict:
     return {"state": state, "detail": detail, **more}
 
 
+def _gemini_envs() -> tuple[str, ...]:
+    from mint.core.gemini_keys import ENVS
+    return ENVS
+
+
 def _env(*names: str):
     def check() -> dict:
         have = [n for n in names if os.environ.get(n, "").strip()]
@@ -227,7 +232,7 @@ FEATURES: list[Feature] = [
             "models", "", "Under Gemini, click Add key next to Key 1 and paste a free key from "
                           "aistudio.google.com/apikey.",
             "{name}'s voice and thinking - nothing works without it.", "add a Gemini key",
-            _env("GEMINI_API_KEY", "GEMINI_API_KEY_2")),
+            _env(*_gemini_envs())),
     Feature("typesafe_key", "TypeSafe key", ("typesafe", "type safe", "jev", "typesafe key", "typesafe api key"),
             "accounts", "", "Under API keys, click Add key next to TypeSafe and paste a key from "
                             "console.typesafe.ai/keys.",

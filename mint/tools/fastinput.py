@@ -245,20 +245,50 @@ def set_volume(level: int) -> str:
     return f"Volume set to {level}"
 
 
-def media_key(action: str) -> str:
-    """Play/pause, next or previous track, using the hardware media keys.
+_MEDIA_ACTIONS = {"play": "play", "resume": "play", "pause": "pause", "stop": "pause", "playpause": "playpause",
+                  "toggle": "playpause", "next": "next", "skip": "next", "previous": "previous", "prev": "previous",
+                  "back": "previous"}
 
-    These are NSSystemDefined events rather than ordinary key events, so they go
+
+def _player(action: str) -> str | None:
+    """Spotify or Music, told directly (AppleScript: no Accessibility needed, and no toggling blind): pause only
+    pauses, play only plays. With neither open nothing is sent - a media key would start one (macOS hands Play to
+    the last player, which is how a quit Spotify kept coming back). None: leave it to the media key."""
+    try:
+        from mint.tools import music
+        running = music._running_apps()
+    except Exception:
+        return None
+    if not running:
+        if action == "play":
+            return music.resume()                 # asked to play: start the usual player
+        return "Nothing is playing in Spotify or Music (neither is open), so there's nothing to " + {
+            "pause": "pause", "playpause": "pause", "next": "skip", "previous": "go back in"}[action] + "."
+    app = music.pick_app()
+    if action == "playpause":
+        action = "pause" if music._state_only(app) == "playing" else "play"
+    return {"pause": music.pause, "play": music.resume, "next": music.next_track,
+            "previous": music.previous_track}[action](app)
+
+
+def media_key(action: str) -> str:
+    """Play, pause, next or previous track: Spotify and Music are told directly (_player); anything else gets the
+    hardware media key.
+
+    Media keys are NSSystemDefined events rather than ordinary key events, so they go
     through AppKit; CGEventCreateKeyboardEvent cannot express them.
     """
     import AppKit  # imported lazily: only this function needs it
 
+    action = _MEDIA_ACTIONS.get(str(action or "").strip().lower().replace("/", "").replace(" ", "").replace("_", ""))
+    if action is None:
+        return "Action must be play, pause, playpause, next or previous."
+    said = _player(action)
+    if said is not None:
+        return said
     if not has_accessibility():
         return _NO_ACCESS
-    codes = {"playpause": 16, "next": 17, "previous": 18}
-    action = action.strip().lower()
-    if action not in codes:
-        return "Action must be playpause, next or previous."
+    codes = {"playpause": 16, "play": 16, "pause": 16, "next": 17, "previous": 18}
     code = codes[action]
     for state in (0xA, 0xB):  # key down, then key up
         event = AppKit.NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(

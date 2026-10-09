@@ -354,6 +354,7 @@ class Notch:
         self._tip_hover = None
         self._tip_polling = False
         self._tip_front = None               # the app in front before Mint asked macOS (it goes back there)
+        self._setup_until = 0.0              # "Set up" over a song: the Mint pane shows instead of the player until
         self._mouse_through = None           # last setIgnoresMouseEvents_ value (set only when it changes)
         self._scene_since = 0.0
         self._scene_shown = False
@@ -1102,7 +1103,8 @@ class Notch:
         self._home(mode, music)
         self._battery_wings(mode == "battery")
         self._music_player(mode == "music" or (mode == "home" and self.tab == "home" and bool(music)
-                                               and not self._mint_words and not scene), height,
+                                               and not self._mint_words and not scene
+                                               and not getattr(self, "_mint_pane_on", False)), height,
                            home=(mode == "home"))
         if mode == "battery":
             wings = True                        # the battery owns both wings for the moment
@@ -1783,8 +1785,18 @@ class Notch:
         # body: home tab
         home = body and self.tab == "home"
         words = getattr(self, "_mint_words", "")
-        mint_pane = home and (not music or bool(words))       # Mint talking beats the player
+        now_t = time.monotonic()
+        busy = getattr(self.hud, "_activity", None) is not None or \
+            getattr(self.hud, "_state", "") in ("thinking", "working", "speaking")
+        tip_keys = self._tip_keys(now_t) if home else []
+        # Mint talking beats the player; so does "Set up" (the header's pill over a song, or a chip at work).
+        setting_up = now_t < self._setup_until or bool(self._tip_wait) or any(
+            now_t < until for until in self._tip_party.values())
+        mint_pane = home and (not music or bool(words) or setting_up)
         self._mint_pane_on = mint_pane
+        chips = mint_pane and not busy and bool(tip_keys)       # (the hint keeps to two lines above them)
+        self._setup_pill(on and home and music and not mint_pane and bool(tip_keys) and not waiting, tip_keys,
+                         left, top_y)
         if mint_pane:
             from mint.ui.hud import TITLES
             state = getattr(self.hud, "_state", "")
@@ -1806,21 +1818,19 @@ class Notch:
                     kinetics.wipe_in(h["title"].layer(), 0.28)
             self._pane_said = (title, hint)
             h["title"].setStringValue_(title)
-            h["hint"].setMaximumNumberOfLines_(3 if words else 2)
+            h["hint"].setMaximumNumberOfLines_(3 if words and not chips else 2)
             h["hint"].setTextColor_(_white(0.85 if words or note is not None else 0.55))
             h["hint"].setStringValue_(hint)
             # The little Mint flies in on the left (_place_face); the words sit beside it and wipe in.
             tx = left + FACE * PANE_FACE + 14
             self._reveal(h["title"], AppKit.NSMakeRect(tx, body_top - 34, left + PLAYER_W - tx, 22),
                          delay=0.16, style="wipe")
-            self._reveal(h["hint"], AppKit.NSMakeRect(tx, body_top - 84, left + PLAYER_W - tx, 46) if words
+            self._reveal(h["hint"], AppKit.NSMakeRect(tx, body_top - 84, left + PLAYER_W - tx, 46) if words and not chips
                          else AppKit.NSMakeRect(tx, body_top - 70, left + PLAYER_W - tx, 32), delay=0.2, style="wipe")
         else:
             for key in ("title", "hint"):
                 self._fade(h[key], False)
-        idle = mint_pane and not words and getattr(self.hud, "_activity", None) is None and \
-            getattr(self.hud, "_state", "") not in ("thinking", "working", "speaking")
-        self._tips(idle, left, body_top)
+        self._tips(mint_pane and not busy, left, body_top, tip_keys)
         side = h["side"]
         if side is not None:
             if home:
@@ -1845,20 +1855,26 @@ class Notch:
 
     # --- "Set up" chips on the home tab: what isn't set up yet (notch_tips) ------------------------------
 
-    def _tips(self, on: bool, left: float, body_top: float) -> None:
-        """Between the hint and the controls, while Mint is idle on the home tab: a chip per thing not set up
-        (Calendars, Claude Code, the shelf...). Statuses are read off the main thread every few seconds. A chip
-        just set up stays a moment longer, green with a tick, before it shrinks away."""
+    def _tip_keys(self, now: float) -> list:
+        """The "Set up" chips due now (statuses read off the main thread every few seconds), a chip just set up
+        included while it shows its green tick."""
+        tips = self._mod("notch_tips")
+        if tips is None:
+            return []
+        self._tips_check(now)
+        keys = tips.pick(getattr(self, "_tips_facts", None) or {}, tips.dismissed())
+        party = {k for k, until in self._tip_party.items() if now < until}
+        if party:
+            keys = [k for k, *_ in tips.TIPS if k in party or k in keys]
+        return keys
+
+    def _tips(self, on: bool, left: float, body_top: float, keys=()) -> None:
+        """Between the hint and the controls, whenever the Mint pane shows and Mint isn't busy (thinking, working,
+        speaking): a chip per thing not set up (Calendars, Claude Code, Accessibility...). A chip just set up stays
+        a moment longer, green with a tick, before it shrinks away."""
         h = self.home
         tips = self._mod("notch_tips") if on else None
-        keys = []
-        if tips is not None:
-            now = time.monotonic()
-            self._tips_check(now)
-            keys = tips.pick(getattr(self, "_tips_facts", None) or {}, tips.dismissed())
-            party = {k for k, until in self._tip_party.items() if now < until}
-            if party:
-                keys = [k for k, *_ in tips.TIPS if k in party or k in keys]
+        keys = list(keys) if tips is not None else []
         strip = h.get("tips")
         if keys and strip is None:
             try:
@@ -2063,6 +2079,51 @@ class Notch:
 
     def _tip_hovered(self, key) -> None:
         self._tip_hover = key
+        if key:
+            self._setup_until = max(self._setup_until, time.monotonic() + 20.0)   # (over a song: it stays up)
+
+    def _setup_pill(self, show: bool, keys, left: float, top_y: float) -> None:
+        """Music has the Mint pane's place: a small "Set up · 2" pill in the header says there's something to set
+        up; a click brings the Mint pane and its chips over the player for a while."""
+        h = self.home
+        pill = h.get("setup_pill")
+        if show and pill is None:
+            act = MintNotchAct.alloc().initWithFn_(self._show_setup)
+            h["acts"].append(act)
+            pill = MintNotchButton.buttonWithTitle_target_action_("", act, "fire:")
+            pill.setBordered_(False)
+            pill.setWantsLayer_(True)
+            pill.layer().setCornerRadius_(10)
+            pill.layer().setBackgroundColor_(gfx.cg(gfx.accent(), 0.22))
+            pill.layer().setBorderWidth_(1.0)
+            pill.layer().setBorderColor_(gfx.cg(gfx.accent(), 0.6))
+            pill.setToolTip_("Things you can still set up")
+            pill.setHidden_(True)
+            self.box.addSubview_(pill)
+            h["setup_pill"] = pill
+        if pill is None:
+            return
+        if show:
+            words = f"Set up · {len(keys)}"
+            if str(pill.title()) != words:
+                pill.setAttributedTitle_(AppKit.NSAttributedString.alloc().initWithString_attributes_(words, {
+                    AppKit.NSFontAttributeName: AppKit.NSFont.systemFontOfSize_weight_(11, AppKit.NSFontWeightSemibold),
+                    AppKit.NSForegroundColorAttributeName: gfx.ns(gfx.light(gfx.accent()))}))
+            after = max([AppKit.NSMaxX(b.frame()) for b in h["tabs"].values() if not b.isHidden()] or [left])
+            w = pill.attributedTitle().size().width + 20
+            fresh = pill.isHidden()
+            pill.setFrame_(AppKit.NSMakeRect(after + 8, top_y - 10, w, 20))
+            self._top(pill, True)
+            if fresh and not kinetics.reduce_motion() and pill.layer() is not None:
+                kinetics.pop(pill.layer(), "bouncy", start=0.6, delay=0.25)
+        elif not pill.isHidden():
+            self._conceal(pill)
+
+    def _show_setup(self) -> None:
+        """The pill: the Mint pane and its chips come over the player (20 s, longer while you're on a chip)."""
+        self._setup_until = time.monotonic() + 20.0
+        self.st.keep(time.monotonic())
+        _sfx("tick")
 
     def _tip_words(self, now: float):
         """(title or None, words) for the Mint pane while the chips have something to say, else None."""

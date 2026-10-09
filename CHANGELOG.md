@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.16 (2026-10-09)
+
+- **"Stop the music" stops it, and a quit Spotify stays quit.** Play / pause by voice tells Spotify or Music
+  directly: pause only pauses, play only plays (it used to press Play/Pause - so "stop" could start a paused song,
+  and with Spotify quit the key made macOS open it again). With neither open, nothing is sent: "Nothing is playing".
+  It works without Accessibility too.
+- **The "Set up" chips show up more:** whenever the Mint pane is up and Mint isn't busy - also while your words or
+  its reply show (not only when it's fully idle). While a song has the notch, a small "Set up · 2" pill sits in
+  the header; click it and the chips come over the player for a while.
+- **Up to five Gemini keys:** Settings ▸ Models & agents lists each key with Change and Remove, then Add another key.
+  Google's per-minute limit is per key, so when the voice's key nears it, Mint's voice moves to the next key on the
+  same model (it used to switch to another model and forget the job); background work spreads over the other keys.
+- **Every saved key has a Remove button** (Gemini, TypeSafe, OpenAI and the agent providers), with a plain question
+  first. Removing a Gemini key moves the next one up.
+
 ## 0.6.15 (2026-10-09)
 
 - **Settings' Install button always answers:** the progress row shows the moment you press it; the page follows

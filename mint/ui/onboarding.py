@@ -1836,24 +1836,14 @@ class Onboarding:
 
     def _go(self, page: int) -> None:
         page = max(0, min(page, len(PAGES) - 1))
-        forward = page >= self.page
         self._leave()
         old = self.view
         if old is not None:
-            AppKit.NSAnimationContext.beginGrouping()
-            AppKit.NSAnimationContext.currentContext().setDuration_(0.22)
-            old.animator().setAlphaValue_(0.0)
-            AppKit.NSAnimationContext.endGrouping()
-            slide = Quartz.CABasicAnimation.animationWithKeyPath_("transform.translation.x")
-            slide.setToValue_(-40.0 if forward else 40.0)
-            slide.setDuration_(0.22)
-            slide.setFillMode_(Quartz.kCAFillModeForwards)
-            slide.setRemovedOnCompletion_(False)
-            old.setWantsLayer_(True)
-            old.layer().addAnimation_forKey_(slide, "leave")
-            orbs = [o for o in self.orbs if o[1].isDescendantOf_(old)]
-            self.orbs = [o for o in self.orbs if o not in orbs]
-            AppHelper.callLater(0.25, old.removeFromSuperview)
+            # The old page goes at once; the new one springs in piece by piece. (A crossfade showed both pages
+            # on top of each other: building a page with its glass cards holds the main thread, so the old
+            # page's fade and its delayed removal ran late - seconds late while Mint was busy.)
+            self.orbs = [o for o in self.orbs if not o[1].isDescendantOf_(old)]
+            old.removeFromSuperview()
         self.page = page
         self.fields = {}
         view = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))

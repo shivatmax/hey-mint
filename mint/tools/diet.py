@@ -292,7 +292,7 @@ LIVE: dict[str, str] = {
     "type_text": "Type text at the cursor in the focused field of any app.",
     "press_key": "Press a key, with modifiers.",
     "scroll": "Scroll the window under the pointer.",
-    "media_key": "Play/pause, next or previous track.",
+    "media_key": "Play, pause, next or previous track (Spotify / Music told directly).",
     "set_volume": "Set the Mac's volume.",
     "ui_act": "Click, type into or pick a control in an app's window, described in plain words; reports what "
               "changed. One control per call.",
@@ -330,7 +330,7 @@ LIVE_ARGS: dict[str, dict[str, str]] = {
     "plan_task": {"steps": "Short steps in order."},
     "step_done": {"step": "'2', or '3.1'.", "result": "What you checked and saw."},
     "set_volume": {"level": "0 to 100."},
-    "media_key": {"action": "playpause, next or previous."},
+    "media_key": {"action": "play, pause, next or previous (playpause only to toggle)."},
 }
 
 BUDGET = 6000              # chars one find_tools answer may use

@@ -532,7 +532,7 @@ def test_only_input_tokens_count_toward_the_limit(models, monkeypatch):
     """The quota is input tokens a minute: a turn's prompt_token_count, not its total (which adds the reply)."""
     m = _mint()
     seen = []
-    monkeypatch.setattr(live_models, "tokens", lambda model, n, now=None: seen.append(n) or False)
+    monkeypatch.setattr(live_models, "tokens", lambda model, n, now=None, **_: seen.append(n) or False)
     m._watch_context = lambda meta, steps=1: None
 
     class Meta:

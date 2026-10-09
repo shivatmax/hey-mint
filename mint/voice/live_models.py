@@ -155,16 +155,19 @@ def good(model: str) -> None:
             _save()
 
 
-def tokens(model: str, count: int, now: float | None = None) -> bool:
-    """A turn's input (prompt) tokens. True when the model is near its per-minute budget (it has been rested a minute)."""
+def tokens(model: str, count: int, now: float | None = None, key: str = "", rest_model: bool = True) -> bool:
+    """A turn's input (prompt) tokens. True when the model is near its per-minute budget. Google's budget is per API
+    key, so with `key` (gemini_keys env) it is counted per key; `rest_model`: also rest the model a minute (the
+    caller passes False when another key can carry on with the same model)."""
     now = time.monotonic() if now is None else now
-    turns = _turns.setdefault(model, deque())
+    turns = _turns.setdefault(f"{model}|{key}" if key else model, deque())
     turns.append((now, int(count or 0)))
     while turns and now - turns[0][0] > 60:
         turns.popleft()
     if sum(n for _, n in turns) <= TPM_SHARE * _tpm_limit():
         return False
-    rest(model)
+    if rest_model:
+        rest(model)
     turns.clear()
     return True
 
@@ -172,7 +175,8 @@ def tokens(model: str, count: int, now: float | None = None) -> bool:
 def used(model: str, now: float | None = None) -> int:
     """Tokens this model used in the last minute (as counted here)."""
     now = time.monotonic() if now is None else now
-    return sum(n for t, n in _turns.get(model, ()) if now - t <= 60)
+    return sum(n for name, turns in list(_turns.items()) if name == model or name.startswith(model + "|")
+               for t, n in turns if now - t <= 60)
 
 
 def _tpm_limit() -> int:
