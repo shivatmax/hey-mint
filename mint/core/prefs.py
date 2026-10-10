@@ -118,8 +118,9 @@ DEFAULTS: dict = {
     # would take it away from all of them. "talk" wakes Mint to listen without the
     # wake word. "dictate": hold it to dictate at the cursor (a key combo, or one
     # modifier on its own: right_option, right_command, right_control, right_shift,
-    # fn), tap it twice for hands-free; "dictate_toggle" starts/stops hands-free.
-    "shortcuts": {"toggle": "cmd+j", "close": "", "talk": "ctrl+option+space", "dictate": "right_option",
+    # fn), tap it twice for hands-free; "dictate_toggle" starts/stops hands-free. "talk_hold": hold it (fn+ctrl, or
+    # any key combo) and talk - no wake word - and let go: Mint works on what was said.
+    "shortcuts": {"toggle": "cmd+j", "close": "", "talk": "ctrl+option+space", "dictate": "fn", "talk_hold": "fn+ctrl",
                   "dictate_toggle": "", "clipboard": "ctrl+option+v",
                   "hide": "ctrl+option+h"},
     # Words dictation should spell exactly (names, jargon), comma-separated.

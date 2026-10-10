@@ -50,7 +50,7 @@ LOSES = {
     "input": "The dictation key and teaching {name} a task don't work.",
     "calendar": "{name} can't tell you what's next or add events.",
     "reminders": "{name} can't read or add your reminders.",
-    "files": "{name} can't read Safari bookmarks or past notifications.",
+    "files": "{name} can't search or open files in protected folders, Safari bookmarks or past notifications.",
     "automation": "{name} can't work inside Notes, Mail, Music and similar apps.",
 }
 # What it is for, in Settings' words.

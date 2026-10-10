@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.20 (2026-10-10)
+
+- **A request never ends in silence:** when the model ran a tool and then said nothing (seen: a file search found
+  nothing, the turn ended empty and Mint fell asleep 6 s later - "it just died"), Mint now waits a few quiet seconds
+  and asks it to answer or carry on, twice at most, then tells you plainly. Talking over Mint's reply no longer puts
+  it to sleep in the same second, and tool-call text the model sometimes says out loud (",name:find_files}") is cut
+  and turned into the real call.
+- **Finding files works again, and finds the right one:** Spotlight's answer is kept when it is slow (under load the
+  search came back empty); "the build folder in my Chrome extension" finds `chrome-plugin/build` - words from your
+  request and the path rank results, and a short walk of your folders backs up Spotlight. When macOS blocks a folder,
+  Mint asks for Files access and opens the right switch.
+- **Hold to talk:** hold <kbd>fn</kbd> <kbd>⌃</kbd>, talk, let go - no "Hey Mint" - and Mint works on what you said;
+  it works while Mint is paused (and pauses again after). Dictation is now <kbd>fn</kbd> held on its own by default;
+  fn, then ⌃, switches from dictation to talking without typing anything. Both are in Settings ▸ Shortcuts.
+- **No repeat jobs on a key switch:** moving to the next Gemini key right after an answer no longer redoes the job.
+- **Fewer wasted steps:** asking for the same tools twice now gets their arguments again, not "given earlier".
+- A crash while pasting into Settings (a stale window in the paste-key handler) is guarded against.
+
 ## 0.6.19 (2026-10-10)
 
 - **Claude Code isn't asked extra questions by Mint:** when you run Claude Code with "bypass permissions", Mint's

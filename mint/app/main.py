@@ -354,6 +354,8 @@ def main() -> int:
         return run
 
     presence.on("wake", in_session(lambda: mint.wake_up("menu bar")))
+    presence.on("talk_hold", in_session(lambda: mint.hold_to_talk(True)))
+    presence.on("talk_release", in_session(lambda: mint.hold_to_talk(False)))
     presence.on("grant", fastinput.request_accessibility)
 
     # The console (⌘J) is for typing. It does not open the microphone: in

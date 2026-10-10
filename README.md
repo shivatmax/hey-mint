@@ -64,7 +64,7 @@ Every change, release by release, is in the [changelog](CHANGELOG.md).
 
 Mint is a small orb with a face that lives in the corner of your screen - or, on a MacBook,
 right in the camera notch like the iPhone's Dynamic Island. Ask in your own words: say
-“Hey Mint”, press <kbd>⌃⌥Space</kbd>, or type (<kbd>⌘J</kbd>). It changes shape for what's
+“Hey Mint”, hold <kbd>fn</kbd> <kbd>⌃</kbd> and talk, or type (<kbd>⌘J</kbd>). It changes shape for what's
 going on: a meeting recorder, your day's schedule, a lesson, a video it's watching, an answer
 as a card - and every card has a × to close it.
 
@@ -81,7 +81,8 @@ as a card - and every card has a × to close it.
 | “watch this video: what's the aesthetic?”, “what did he say at 3:20?” | Understands a video (link, file or the one on screen) in seconds from its transcript and a few keyframes, with timestamps |
 | “every weekday at 9, brief me on my calendar and mail”, “when a PDF lands in Downloads, file it” | Automations: schedules, folder and app triggers, reminders before meetings |
 | *(on a call, press ● on the orb)* “what did we decide in the Acme call?” | Meeting notes with no bot: the orb turns into a recorder (mic and video switches), then a transcript, decisions and action items; “what's been said so far?” mid-call |
-| *hold Right ⌥ and talk* | Dictation, Wispr-Flow style: let go and clean text is typed where your cursor is (fillers dropped, corrections applied, Hindi or English) |
+| *hold fn ⌃ and talk* | Talk to Mint without the wake word: let go and it works on what you said |
+| *hold fn and talk* | Dictation, Wispr-Flow style: let go and clean text is typed where your cursor is (fillers dropped, corrections applied, Hindi or English) |
 | “let me know when this download finishes”, “tell me when the Claude session is done” | Trackers: downloads, Claude Code sessions, Terminal commands, uploads in any window, files; Mint speaks up the moment they finish |
 | “watch me do this once”, “show me how to export a PDF in Preview” | Learns a task from one demonstration; or guides you step by step, pointing at each control |
 | “good morning, brief me”, “turn on the living room lights”, “find the screenshot with the invoice number” | A spoken daily briefing, your Apple Shortcuts (Home scenes, Focus, music), screenshots found by what's in them |

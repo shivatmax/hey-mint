@@ -70,7 +70,7 @@ VOICES = ("Zephyr", "Aoede", "Kore", "Puck", "Charon", "Sulafat")
 # The permissions page's six (and how each is read and asked for) live in permissions.py, shared with Settings.
 
 SHORTCUTS = (
-    ("talk", "waveform", "Talk to Mint", "Start talking without the wake word.", False),
+    ("talk_hold", "waveform", "Talk to Mint", "Hold, talk, let go: Mint works on it. No wake word needed.", "chord"),
     ("dictate", "mic.fill", "Dictate anywhere", "Hold, talk, let go: clean text lands at your cursor. Tap twice for hands-free.", True),
     ("toggle", "bubble.left.and.bubble.right.fill", "Open the chat", "Type to me instead of talking.", False),
     ("clipboard", "doc.on.clipboard.fill", "Open the clipboard", "Everything you copied, and every screenshot.", False),
@@ -311,6 +311,8 @@ def _caps(value: str) -> list[str]:
         return []
     if value in hotkeys.MODIFIER_NAMES:
         return [hotkeys.MODIFIER_NAMES[value]]
+    if hotkeys.is_chord(value):
+        return hotkeys.display(value).split(" ")
     symbols = {"ctrl": "⌃", "control": "⌃", "option": "⌥", "alt": "⌥", "shift": "⇧", "cmd": "⌘", "command": "⌘"}
     keys = {"space": "Space", "return": "↩", "enter": "↩", "escape": "Esc", "tab": "⇥", "delete": "⌫",
             "left": "←", "right": "→", "up": "↑", "down": "↓"}
@@ -1564,7 +1566,7 @@ class Onboarding:
         value = prefs.get("shortcuts").get(key, "")
         caps = _caps(value)
         x = 0
-        if key == "dictate" and caps:
+        if key in ("dictate", "talk_hold") and caps:
             word = self._label(card.keys, "Hold", 0, 9, 40, size=13, weight=AppKit.NSFontWeightMedium, rgb=DIM)
             word.sizeToFit()
             x = word.frame().size.width + 10
@@ -1771,8 +1773,8 @@ class Onboarding:
         AppHelper.callLater(0.4, self._confetti)
         title = self._label(page, f"You're all set{', ' + you[0] if you else ''}.", 0, 262, W, size=44,
                             weight=AppKit.NSFontWeightBold, rounded=True, align=AppKit.NSTextAlignmentCenter)
-        talk = "".join(_caps(prefs.get("shortcuts").get("talk", "")))
-        sub = self._label(page, f"Say “Hey {me}”" + (f" or press {talk}" if talk else "") + " whenever you need me. "
+        talk = " ".join(_caps(prefs.get("shortcuts").get("talk_hold", "")))
+        sub = self._label(page, f"Say “Hey {me}”" + (f" or hold {talk} and talk" if talk else "") + " whenever you need me. "
                           "Try one of these:", (W - 700) / 2, 326, 700, size=16, rgb=DIM, lines=2,
                           align=AppKit.NSTextAlignmentCenter)
         items = [(host, 0.0, 0.6), title, sub]

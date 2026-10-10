@@ -9,6 +9,7 @@ Shortcuts are written "cmd+j", "ctrl+option+space", "cmd+shift+h". A shortcut ca
 report its release (hold-to-talk). A single modifier key held down on its own - "right_option",
 "right_command", "right_control", "right_shift", "fn" (Wispr-Flow style) - is watched by
 ModifierHold instead: hold it to act while held, or tap it twice to start and tap once more to stop.
+Two or more modifiers held together with no other key - "fn+ctrl" - are a chord (ModifierChord): hold to talk.
 """
 
 from __future__ import annotations
@@ -81,6 +82,9 @@ def display(shortcut: str) -> str:
     """'cmd+shift+j' -> '⇧⌘J', the way macOS menus write it; 'right_option' -> 'Right ⌥'."""
     if shortcut in MODIFIER_NAMES:
         return MODIFIER_NAMES[shortcut]
+    if is_chord(shortcut):
+        names = {CHORD_FLAGS[p]: _CHORD_SYMBOLS[p] for p in shortcut.lower().split("+")}
+        return " ".join(names[f] for f in sorted(names, key=_CHORD_ORDER.index))
     parts = [p.strip().lower() for p in shortcut.split("+") if p.strip()]
     if not parts:
         return ""
@@ -167,6 +171,96 @@ MODIFIER_NAMES = {"right_option": "Right ⌥", "right_command": "Right ⌘", "ri
                   "right_shift": "Right ⇧", "fn": "fn"}
 
 
+# Modifiers held together on their own (a chord): NSEvent's device-independent flags.
+CHORD_FLAGS = {"fn": 1 << 23, "ctrl": 1 << 18, "control": 1 << 18, "option": 1 << 19, "opt": 1 << 19,
+               "alt": 1 << 19, "cmd": 1 << 20, "command": 1 << 20, "shift": 1 << 17}
+_CHORD_SYMBOLS = {"fn": "fn", "ctrl": "⌃", "control": "⌃", "option": "⌥", "opt": "⌥", "alt": "⌥", "cmd": "⌘",
+                  "command": "⌘", "shift": "⇧"}
+_CHORD_ORDER = [1 << 23, 1 << 18, 1 << 19, 1 << 17, 1 << 20]
+_ALL_MODS = sum(set(CHORD_FLAGS.values()))
+
+
+def is_chord(shortcut: str) -> bool:
+    """'fn+ctrl' (two or more modifiers, no other key)."""
+    parts = [p.strip().lower() for p in (shortcut or "").split("+") if p.strip()]
+    return len(parts) >= 2 and all(p in CHORD_FLAGS for p in parts) and len({CHORD_FLAGS[p] for p in parts}) >= 2
+
+
+def chord_mask(shortcut: str) -> int:
+    mask = 0
+    for part in shortcut.lower().split("+"):
+        mask |= CHORD_FLAGS[part.strip()]
+    return mask
+
+
+class ModifierChord:
+    """Modifiers held together and nothing else (fn+⌃): on_hold once they are all down for a moment, on_release
+    as soon as one is let go. A key typed before the hold counts as a shortcut (⌃fn-arrow...), not ours."""
+
+    HOLD = 0.15
+
+    def __init__(self, shortcut: str, on_hold, on_release) -> None:
+        self.mask = chord_mask(shortcut)
+        self.on_hold, self.on_release = on_hold, on_release
+        self.down_at = 0.0
+        self.holding = False
+        self.spoiled = False
+        self.monitors = []
+
+    def start(self) -> None:
+        import AppKit
+        self.monitors = [
+            AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(AppKit.NSEventMaskFlagsChanged, self.flags),
+            AppKit.NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(AppKit.NSEventMaskKeyDown, self.key),
+            AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(AppKit.NSEventMaskFlagsChanged,
+                                                                         self._local_flags),
+            AppKit.NSEvent.addLocalMonitorForEventsMatchingMask_handler_(AppKit.NSEventMaskKeyDown, self._local_key)]
+
+    def stop(self) -> None:
+        import AppKit
+        for monitor in self.monitors:
+            if monitor is not None:
+                AppKit.NSEvent.removeMonitor_(monitor)
+        self.monitors = []
+
+    def _local_flags(self, event):
+        self.flags(event)
+        return event
+
+    def _local_key(self, event):
+        self.key(event)
+        return event
+
+    def key(self, event) -> None:
+        if self.down_at and not self.holding:
+            self.spoiled = True
+
+    def flags(self, event, later=None) -> None:
+        """One FlagsChanged event. `later(seconds, fn)` schedules the hold check (AppHelper.callLater)."""
+        import time as _time
+        held = int(event.modifierFlags()) & _ALL_MODS
+        now = _time.monotonic()
+        if held == self.mask:
+            if not self.down_at:
+                self.down_at, self.spoiled = now, False
+                stamp = now
+
+                def check():
+                    if self.down_at == stamp and not self.spoiled and not self.holding:
+                        self.holding = True
+                        ModifierHold._call(self.on_hold)
+                if later is None:
+                    from PyObjCTools import AppHelper
+                    later = AppHelper.callLater
+                later(self.HOLD, check)
+            return
+        if self.down_at:
+            self.down_at = 0.0
+            if self.holding:
+                self.holding = False
+                ModifierHold._call(self.on_release)
+
+
 class ModifierHold:
     """One modifier key on its own: hold it (on_hold, then on_release when let go), or tap it twice
     quickly (on_double_tap). Typing with it (right-option accents) does nothing: any other key while it
@@ -175,9 +269,10 @@ class ModifierHold:
     HOLD = 0.28           # held this long with nothing else pressed: it is a hold
     DOUBLE = 0.42         # two taps within this: a double tap
 
-    def __init__(self, name: str, on_hold, on_release, on_double_tap=None) -> None:
+    def __init__(self, name: str, on_hold, on_release, on_double_tap=None, on_cancel=None) -> None:
         self.code, self.flag = MODIFIER_KEYS[name]
         self.on_hold, self.on_release, self.on_double_tap = on_hold, on_release, on_double_tap
+        self.on_cancel = on_cancel          # another modifier joined a hold (fn, then ⌃ for hold-to-talk)
         self.down_at = 0.0
         self.last_tap = 0.0
         self.holding = False
@@ -220,11 +315,16 @@ class ModifierHold:
         if int(event.keyCode()) != self.code:
             if self.down_at:
                 self.spoiled = True          # another modifier joined: a shortcut, not ours
+                if self.holding:
+                    self.holding = False     # ...after the hold began: undo it (fn held, then ⌃ = talk to Mint)
+                    self._call(self.on_cancel)
             return
-        down = bool(int(event.modifierFlags()) & self.flag)
+        flags = int(event.modifierFlags())
+        down = bool(flags & self.flag)
         now = _time.monotonic()
         if down and not self.down_at:
-            self.down_at, self.spoiled = now, False
+            # Pressed while another modifier is down (⌃ then fn): a chord, not this key alone.
+            self.down_at, self.spoiled = now, bool(flags & _ALL_MODS & ~self.flag)
             stamp = now
 
             def check():

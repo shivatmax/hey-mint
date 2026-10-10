@@ -554,6 +554,34 @@ class Mint:
         self._print(f"[awake: {reason}]")
         self._state("awake")
 
+    async def hold_to_talk(self, down: bool) -> None:
+        """The hold-to-talk keys (fn+⌃ by default, ui._register_talk_hold): held, Mint listens - no wake word, even
+        while paused or speaking; let go, the words are over and it works on them. Paused before, it pauses again
+        once it is done (go_to_sleep)."""
+        if down:
+            self._ptt = True
+            if self.paused:
+                self._ptt_repause = True
+                self.set_paused(False)
+            if self.audio.playing or not self.audio_in.empty():
+                self._flush_playback()          # talking over Mint: the user has the floor
+            if self.asleep:
+                await self.wake_up("shortcut hold")
+            else:
+                self._next_kind = "asked"
+            self._window.handling()             # no clock while the keys are down
+            if self._gate is not None:
+                self._gate.force_open()         # their own keys: no voice check
+            self._print("[listening while the keys are held]")
+            self._state("awake")
+            return
+        if not getattr(self, "_ptt", False):
+            return
+        self._ptt = False
+        self._window.woke(time.monotonic())      # time for the words' verdict; a request keeps it open
+        self._print("[keys let go: working on it]")
+        await self._close_user_audio()           # the words are over now - no waiting for a pause
+
     def _converse(self, on: bool) -> None:
         """Echo cancellation (voice processing) only while talking with the user: asleep it ducked every other
         app's sound - a video, music - and changed what the mic hears (7 Oct). audio_vp.VoiceAudio.converse."""
@@ -566,6 +594,10 @@ class Mint:
 
     def go_to_sleep(self, reason: str = "quiet") -> None:
         if self.asleep or not self.hands_free or self.meet is not None:
+            return
+        if getattr(self, "_ptt_repause", False):
+            self._ptt_repause = False           # woken by the hold-to-talk keys while paused: paused again
+            self.set_paused(True)
             return
         self.asleep = True
         self._last_active = time.monotonic()
@@ -886,6 +918,7 @@ class Mint:
             if self.audio.playing and not self.half_duplex:
                 self._flush_playback()
                 self._print(f"[you interrupted - listening] (voice {self._gate.last_score:.2f})")
+                self._window.hold(time.monotonic())
                 self._state("awake")
             if event.endswith("end"):
                 self._voice_sent(time.monotonic())
@@ -1005,7 +1038,7 @@ class Mint:
                     return
                 nxt = gemini_keys.live_key()[0]
                 self._print(f"[Gemini {gemini_keys.label(_live_env)}: {why} - the voice moves to {gemini_keys.label(nxt)}]")
-                if self._working_on_request():
+                if self._job_open():
                     self._carry_note = _carry_on_note(self)
                 self._resume_handle = None          # a resumption handle may not carry across keys
                 self._restarting = True
@@ -1030,7 +1063,7 @@ class Mint:
                 return
             self._print(f"[{live_models.label(current)}: {why} - switching to {live_models.label(target)}]")
             log.info("switching voice model %s -> %s (%s)", current, target, why)
-            if self._working_on_request():
+            if self._job_open():
                 # Mid-job (a per-minute token limit can strike between two clicks): the new session picks the job up
                 # where it was, instead of waiting to be asked again.
                 self._carry_note = _carry_on_note(self)
@@ -1265,6 +1298,7 @@ class Mint:
             self._barge_frames = 0
             self._flush_playback()
             self._print("[you interrupted - listening]")
+            self._window.hold(time.monotonic())
             self._state("awake")
 
     def _on_play(self, pcm: bytes) -> None:
@@ -1792,8 +1826,12 @@ class Mint:
                     and not self._hush and not self._mute):
                 if self._verdict_pending():
                     self._held_words.append(server.output_transcription.text)
+                elif self._leak_check(server.output_transcription.text):
+                    pass                         # tool-call text, not words: not shown, not played
                 else:
                     self._said += server.output_transcription.text
+                    if server.output_transcription.text.strip():
+                        self._tools_unspoken = 0
                     self.ui.assistant_said(server.output_transcription.text)
                     if getattr(self, "_chat_reply", None) is not None:
                         self._chat_reply.append(server.output_transcription.text)
@@ -1819,6 +1857,8 @@ class Mint:
                     if self._heard.strip() and not self._filler_hit:
                         self._print(f"(not for me: {' '.join(self._heard.split())})")
                 else:
+                    if self._heard.strip() or getattr(self, "_typed_request", ""):
+                        self._rescues = 0              # a new request: it gets its own rescues
                     if self._heard.strip():
                         self._print(f"you:    {' '.join(self._heard.split())}")
                         memory.add("user", self._heard)
@@ -1829,12 +1869,18 @@ class Mint:
                         if teach.recording():
                             teach.add_narration(self._heard)      # what the user says while showing Mint
                     if self._said.strip():
+                        self._answered_at = time.monotonic()
                         self._print(f"mint: {' '.join(self._said.split())}")
                         from mint.app import telegram
                         telegram.on_event("reply", {"text": " ".join(self._said.split())})
                         memory.add("mint", self._said)
                         self._last_said = self._said
+                leaked, self._leaked = getattr(self, "_leaked", False), False
                 finished_said = "" if self._suppress_turn else self._said
+                # Tools ran and the model ended its turn without a word for them: the user is still waiting.
+                # Seen 10 Oct 17:43: find_files, then an empty turn, and Mint fell asleep 6 s later - "it died".
+                unanswered = (not self._suppress_turn and not finished_said.strip()
+                              and (getattr(self, "_tools_unspoken", 0) > 0 or leaked))
                 request = " ".join((self._heard or getattr(self, "_typed_request", "") or "").split())
                 self._typed_request = ""
                 if (not self._suppress_turn and request and self.loop is not None
@@ -1844,7 +1890,10 @@ class Mint:
                     self.loop.create_task(self._promise_watch(request, time.monotonic(), self._stop_epoch))
                 self._check_empty_done(finished_said)
                 self._check_refused_job(finished_said)
-                if (not self._suppress_turn or self._verdict == "act") and \
+                if unanswered and self.loop is not None:
+                    self._window.handling()          # not done: no follow-up clock, the rescue watch decides
+                    self.loop.create_task(self._silence_watch(self._stop_epoch, time.monotonic(), 5.0, leaked))
+                elif (not self._suppress_turn or self._verdict == "act") and \
                         not (self.audio.playing or not self.audio_in.empty()):
                     # Mint is done (or its answer was only a "hmm"): the follow-up window starts.
                     # Talk that was not for Mint opens nothing.
@@ -1869,6 +1918,8 @@ class Mint:
                                                                      "don't retry: just say 'Stopped.' and wait."))
         elif response.tool_call is not None:
             self._tool_call_at = time.monotonic()
+            if any(f.name not in self._QUIET_TOOLS for f in response.tool_call.function_calls):
+                self._tools_unspoken = getattr(self, "_tools_unspoken", 0) + 1
             self._mute = False               # the model moved on to work: its words are about that
             # In the background, so this loop keeps reading the server while a
             # tool runs: the user's words (and "stop") are heard mid-task.
@@ -2145,6 +2196,80 @@ class Mint:
             await asyncio.sleep(0.5)
         await self.new_session("asked")
 
+    # Tools that need no words of their own (the orb's faces, plan bookkeeping): no rescue for them.
+    _QUIET_TOOLS = {"express", "move_orb", "clear_marks", "step_done", "react"}
+    MAX_RESCUES = 2
+    _LEAK = re.compile(r"""(\bname\s*:\s*[a-z_]{3,}\s*\}|["']name["']\s*:\s*["']?[a-z_]|\buse_tool\s*\(|"""
+                       r"""\bdefault_api\.|\btool_code\b|\bfunction_?call\b|\{\s*["']?(args|arguments)["']?\s*:)""", re.I)
+
+    def _leak_check(self, chunk: str) -> bool:
+        """The model 'said' a tool call (seen 10 Oct 17:43:51: Mint spoke ",name:find_files}" and did nothing).
+        From the first sign of it the rest of the turn is cut: not played, not shown, not remembered; the turn's
+        end asks for the real call (_silence_watch)."""
+        if getattr(self, "_leaked", False):
+            return True
+        if not self._LEAK.search(self._said[-80:] + chunk):
+            return False
+        self._leaked = True
+        self._flush_playback()
+        self._said = ""
+        self._print(f"[the model wrote a tool call as words ({chunk.strip()[:60]}): cut]")
+        return True
+
+    async def _silence_watch(self, epoch: int, since: float, wait: float, leaked: bool = False) -> None:
+        """The model ran tools for the user's request and then went quiet - no words, no next call: ask it to
+        answer (twice at most per request), so a request never just ends in silence. Waits `wait` seconds of
+        nothing from the model, the user or a tool first; anything from them in that time means it is going on."""
+        from mint.app import control
+        from mint.app import live
+        end = since + wait
+        while time.monotonic() < end + 20:
+            # Quiet counts from the last tool's end too: the model needs a few seconds after a big result (18:26:23,
+            # a rescue 3 s after find_tools crossed the model's own next call).
+            end = max(since, getattr(self, "_tools_at", 0.0) or 0.0) + wait
+            await asyncio.sleep(0.25)
+            if epoch != self._stop_epoch or control.stopped() or self.session is None:
+                return
+            if max(getattr(self, "_model_active_at", 0.0), getattr(self, "_nudged_at", 0.0)) > since + 0.05 or \
+                    self._heard.strip() or self._busy or \
+                    (self._tool_task is not None and not self._tool_task.done()):
+                return
+            if self.audio.playing or not self.audio_in.empty():
+                continue
+            if time.monotonic() >= end:
+                break
+        else:
+            return
+        if not leaked and getattr(self, "_tools_unspoken", 0) <= 0:
+            return
+        request = " ".join((live.request() or "").split())[:300]
+        rescues = getattr(self, "_rescues", 0)
+        if rescues >= self.MAX_RESCUES:
+            self._print("[the model stayed quiet after its tools twice: telling the user]")
+            self._tools_unspoken = 0
+            self.ui.assistant_said("I lost track of that one - ask me again and I'll take another run at it.")
+            self._window.finished(time.monotonic())
+            return
+        self._rescues = rescues + 1
+        self._print("[the model went quiet after its tools: asking it to answer]"
+                    if not leaked else "[asking the model to make the call it wrote as words]")
+        note = ("(Mint note - not the user: your last reply came out as tool-call text, which did nothing and the "
+                "user didn't hear. Make the real tool call now; don't mention this.)" if leaked else
+                "(Mint note - not the user: you ran tools for the user's request and then said nothing, so they are "
+                f"still waiting. The request: \"{request}\". Answer them now in one or two short sentences from the "
+                "results you got: what you found or did. If it isn't finished, carry on with the next step. If "
+                "something failed or found nothing, say so and try another way (another query, folder or tool) - "
+                "never go quiet.)")
+        self._nudge_turn = True
+        self._nudged_at = time.monotonic()
+        self._turn_open = True
+        self._window.handling()
+        try:
+            await self.session.send_realtime_input(text=note)
+        except Exception:
+            log.debug("rescue note not sent", exc_info=True)
+            self._turn_open = False
+
     def _tool_task_done(self, task: asyncio.Task) -> None:
         """A background batch must never die quietly: log what went wrong."""
         if task.cancelled():
@@ -2200,6 +2325,7 @@ class Mint:
             return
         self._print(f"[autopilot: carrying on - {step or 'the rest of the request'}]")
         self._nudge_turn = True
+        self._nudged_at = time.monotonic()
         self._turn_open = True
         self._window.handling()                # still working on the user's request: keep listening
         try:
@@ -2542,6 +2668,23 @@ class Mint:
         self._decide(listening.judge(kind, option, probability, self._last_said, text, working),
                      f"{option or 'none'} {probability:.2f}{' working' if working else ''}", took, text)
 
+    def _job_open(self) -> bool:
+        """Mid-job, for a model or key switch: working on the request and not already answered since the last tool
+        (10 Oct 18:26: the answer was given, then a key switch "carried on" and did the whole search again)."""
+        if not self._working_on_request():
+            return False
+        tool_task = getattr(self, "_tool_task", None)
+        if getattr(self, "_busy", False) or (tool_task is not None and not tool_task.done()):
+            return True
+        try:
+            from mint.app import tasks
+            task = getattr(self, "task", None)
+            if task and tasks.remaining(task):
+                return True
+        except Exception:
+            pass
+        return getattr(self, "_answered_at", 0.0) <= (getattr(self, "_tools_at", 0.0) or 0.0)
+
     def _working_on_request(self) -> bool:
         """Mint is in the middle of what the user asked: a plan with steps left, or a tool in the last 45 s."""
         tool_task = getattr(self, "_tool_task", None)
@@ -2595,6 +2738,8 @@ class Mint:
                 return
             try:
                 await self._run_batch(tool_call)
+                if self.loop is not None and (epoch is None or epoch == self._stop_epoch):
+                    self.loop.create_task(self._silence_watch(self._stop_epoch, time.monotonic(), 8.0))
             except asyncio.CancelledError:
                 raise
             except Exception as error:

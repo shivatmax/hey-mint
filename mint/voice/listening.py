@@ -78,6 +78,11 @@ class Window:
         """A request for Mint is being answered: listen until it is done."""
         self.until = math.inf
 
+    def hold(self, now: float) -> None:
+        """The user talks over Mint: at least a full follow-up from now (seen 10 Oct 17:43:37 - talking over the
+        reply put Mint to sleep in the same second, the window having started before its tool ran)."""
+        self.until = max(self.until, now + max(self.follow_up, END_GAP * 3))
+
     def finished(self, now: float) -> None:
         """Mint is done (spoke its reply, finished its work): the follow-up window starts now."""
         self.until = now + self.follow_up

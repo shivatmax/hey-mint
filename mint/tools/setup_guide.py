@@ -297,9 +297,11 @@ FEATURES: list[Feature] = [
             "shortcuts", "", "Hold the dictate key, talk and let go; you can change the key here.",
             "Clean, punctuated text wherever your cursor is.", "allow Input Monitoring", _dictation),
     Feature("keyboard_shortcuts", "Keyboard shortcuts", ("keyboard shortcut", "keyboard shortcuts", "hotkey",
-                                                         "hotkeys", "talk key", "shortcut key", "key combo"),
+                                                         "hotkeys", "talk key", "shortcut key", "key combo",
+                                                         "hold to talk", "push to talk", "without the wake word"),
             "shortcuts", "", "Click a shortcut, then press the keys you want.",
-            "Keys for the chat, talking, dictation and the clipboard, in any app.", "",
+            "Keys for the chat, talking, dictation and the clipboard, in any app. Hold fn and ⌃ and talk - no wake "
+            "word - then let go and {name} works on it; hold fn alone to dictate at the cursor.", "",
             _always("Set (you can change them)")),
     Feature("apps", "Apps and services", ("connectors", "apps and services", "integrations", "connected apps",
                                           "my apps"),

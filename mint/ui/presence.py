@@ -203,6 +203,7 @@ class Presence:
         if keys.get("talk") and self._hotkeys.register(keys["talk"], lambda: self.fire("wake")):
             print(f"  [shortcut: {hotkeys.display(keys['talk'])} - talk to {prefs.name()} without the wake word]",
                   flush=True)
+        self._register_talk_hold(keys)
         if keys.get("clipboard"):
             from mint.ui import clipboard_window
             if self._hotkeys.register(keys["clipboard"], clipboard_window.window.toggle):
@@ -210,6 +211,22 @@ class Presence:
         if keys.get("hide") and self.hud is not None and self._hotkeys.register(keys["hide"], self.hud.toggle_hidden):
             print(f"  [shortcut: {hotkeys.display(keys['hide'])} hides or shows {prefs.name()}]", flush=True)
         self._register_dictation(keys)
+
+    def _register_talk_hold(self, keys: dict) -> None:
+        """Hold to talk: listen while held (no wake word), act when let go. fn+⌃ by default (a chord of modifiers),
+        or any key combo."""
+        if getattr(self, "_talk_chord", None) is not None:
+            self._talk_chord.stop()
+            self._talk_chord = None
+        key = str(keys.get("talk_hold") or "")
+        press, release = (lambda: self.fire("talk_hold")), (lambda: self.fire("talk_release"))
+        if hotkeys.is_chord(key):
+            self._talk_chord = hotkeys.ModifierChord(key, press, release)
+            self._talk_chord.start()
+        elif not (key and self._hotkeys.register(key, press, on_release=release)):
+            return
+        print(f"  [shortcut: hold {hotkeys.display(key)} and talk to {prefs.name()} - let go and it works on it]",
+              flush=True)
 
     def _register_dictation(self, keys: dict) -> None:
         """Dictation (dictation.py): hold the key to dictate at the cursor, tap it twice for hands-free."""
@@ -219,7 +236,8 @@ class Presence:
             self._dictation_hold = None
         key = str(keys.get("dictate") or "")
         if key in hotkeys.MODIFIER_KEYS:
-            self._dictation_hold = hotkeys.ModifierHold(key, dictation.start, dictation.finish, dictation.toggle)
+            self._dictation_hold = hotkeys.ModifierHold(key, dictation.start, dictation.finish, dictation.toggle,
+                                                        on_cancel=dictation.cancel)
             self._dictation_hold.start()
             print(f"  [shortcut: hold {hotkeys.display(key)} to dictate, tap it twice for hands-free]", flush=True)
         elif key and self._hotkeys.register(key, dictation.start, on_release=dictation.finish):

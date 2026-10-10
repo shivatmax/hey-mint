@@ -24,7 +24,8 @@ NEEDS_ACCESSIBILITY = {"ui_act", "ui_elements", "click_at", "click_text", "drag"
 # What a tool says when it ran into a missing permission anyway (checked inside the tools).
 _SAID = {"accessibility": ("lacks Accessibility permission", "without Accessibility permission"),
          "screen": ("lacks Screen Recording permission", "does not have Screen Recording permission",
-                    "Screen Recording isn't working")}
+                    "Screen Recording isn't working"),
+         "files": ("Mint lacks Files access",)}
 WATCH_FOR = 180.0           # how long Mint waits for the switch before it stops watching
 AGAIN_AFTER = 20.0          # a second tool in the same breath doesn't open System Settings twice
 
@@ -100,6 +101,8 @@ def request(kind: str, tool: str = "", resume=None) -> str:
         shown = ("macOS's box asking for it is on screen now (it may say 'would like to control this computer'; "
                  "the button is Open System Settings)" if kind == "accessibility" else
                  f"{where} is open now (macOS may also show its own box)" if kind == "screen" else
+                 f"{where} is open now (macOS has no box for this one: the user switches {name} on in that list, "
+                 "or adds it with +)" if kind == "files" else
                  f"macOS's box asking for it is on screen now, or {where} is open")
         return (f"NEEDS PERMISSION: nothing was done - {name} needs {title} for this ({loses}). {shown}. Tell the user "
                 f"in one short sentence to switch on {name} there; you carry on by yourself as soon as it is on - "

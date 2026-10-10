@@ -29,7 +29,10 @@ def handle(event):
         key = str(event.charactersIgnoringModifiers() or "").lower()
         if key not in _KEYS and key != "z":
             return event
-        window = event.window() or AppKit.NSApplication.sharedApplication().keyWindow()
+        # The window by number among live windows, not event.window(): 10 Oct 17:23:58 Mint crashed (SIGSEGV in a
+        # local event monitor) while a bot token was pasted into Settings - a stale window pointer is the suspect.
+        app = AppKit.NSApplication.sharedApplication()
+        window = app.windowWithWindowNumber_(int(event.windowNumber())) or app.keyWindow()
         target = window.firstResponder() if window is not None else None
         if not isinstance(target, AppKit.NSTextView):
             return event

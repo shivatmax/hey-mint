@@ -1537,7 +1537,8 @@ class SettingsWindow:
     def _page_shortcuts(self, page, facts: dict) -> None:
         name = prefs.name()
         page.section("Keyboard shortcuts")
-        rows = (("toggle", "Open or close the chat", False), ("talk", f"Talk to {name} (no wake word)", False),
+        rows = (("toggle", "Open or close the chat", False), ("talk_hold", f"Hold to talk to {name}", "chord"),
+                ("talk", f"Talk to {name} (no wake word)", False),
                 ("dictate", "Dictate at the cursor (hold)", True), ("dictate_toggle", "Dictate hands-free", False),
                 ("clipboard", "Open the clipboard", False), ("hide", f"Hide or show {name}", False))
         for key, title, modifier_ok in rows:
@@ -2928,7 +2929,8 @@ def record_keys(modifier_ok: bool, prompt, done) -> None:
         AppKit.NSEvent.removeMonitor_(_recorder[0])
     prompt("Press the keys…")
     names = {code: name for name, code in fastinput.KEYS.items()}
-    pending = {"modifier": None}
+    pending = {"modifier": None, "chord": 0}
+    chord_names = (("fn", 1 << 23), ("ctrl", 1 << 18), ("option", 1 << 19), ("shift", 1 << 17), ("cmd", 1 << 20))
     sides = {61: "right_option", 54: "right_command", 62: "right_control", 60: "right_shift", 63: "fn"}
 
     def finish(value):
@@ -2954,6 +2956,20 @@ def record_keys(modifier_ok: bool, prompt, done) -> None:
                 prompt("Add ⌘, ⌥, ⌃ or ⇧…")
             pending["modifier"] = None
             return None
+        if kind == AppKit.NSEventTypeFlagsChanged and modifier_ok == "chord":
+            # Hold to talk: modifiers held together and let go ("fn+ctrl").
+            held = sum(bit for _, bit in chord_names if flags & bit)
+            if held and bin(held).count("1") >= bin(pending["chord"]).count("1"):
+                pending["chord"] = held
+                prompt(" ".join(n for n, bit in chord_names if held & bit).replace("ctrl", "⌃").replace(
+                    "option", "⌥").replace("shift", "⇧").replace("cmd", "⌘") + "…")
+            elif not held and pending["chord"]:
+                chosen, pending["chord"] = pending["chord"], 0
+                if bin(chosen).count("1") >= 2:
+                    finish("+".join(n for n, bit in chord_names if chosen & bit))
+                else:
+                    prompt("Hold two together, like fn and ⌃…")
+            return event
         if kind == AppKit.NSEventTypeFlagsChanged and modifier_ok:
             code = int(event.keyCode())
             if code in sides:

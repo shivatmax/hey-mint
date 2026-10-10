@@ -716,7 +716,7 @@ PACK_BUDGET = 6500
 _shown: set[str] = set()           # tools whose arguments the model has been given in this session
 
 
-def pack(groups: list[str], about: str = "", budget: int = PACK_BUDGET) -> str:
+def pack(groups: list[str], about: str = "", budget: int = PACK_BUDGET, again: bool = False) -> str:
     """The tools and how-to of `groups` for one request, within `budget` characters: each group's how-to (once
     a session), then its tools - the ones `about` names first - with their arguments (once a session; later just
     named). What doesn't fit is named, for find_tools."""
@@ -754,6 +754,14 @@ def pack(groups: list[str], about: str = "", budget: int = PACK_BUDGET) -> str:
             spent += len(entry)
             _shown.add(name)
         used += spent
+    if known and again:
+        # Asked for again (find_tools): the model has lost them - seen 10 Oct, five find_tools "find files" in a row,
+        # each answered only "(Given earlier: find_files, ...)". The best few again, arguments only.
+        best = sorted(known, key=lambda n: -len(wanted & set(_words(f"{n} {_all()[n].description or ''}"))))[:3]
+        for name in best:
+            out.append(f"\n- {name} args: {_schema(_all()[name])}")
+        known = [n for n in known if n not in best]
+        out.append("\nYou have what you need: call use_tool now. Asking find_tools again gives nothing new.")
     if known:
         out.append(f"\n(Given earlier: {', '.join(known)}.)")
     if left_out:
@@ -777,7 +785,7 @@ def find_for_request(query: str, request: str | None = None) -> str:
             groups.append(family)
     if not groups:
         return find(query)
-    answer = pack(groups[:4], f"{query} {request}")
+    answer = pack(groups[:4], f"{query} {request}", again=True)
     if answer and request:
         _kits.add(_request_key(request))
     return answer or find(query)

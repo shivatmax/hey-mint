@@ -283,6 +283,8 @@ def looping(name: str, args: dict) -> str:
 
 
 def _fingerprint(name: str, args: dict) -> str:
+    if not isinstance(args, dict):
+        args = {"value": args}
     clean = {k: (" ".join(v.lower().split()) if isinstance(v, str) else v) for k, v in (args or {}).items()}
     return hashlib.sha1(json.dumps({name: clean}, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
@@ -1263,11 +1265,18 @@ def find_files(args: dict) -> str:
     other = _other_format(query, folder) if not any(p.name.lower() == needle for p in found) else ""
     if other:
         return other
+    refused = getattr(_search_paths, "refused", [])
+    if not found and refused:
+        return (f"Nothing found for '{query}' - and Mint lacks Files access: macOS refused to let it look in "
+                f"{', '.join(refused)}. Ask the user to allow Hey Mint under Files & Folders (or Full Disk Access).")
     if not found:
         return f"Nothing found for '{query}'" + (f" in {_short(folder)}" if folder else "") + \
-            ". Try a shorter part of the name, or another folder."
+            (". Try a shorter part of the name, a word from the folder it is in ('chrome build'), or folder=" 
+             "a place to look in. Don't stop here: search again another way, or list the likely folder.")
     _remember(found, query, f"{len(found)} {'file' if len(found) == 1 else 'files'} for “{query}”")
-    return f"{len(found)} found for '{query}' (name matches first, newest first):\n" + _listing(found, limit)
+    many = (f"\n({len(found) - limit} more. If none of these is it, add a word from the path the user mentioned - "
+            f"e.g. '{query} chrome' - or pass folder=.)" if len(found) > limit else "")
+    return f"{len(found)} found for '{query}' (exact names first, then newest):\n" + _listing(found, limit) + many
 
 
 def _others(entries: list[Path]) -> str:
@@ -1324,31 +1333,94 @@ def _find_filtered(args: dict, query: str, kind: str, limit: int, folder: Path |
             + _listing(found, limit) + more)
 
 
-def _search_paths(query: str, folder: Path | None, kind: str, limit: int, content: bool = True) -> list[Path]:
-    """Spotlight (then a short walk) for `query` by name and, with content, inside files; best first."""
-    scope = str(folder or HOME)
-    found: list[Path] = []
+def _mdfind(argv: list[str], timeout: float = 8.0, cap: int = 4000) -> list[str]:
+    """Spotlight's answer, at most `cap` lines. On a timeout what came back so far is kept (10 Oct 17:41: under
+    load the search for "build" came back empty - 75,000 content hits take ~7 s - and Mint said nothing exists)."""
+    started = time.monotonic()
     try:
-        names = subprocess.run(["mdfind", "-onlyin", scope, "-name", query], capture_output=True, text=True,
-                               timeout=8, check=False).stdout.splitlines()
-        found = [Path(n) for n in names if n.strip()]
-        if content and len(found) < limit:
-            inside = subprocess.run(["mdfind", "-onlyin", scope, query], capture_output=True, text=True,
-                                    timeout=8, check=False).stdout.splitlines()
-            known = set(map(str, found))
-            found += [Path(n) for n in inside if n.strip() and n not in known]
-    except subprocess.TimeoutExpired:
-        pass
-    if not found and folder is not None:
-        # Spotlight may not index this folder: walk it, briefly.
-        deadline, needle = time.monotonic() + 3, query.lower()
-        for root, dirs, files in os.walk(folder):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"node_modules", ".git", ".venv"}]
-            for name in dirs + files:
-                if needle in name.lower():
-                    found.append(Path(root) / name)
-            if time.monotonic() > deadline or len(found) > limit * 3:
-                break
+        out = subprocess.run(["mdfind", *argv], capture_output=True, text=True, timeout=timeout, check=False).stdout
+    except subprocess.TimeoutExpired as late:
+        out = late.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "ignore")
+        log.info("mdfind %s: timed out after %.1fs, %d lines kept", argv[-1][:40], time.monotonic() - started,
+                 out.count("\n"))
+    except OSError:
+        log.info("mdfind unavailable", exc_info=True)
+        return []
+    return [line for line in out.splitlines()[:cap] if line.strip()]
+
+
+# Where a walk looks when Spotlight has nothing: the user's own places, shallow first.
+_WALK_SKIP = {"node_modules", ".git", ".venv", "venv", "__pycache__", "Library", "site-packages", "dist", ".next",
+              "Pods", "DerivedData", ".cache", "target"}
+
+
+def _walk_for(words: list[str], roots: list[Path], seconds: float, limit: int) -> tuple[list[Path], list[str]]:
+    """Names holding one of `words` in a path holding all of them, breadth-first under `roots`; and the roots macOS
+    refused (Files & Folders / Full Disk Access)."""
+    deadline = time.monotonic() + seconds
+    found: list[Path] = []
+    refused: list[str] = []
+    queue = list(roots)
+    while queue and time.monotonic() < deadline and len(found) < limit:
+        folder = queue.pop(0)
+        try:
+            entries = list(os.scandir(folder))
+        except PermissionError:
+            if folder in roots:
+                refused.append(_short(folder))
+            continue
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            path = Path(entry.path)
+            name = _plain(entry.name)
+            if any(w in name for w in words) and all(w in _plain(str(path)) for w in words):
+                found.append(path)
+            try:
+                if entry.is_dir(follow_symlinks=False) and entry.name not in _WALK_SKIP and not entry.name.endswith(".app"):
+                    queue.append(path)
+            except OSError:
+                continue
+    return found, refused
+
+
+def _plain(text: str) -> str:
+    """'Chrome-Plugin_v2' -> 'chrome plugin v2': words match across - and _."""
+    return re.sub(r"[-_.]+", " ", text.lower())
+
+
+def _search_paths(query: str, folder: Path | None, kind: str, limit: int, content: bool = True) -> list[Path]:
+    """Spotlight (then a walk) for `query` by name and, with content, inside files; best first. Several words that
+    aren't one name ("chrome build") mean: a name with one of them, in a path holding the others."""
+    scope = str(folder or HOME)
+    found = [Path(n) for n in _mdfind(["-onlyin", scope, "-name", query])]
+    words = [w for w in _plain(query).split() if len(w) > 1]
+    if len(words) >= 2 and not any(_plain(query) in _plain(p.name) for p in found):
+        # "the build folder around the Chrome extension": name = one word, the others somewhere in its path.
+        hits: list[Path] = []
+        for name_word in words:
+            others = [w for w in words if w != name_word]
+            hits += [p for p in map(Path, _mdfind(["-onlyin", scope, "-name", name_word], cap=20000))
+                     if all(w in _plain(str(p)) for w in others) and not _JUNK.search(str(p)) and _kind_ok(p, kind)]
+        # The name holding the LAST word is usually what is meant ("chrome build" = a build folder).
+        hits.sort(key=lambda p: words[-1] in _plain(p.name), reverse=True)
+        found = hits + found
+    if content and len(found) < limit:
+        known = set(map(str, found))
+        found += [Path(n) for n in _mdfind(["-onlyin", scope, query], cap=1500) if n not in known]
+    if not found:
+        # Spotlight has nothing (not indexed, switched off, too slow): walk the folder, or the user's own places.
+        roots = [folder] if folder is not None else [r for r in (HOME / "Desktop", HOME / "Documents",
+                                                                 HOME / "Downloads", HOME) if r.is_dir()]
+        walked, refused = _walk_for(words or [_plain(query)], roots, 4.0 if folder is None else 3.0, limit * 3)
+        found += walked
+        _search_paths.refused = refused
+    else:
+        _search_paths.refused = []
     found += [p for p in _made() if query.lower() in p.name.lower() or _contains(p, query)]
     unique: dict[str, Path] = {}
     for p in found:
@@ -1361,10 +1433,27 @@ def _search_paths(query: str, folder: Path | None, kind: str, limit: int, conten
         # "the Markdown notes": .md only (bench, a .txt note slipped into a Markdown digest).
         found = [p for p in found if p.is_dir() or p.suffix.lower() in (".md", ".markdown")]
     needle = query.lower()
-    # Name matches, then documents in the user's own places, then the rest; newest first within each.
-    found.sort(key=lambda p: (needle in p.name.lower(), p.suffix.lower() in _DOCS or p.is_dir(),
-                              _place_score(p), _mtime(p)), reverse=True)
+    plain = _plain(query)
+    # Exactly the name, then name matches, then documents in the user's own places, then the rest; newest first
+    # within each. (A folder called "build" before "Task_builder".)
+    words = [w for w in plain.split() if len(w) > 1]
+    # Words of the user's own request that aren't the query: "the build folder in my Chrome extension" puts
+    # .../chrome-plugin/build first even when the model searched just "build" (10 Oct: it was 7th of 101).
+    hints = {w for w in re.findall(r"[a-z0-9]{4,}", asked) if w not in _HINT_SKIP and w not in words}
+    found.sort(key=lambda p: (p.name.lower() == needle or _plain(p.stem) == plain,
+                              sum(w in _plain(str(p.parent)) for w in hints),
+                              len(words) > 1 and words[-1] in _plain(p.name)
+                              and all(w in _plain(str(p)) for w in words), needle in p.name.lower(),
+                              p.suffix.lower() in _DOCS or p.is_dir(), _place_score(p), _mtime(p)), reverse=True)
     return found
+
+
+_search_paths.refused = []
+_HINT_SKIP = {"find", "folder", "folders", "file", "files", "show", "that", "this", "these", "those", "somewhere",
+              "notch", "where", "which", "there", "have", "with", "from", "into", "what", "open", "please", "them",
+              "search", "look", "inside", "around", "think", "should", "would", "could", "want", "need", "mint",
+              "called", "named", "something", "anything", "about", "just", "some", "your", "mine", "they", "here",
+              "users", "documents", "downloads", "desktop", "home", "tell", "give", "list", "make", "sure"}
 
 
 def file_action(args: dict) -> str:
