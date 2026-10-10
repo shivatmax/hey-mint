@@ -119,12 +119,16 @@ def test_claude_limits_come_from_the_claude_apps_newest_sample(tmp_path, monkeyp
 
 
 def test_an_old_sample_is_not_shown_at_all(tmp_path, monkeypatch):
-    """Numbers that may be wrong now are left out: the 5 hours after 20 minutes, the week after an hour."""
+    """Claude's numbers (the app notes them only now and then) show until their window could have started over -
+    the 5 hours for five hours, the week for a day - "As of" when they were noted; older ones are left out."""
     now = time.time() * 1000
     _app_usage(tmp_path, monkeypatch, [{"t": now - 30 * 60_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
     claude = agent_watch.limits()["claude"]
-    assert "5h" not in claude and claude["week"] == 50 and not claude["live"]
+    assert claude["5h"] == 80 and claude["week"] == 50 and not claude["live"]
     _app_usage(tmp_path, monkeypatch, [{"t": now - 6 * 3_600_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
+    claude = agent_watch.limits()["claude"]
+    assert "5h" not in claude and claude["week"] == 50
+    _app_usage(tmp_path, monkeypatch, [{"t": now - 30 * 3_600_000, "org": "o", "u": {"fh": 80, "sd": 50}}])
     assert "claude" not in agent_watch.limits()
     assert agent_checks.limits_line() == ""
     assert "aren't known right now" in agent_checks._limits()

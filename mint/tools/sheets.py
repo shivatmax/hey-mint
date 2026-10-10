@@ -242,6 +242,19 @@ def _extent(ws) -> tuple[int, int, int]:
     return min(rows), max(rows), min(c for _r, c in used)
 
 
+def _create_if_new(path: str, changing: bool) -> None:
+    """A new spreadsheet the user asked for ("make a budget in GenOffice and save it as budget"): an empty .xlsx where
+    they said, so its rows go in through this tool - exact - instead of typing into a spreadsheet app's grid."""
+    from pathlib import Path
+    if not changing or not path.lower().endswith(".xlsx"):
+        return
+    file = Path(path).expanduser()
+    if file.exists() or not file.parent.is_dir():
+        return
+    from openpyxl import Workbook
+    Workbook().save(file)
+
+
 def edit_spreadsheet(path: str, add_rows=None, set_cells=None, total: bool = False, sheet: str = "") -> str:
     """Change an existing .xlsx in place (a backup is kept): add rows at the bottom, set cells, add or refresh a
     Total row of =SUM formulas. With no change asked for, show what is in it."""
@@ -255,6 +268,7 @@ def edit_spreadsheet(path: str, add_rows=None, set_cells=None, total: bool = Fal
 
     from mint.tools import harness as harness_tools
     from mint.tools import undo
+    _create_if_new(str(path or ""), bool(add_rows or set_cells or total))
     file, why = harness_tools._resolve(str(path or ""))
     if file is None:
         return f"FAILED: {why}"
@@ -405,7 +419,7 @@ def declarations():
             required=["source"])),
         types.FunctionDeclaration(
             name="edit_spreadsheet",
-            description=("Change an existing Excel .xlsx file in place, without opening it: add rows at the bottom, set "
+            description=("Make or change an Excel .xlsx file without typing into an app (a new path makes a new file): add rows at the bottom, set "
                          "cells, add a Total row (=SUM of every number column, below the data; an existing Total row "
                          "moves below new rows). A backup is kept. With only the path, shows what is in it. Use this "
                          "instead of typing into Numbers or Excel."),

@@ -133,6 +133,8 @@ def test_claude_code_hook_guard(tmp_path):
     asked = run("rm -rf node_modules")
     assert asked["permissionDecision"] == "ask" and "deletes files" in asked["permissionDecisionReason"]
     assert run("npm test") is None
+    assert run("mv a b") is None                     # a coding agent's everyday work doesn't ask (agent_guard: delete)
+    settings.write_text(json.dumps({"guard": "all", "agent_guard": "all"}))
     assert run("mv a b")["permissionDecision"] == "ask"
     settings.write_text(json.dumps({"guard": "delete"}))
     assert run("mv a b") is None and run("rm x") is not None

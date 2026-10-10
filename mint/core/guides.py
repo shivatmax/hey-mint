@@ -105,7 +105,10 @@ the task (and the app); follow its steps, then skill_result. When the user teach
 that worked; skill_history lists and undoes skill changes; learn_skill makes one from a page, the window, the \
 clipboard or this conversation. Never put passwords, keys or card numbers in a skill or a memory."""
 
-CHAT_APPS = """Chat apps (Telegram, WhatsApp, Slack, Discord, Messages): open_app it, then click its search box by \
+CHAT_APPS = """Chat apps (Telegram, WhatsApp, Slack, Discord, Messages). A chat with a username (a bot, a channel, \
+a public group or person with an @name): open_url tg://resolve?domain=NAME (Telegram, no @: BotFather -> \
+tg://resolve?domain=BotFather) - it opens that chat directly, no searching or clicking. Otherwise: open_app it, then \
+click its search box by \
 the words in it (click_text "Search"; in Telegram, WhatsApp and Discord press_key k with command does the same), \
 type_text the name ONCE without Return, and click_text the name in the results. read_window: the chat's name heads \
 the conversation and the expected messages are there - a lookalike or an empty chat ("No messages here yet"): go \

@@ -89,7 +89,10 @@ def status(kind: str, asked=()) -> str:
                 return "allowed"
         elif kind == "screen":
             if Quartz.CGPreflightScreenCaptureAccess():
-                return "allowed"
+                # macOS says yes, but its answer can be stale: switched on, yet every picture is grey but for Mint's
+                # own windows (10 Oct, after its monthly check / an update). Then it is not allowed in any way that
+                # matters - so the Set up chips, Settings and the ask flow all treat it as off.
+                return "denied" if screen_blind() else "allowed"
         elif kind == "input":
             if Quartz.CGPreflightListenEventAccess():
                 return "allowed"
@@ -105,6 +108,25 @@ def status(kind: str, asked=()) -> str:
     except Exception:
         log.debug("permission status %s", kind, exc_info=True)
     return "denied" if kind in asked else "ask"
+
+
+_blind_seen = {"at": -1e9, "blind": False}
+BLIND_RECHECK = 30.0        # seconds a "can it really see?" answer is kept (it takes a picture)
+
+
+def screen_blind() -> bool:
+    """Screen Recording is on for macOS but captures show only Mint's own windows (vision.sees_other_apps)."""
+    import time
+    now = time.monotonic()
+    if now - _blind_seen["at"] < BLIND_RECHECK:
+        return _blind_seen["blind"]
+    try:
+        from mint.screen import vision
+        blind = vision.sees_other_apps() is False
+    except Exception:
+        blind = False
+    _blind_seen.update(at=now, blind=blind)
+    return blind
 
 
 def snapshot(asked=(), kinds=None) -> dict:
@@ -177,6 +199,9 @@ def ask(kind: str, asked: set, done=None) -> None:
         return
     first = kind not in asked
     asked.add(kind)
+    if kind == "screen" and Quartz.CGPreflightScreenCaptureAccess():
+        open_pane(kind)            # switched on but not working: macOS shows no box for it - only the switch helps
+        return
     try:
         if current == "ask" and first:
             if kind == "microphone":
@@ -190,6 +215,9 @@ def ask(kind: str, asked: set, done=None) -> None:
                 return
             if kind == "screen":
                 Quartz.CGRequestScreenCaptureAccess()
+                # macOS shows its box only once per app; after that the call does nothing on screen (10 Oct: asked,
+                # nothing appeared). The switch's page opens too, so there is always something to answer.
+                open_pane(kind)
                 return
             if kind == "input":
                 Quartz.CGRequestListenEventAccess()

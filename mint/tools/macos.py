@@ -57,8 +57,23 @@ def open_app(name: str) -> str:
     return f"Opened {name} and it is in front"
 
 
+APP_LINKS = {"tg": "Telegram", "slack": "Slack", "whatsapp": "WhatsApp", "discord": "Discord", "spotify": "Spotify",
+             "x-apple.systempreferences": "System Settings", "zoommtg": "Zoom", "msteams": "Microsoft Teams",
+             "notion": "Notion", "obsidian": "Obsidian", "things": "Things", "music": "Music", "facetime": "FaceTime",
+             "sms": "Messages", "imessage": "Messages", "mailto": "Mail", "maps": "Maps", "shortcuts": "Shortcuts"}
+
+
 def open_url(url: str, browser: str = "") -> str:
-    """Open a web address in the right browser (see browser_choice): a tab already showing it, else a new tab."""
+    """Open a web address in the right browser (see browser_choice): a tab already showing it, else a new tab. An app's
+    own link (tg://resolve?domain=BotFather, slack://, x-apple.systempreferences:) goes straight to that app - the
+    surest way into an app that shows Accessibility nothing (Telegram)."""
+    scheme = url.split(":", 1)[0].lower() if ":" in url else ""
+    if scheme and scheme not in ("http", "https", "file", "about", "chrome"):
+        target = AppKit.NSURL.URLWithString_(url)
+        if target is None or not AppKit.NSWorkspace.sharedWorkspace().openURL_(target):
+            return f"FAILED: no app on this Mac opens {scheme}: links."
+        app = APP_LINKS.get(scheme, "the app")
+        return f"Opened {url} in {app}. Check what it shows (read_window or look) before going on."
     from mint.tools import browser_choice
     return browser_choice.open_url(url, browser)
 

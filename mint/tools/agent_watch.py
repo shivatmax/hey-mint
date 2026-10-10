@@ -1195,6 +1195,10 @@ def _claude_app_usage() -> dict:
 # when that can't run. Claude: what Claude Code passed to Mint's status line, or the Claude app's own samples.
 # A figure older than LIMITS_FRESH (per window), or from a window that has reset since, is not shown at all.
 LIMITS_FRESH = {"5h": 20 * 60, "week": 60 * 60}      # (the Claude app notes them every ~15 min)
+# Claude has no live reading: the app notes its numbers only now and then, so under the rule above they were never
+# shown (10 Oct: 2% / 18% noted at 11:06, nothing on screen all afternoon). A Claude figure stays until its window
+# could have started over, and is shown "As of <time>" (the "at" field) - an old number, said to be old.
+CLAUDE_FRESH = {"5h": 5 * 3600, "week": 24 * 3600}
 LIVE_EVERY = 120.0
 LIVE: dict = {}              # "codex" -> the live reading ({"5h", "5h_resets", "week", "week_resets", "at", "live"})
 _live = {"wanted": 0.0, "at": -1e9, "busy": False, "failed": -1e9}
@@ -1306,15 +1310,16 @@ def refresh_live(block: bool = False, force: bool = False) -> None:
         threading.Thread(target=run, daemon=True, name="codex-limits").start()
 
 
-def _fresh(x, now: float | None = None):
+def _fresh(x, now: float | None = None, keep: dict | None = None):
     """Only the windows still true: read recently enough, and not reset since. None when nothing is left."""
     if not isinstance(x, dict):
         return None
     now = time.time() if now is None else now
     age = now - float(x.get("at") or 0)
+    keep = keep or LIMITS_FRESH
     out = {k: v for k, v in x.items() if k not in ("5h", "5h_resets", "week", "week_resets")}
     for name in ("5h", "week"):
-        if not isinstance(x.get(name), (int, float)) or age > LIMITS_FRESH[name] or age < -60:
+        if not isinstance(x.get(name), (int, float)) or age > keep[name] or age < -60:
             continue
         resets = float(x.get(name + "_resets") or 0)
         if resets and resets < now:
@@ -1345,7 +1350,7 @@ def limits(live: bool = True) -> dict:
     if app and app["at"] > float((claude or {}).get("at") or 0):
         claude = app
     for name, x in (("codex", codex), ("claude", claude)):
-        x = _fresh(x)
+        x = _fresh(x, keep=CLAUDE_FRESH if name == "claude" and not (x or {}).get("live") else None)
         if x is not None:
             out[name] = x
     return out

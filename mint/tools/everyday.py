@@ -85,6 +85,23 @@ class _Clipboard:
 
 # --- dictation and selection -------------------------------------------------
 
+def _is_search(element) -> bool:
+    """A search field: its role, or a search placeholder or label ("Search (⌘K)", "Search chats")."""
+    from mint.screen import axkit
+    if axkit.attr(element, "AXSubrole") == "AXSearchField" or axkit.attr(element, "AXRole") == "AXSearchField":
+        return True
+    words = " ".join(str(axkit.attr(element, k) or "") for k in ("AXPlaceholderValue", "AXDescription", "AXTitle",
+                                                                    "AXHelp", "AXIdentifier"))
+    return "search" in words.lower()
+
+
+def _already_holds(value: str, text: str) -> bool:
+    """The field already has these words in it: typing them again would double them ("BotFatherBotFather" in Telegram's
+    search box, 10 Oct - its box doesn't say it is a search box). Then the field gets just the words, once."""
+    words = " ".join(text.split()).lower()
+    return bool(words) and len(words) <= 200 and "\n" not in text and words in " ".join(value.split()).lower()
+
+
 def type_text(text: str, press_return: bool = False, pid: int | None = None) -> str:
     """Insert text at the cursor in whatever field has focus. Instant.
 
@@ -130,7 +147,10 @@ def type_text(text: str, press_return: bool = False, pid: int | None = None) -> 
             and not effect.LIVE.chromium(app_pid):
         raw = axkit.attr(focused, "AXValue")
         value_before = raw if isinstance(raw, str) else None
-        progress, count, _ = effect.ax_insert(focused, text, at="caret")
+        # A search box takes one query: what is typed replaces what is there. Seen 9 Oct: Telegram's search read
+        # "botfatherbot father" after two tries, and every result was a lookalike bot.
+        where = "all" if value_before and (_is_search(focused) or _already_holds(value_before, text)) else "caret"
+        progress, count, _ = effect.ax_insert(focused, text, at=where)
         if progress in ("complete", "partial", "unverifiable"):
             route, delivery = "accessibility", "background"
         elif progress in ("unchanged", "rejected") and len(text) <= fastinput.UNICODE_MAX:

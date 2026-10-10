@@ -145,9 +145,11 @@ def guard(payload):
                                         "Claude Code's / Codex's settings. It needs your OK."}}) + "\n")
         return True
     try:
-        level = (json.load(open(SETTINGS)).get("guard") or "all")
+        saved = json.load(open(SETTINGS))
+        level = saved.get("agent_guard") or ("off" if saved.get("guard") == "off" else "delete")
     except Exception:
-        level = "all"
+        level = "delete"           # for coding agents: deletes and system commands ask; moving or writing a file
+                                   # (their everyday work) doesn't - it made Claude Code ask all day (10 Oct)
     if level == "off":
         return False
     for pattern, why, kind in GUARD:
@@ -166,6 +168,15 @@ def main():
         return
     event = payload.get("hook_event_name", "")
     if event == "PreToolUse":
+        if payload.get("permission_mode") == "bypassPermissions":
+            # The user chose "never ask me" for this Claude Code session: Mint doesn't ask either (it used to make
+            # Claude ask before ordinary commands and edits, 10 Oct). Only its floor stays - a command that deletes or
+            # writes over Mint's own files or Claude Code's / Codex's settings.
+            if payload.get("tool_name") == "Bash":
+                command = str((payload.get("tool_input") or {}).get("command") or "")
+                if OWN.search(command) and WRITES.search(command):
+                    guard(payload)
+            return
         if payload.get("tool_name") == "Bash" and guard(payload):
             return
         checks(payload)

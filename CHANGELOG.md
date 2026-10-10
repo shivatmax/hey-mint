@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.19 (2026-10-10)
+
+- **Claude Code isn't asked extra questions by Mint:** when you run Claude Code with "bypass permissions", Mint's
+  hooks no longer make it ask (only a command that deletes or overwrites Mint's own files or Claude/Codex settings
+  still does); in other modes only deletes and system commands ask - moving or writing files, everyday work, doesn't.
+- **Claude usage shows again:** the Claude app notes its numbers only now and then, and Mint hid anything older than
+  20 minutes. Claude's 5-hour figure now shows for up to five hours and the weekly one for a day, marked "As of".
+- **Mint knows when it can't see:** a test picture of another app's window, not macOS's answer, decides whether
+  Screen Recording works; when it doesn't, the Set up chip, Settings and Mint itself say so and System Settings opens
+  at the Screen Recording switch (macOS shows its own box only once per app).
+- **App routes:** when Mint opens an app it learns its direct ways in first - links (tg://resolve?domain=… opens a
+  Telegram chat), scripting, the files it opens (a GenOffice spreadsheet is made as the .xlsx, then opened) - and a
+  job that keeps failing changes route, then ends and says what it tried, instead of "processing" forever.
+- **Mint no longer clicks its own words:** read off the whole screen, "BotFather" matched the notch's own "Clicking
+  'BotFather'" and the step card above it - Mint clicked its notch twenty times, each "confirmed". Words are now read
+  from the app's own window first (a picture of that window alone), for clicking, reading and a look's word list.
+- **Telegram's window is found:** its four empty 1440 x 29 strips across the top were taken for "the window", so
+  reading it found nothing.
+- **A search box takes one query:** typing into a search field replaces what is there ("botfatherbot father" after
+  two tries matched only lookalike bots).
+- **No more guessing loops:** after three rough-point clicks miss in one request, click_at is off until the next one
+  - words on screen or the keyboard instead.
+- **A sleeping voice connection is renewed** after 11 minutes (resumed, same conversation): a connection that had
+  gone quiet without closing swallowed the user's words after "Hey Alex".
+
 ## 0.6.18 (2026-10-09)
 
 - **What you ask to see done on screen, Mint does in front of you:** "open Telegram and search BotFather" was handed

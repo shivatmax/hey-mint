@@ -37,10 +37,17 @@ def _ax(element, attribute):
 def _ocr_front_window() -> str:
     """The front window's visible text, top to bottom, via on-device recognition."""
     try:
+        import AppKit
+
         from mint.screen import ocr
-        items, _ = ocr.read_screen()
-        front = ocr._front_window()
-        inside = [i for i in items if front is None or ocr._inside(i, front)]
+        app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        try:
+            # A picture of that window alone: no other window's words, and not Mint's own notch or cursor tag.
+            inside, _, _ = ocr.read_window(app)
+        except Exception:
+            items, _ = ocr.read_screen()
+            front = ocr._front_window()
+            inside = [i for i in items if front is None or ocr._inside(i, front)]
         inside.sort(key=lambda i: (round(i["y"] / 8), i["x"]))
         return "\n".join(i["text"] for i in inside)
     except Exception:

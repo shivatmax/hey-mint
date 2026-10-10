@@ -73,6 +73,12 @@ _SCREEN_TOOLS = {"ui_act", "ui_elements", "click_text", "click_at", "type_text",
 _MISSED = ("FAILED", "NOT CLICKED", "NOT DRAGGED", "SUSPECTED NO-OP", "No text is visible", "UNVERIFIED",
            "REFUSED", "NOT RUN")
 
+_ASKS_PROGRESS = re.compile(r"\b(what\W*(s|is|are)?\W+(it'?s|its|it|that|the job|the task|you)\W+(are\W+|is\W+)?doing|how (much|far)|progress|status|"
+                            r"is it (working|done|running)|still (working|going)|any update|what happened|"
+                            r"i don'?t see (it|anything))\b", re.I)
+CLICK_AT_MISSES = 3          # rough-point clicks that missed in one request before click_at is turned off for it
+
+
 def _ladder(owner, name: str, result: str) -> str:
     """After two screen actions in one request didn't work: the next way to try, so the model changes method
     instead of retrying variants of the same call (seen 9 Oct: ui_act, ui_act, type_text, click_text x2 in
@@ -1409,6 +1415,30 @@ class Mint:
             self.loop.create_task(self.session.send_realtime_input(text=text))
         self.loop.call_soon_threadsafe(send)
 
+    STALE_AFTER = 11 * 60     # a connection asleep this long is renewed before the next wake
+
+    def _renew_if_stale(self) -> None:
+        """Asleep on a connection opened over STALE_AFTER ago: renew it (resumed - same conversation) before anyone
+        needs it. Seen 10 Oct: woken at 01:14 on a connection from 00:57 that had gone quiet without closing, the
+        user's words were never transcribed and Mint fell asleep "nothing said after the wake word"."""
+        connected = getattr(self, "_connected_at", 0.0)
+        if (not connected or self.session is None or self._busy or getattr(self, "_restarting", False)
+                or getattr(self, "_speed_switching", False)):
+            return
+        now = time.monotonic()
+        if now - connected < self.STALE_AFTER or now - max(self._server_at, self._tools_at) < 60:
+            return
+        self._connected_at = now                # once per connection
+        self._print("[renewing the voice connection while asleep]")
+        self._restarting = True                 # (resumed with its handle: the conversation carries on)
+
+        async def close(session=self.session):
+            try:
+                await session.close()
+            except Exception:
+                log.debug("closing a stale session", exc_info=True)
+        self.loop.create_task(close())
+
     async def _idle_watch(self) -> None:
         """Fall asleep once the listening window has passed (listening.Window): a few seconds after
         Mint is done, unless work is in progress, Mint is speaking, or the user's words are still
@@ -1427,6 +1457,8 @@ class Mint:
                     self._print("[the microphone was left closed after Mint spoke - open again]")
             else:
                 muted_since = 0.0
+            if self.asleep and not self.paused:
+                self._renew_if_stale()
             if self.asleep or self.paused or not self.hands_free:
                 continue
             now = time.monotonic()
@@ -1544,6 +1576,13 @@ class Mint:
                 memo = ""
             if memo:
                 text = f"{text}\n\n[{memo}]"
+        from mint.app import background
+        jobs = background.running_note()
+        if jobs and _ASKS_PROGRESS.search(text):
+            # "What is it doing?" while a job runs: answer from the job's real state, never a guess. Seen 10 Oct:
+            # asked twice, Mint said "it's processing the images" while the job sat "waiting for you to pause typing".
+            text = (f"{text}\n\n[{jobs} Answer from this, in plain words - say if it is waiting or stuck and why; "
+                    "don't make up progress.]")
         session = self.session
         try:
             # Realtime text is how the 3.x Live models take a typed turn
@@ -2663,12 +2702,19 @@ class Mint:
                                 await asyncio.to_thread(permit.system_box_open):
                             result += permit.BOX_NOTE
                         result += _ladder(self, name, result)
+                        if name == "click_at" and result.startswith(("NOT CLICKED", "FAILED", "UNVERIFIED")):
+                            track = self.__dict__.setdefault("_click_misses", {"asked": None, "n": 0})
+                            if track["asked"] != getattr(self, "_asked_at", 0.0):
+                                track.update(asked=getattr(self, "_asked_at", 0.0), n=0)
+                            track["n"] += 1
                         self._recent_calls[key] = (time.monotonic(), result)
                         if typed_key and result.startswith(("CONFIRMED", "Typed", "UNVERIFIABLE", "PARTIAL", "STILL RUNNING")):
                             typed_map[typed_key] = time.monotonic()
-                        elif name in ("click_text", "click_at", "ui_act", "press_key") and \
-                                not result.startswith(("FAILED", "REFUSED", "NOT RUN")):
-                            typed_map.clear()        # the focus may have moved: the same words can go elsewhere
+                        elif name in ("click_text", "click_at", "ui_act") and \
+                                not result.startswith(("FAILED", "REFUSED", "NOT RUN", "NOT CLICKED", "UNVERIFIED")):
+                            # A click may have moved to another field: the same words can go there. Not a key press -
+                            # ⌘K brought back the same search box with the words still in it (10 Oct).
+                            typed_map.clear()
                         if send_key:
                             sends[send_key] = (time.monotonic(), result)
                 result = tool_diet.fit(name, result)        # a huge result: head + tail, the rest in a file
@@ -2746,6 +2792,14 @@ class Mint:
             refused = telegram.send_guard(name, args, live.request() or "")    # no sending unless asked, ever
         if refused:
             return refused, None
+        if name == "click_at":
+            track = self.__dict__.get("_click_misses", {"asked": None, "n": 0})
+            if track["asked"] == getattr(self, "_asked_at", 0.0) and track["n"] >= CLICK_AT_MISSES:
+                # Seen 10 Oct: 20+ click_at guesses on the bare desktop in one request, each refused, none learned
+                # from. After three, pointing is off until the next request: words on screen or the keyboard.
+                return (f"NOT RUN: click_at missed {track['n']} times in this request, so it is off until the next "
+                        "one. Use click_text with words from the look's list of words on screen (it gives each "
+                        "word's place), ui_act, or the keyboard (a shortcut, arrows, Tab).", None)
         if name == "background_task":
             from mint.app import background
             from mint.app import live
@@ -3205,6 +3259,7 @@ class Mint:
                         handle=self._resume_handle)
                 async with client.aio.live.connect(model=config.MODEL, config=settings) as session:
                     self.session = session
+                    self._connected_at = time.monotonic()
                     self._session_day = dt.date.today()   # the date the instructions give
                     attempt = 0
                     typing = " Type to send text; Ctrl-C to stop." if sys.stdin and sys.stdin.isatty() else ""

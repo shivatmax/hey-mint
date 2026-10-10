@@ -177,3 +177,164 @@ def test_a_window_that_gives_no_picture_at_first_is_tried_again(monkeypatch):
     monkeypatch.setattr(capture, "_shot", lambda image, bounds, wid, method: {"image": image, "method": method})
     monkeypatch.setattr(capture.time, "sleep", lambda s: None)
     assert capture.window(3783)["image"] == "img" and len(tries) == 2
+
+
+def test_a_search_box_takes_one_query(monkeypatch):
+    try:
+        from mint.screen import axkit
+        from mint.tools import everyday as skills
+    except ImportError:
+        from mint import axkit, skills
+    fields = {"tg": {"AXRole": "AXTextField", "AXPlaceholderValue": "Search (⌘K)"},
+              "note": {"AXRole": "AXTextArea", "AXDescription": "Message"},
+              "mac": {"AXRole": "AXTextField", "AXSubrole": "AXSearchField"}}
+    monkeypatch.setattr(axkit, "attr", lambda element, key: fields[element].get(key))
+    assert skills._is_search("tg") and skills._is_search("mac")
+    assert not skills._is_search("note")                  # a message box keeps what is there
+
+
+def test_the_voice_connection_is_renewed_while_asleep():
+    import time
+    try:
+        from mint.app import session
+    except ImportError:
+        from mint import session
+
+    class Loop:
+        def __init__(self):
+            self.made = []
+
+        def create_task(self, coro):
+            self.made.append(coro)
+            coro.close()
+    mint = object.__new__(session.Mint)
+    mint.loop, mint.session, mint._busy = Loop(), object(), False
+    mint._server_at = mint._tools_at = time.monotonic() - 1000
+    mint._connected_at = time.monotonic() - 60                 # young: left alone
+    mint._renew_if_stale()
+    assert not mint.loop.made
+    mint._connected_at = time.monotonic() - session.Mint.STALE_AFTER - 5
+    mint._renew_if_stale()
+    assert len(mint.loop.made) == 1 and mint._restarting
+
+
+def test_screen_on_but_not_working_says_so(monkeypatch):
+    try:
+        from mint.core import permit
+    except ImportError:
+        from mint import permit
+    opened = []
+    monkeypatch.setattr(permit, "_times", {})
+    import Quartz
+    monkeypatch.setattr(Quartz, "CGPreflightScreenCaptureAccess", lambda: True)    # macOS says "on"...
+    monkeypatch.setattr(permit.permissions, "status", lambda kind, asked=(): "denied")  # ...but it can't see
+    monkeypatch.setattr(permit.permissions, "open_pane", lambda kind: opened.append(kind))
+    monkeypatch.setattr(permit.permissions, "ask", lambda *a, **k: opened.append("asked"))
+    said = permit.request("screen", "look")
+    assert opened == ["screen"] and "switch" in said and "off and on" in said and "don't guess" in said
+
+
+def test_words_already_in_the_field_are_not_typed_again():
+    try:
+        from mint.tools import everyday as skills
+    except ImportError:
+        from mint import skills
+    assert skills._already_holds("BotFather", "BotFather")
+    assert skills._already_holds("botfather ", "BotFather")
+    assert not skills._already_holds("Hello", "BotFather")
+    assert not skills._already_holds("", "BotFather")
+
+
+def test_asking_how_a_job_is_going_is_recognised():
+    try:
+        from mint.app import session
+    except ImportError:
+        from mint import session
+    for asked in ("what its doing", "what is it doing?", "ask for how much done because i don't see anything working",
+                  "any update?", "is it still working"):
+        assert session._ASKS_PROGRESS.search(asked), asked
+    for other in ("open telegram", "do the thing", "make a note"):
+        assert not session._ASKS_PROGRESS.search(other), other
+
+
+def test_a_job_that_keeps_failing_changes_route_then_ends_honestly(monkeypatch):
+    from types import SimpleNamespace
+    try:
+        from mint.app import background
+    except ImportError:
+        from mint import background
+    told = []
+    monkeypatch.setattr(background, "_tell_stuck", lambda run: told.append(run.id))
+    run = SimpleNamespace(id="task-1", task="open the Dharamshala group", title="Telegram group")
+    notes = [background._stuck_note(run, "click_text", "Could not read the screen: could not capture window 4971")
+             for _ in range(background.STUCK_AFTER)]
+    assert notes[-1].startswith("\n[STUCK") and "Export" in notes[-1] and told == ["task-1"]
+    assert background._stuck_note(run, "read_window", "Telegram - Telegram\nDharamshala") == ""   # it worked
+    for _ in range(background.GIVE_UP_AFTER - 1):
+        note = background._stuck_note(run, "ui_act", "FAILED: could not find 'Search box'")
+    assert background._stuck_note(run, "ui_act", "FAILED: x").startswith("\n[END THE JOB NOW")
+
+
+def test_a_box_from_gemini_becomes_a_screen_point_on_the_matching_words(monkeypatch):
+    import PIL.Image
+    try:
+        from mint.screen import ground
+    except ImportError:
+        from mint import ground
+    image = PIL.Image.new("RGB", (1600, 1000))               # an 800 x 500 point window on a Retina screen
+    monkeypatch.setattr(ground, "screenshot", lambda area, wid=None: (image, 2.0))
+    # Gemini's box_2d for the "Dharamshala Trip" row: [ymin, xmin, ymax, xmax], 0-1000 across the picture sent.
+    monkeypatch.setattr(ground, "_generate", lambda *a, **k: ('[{"box_2d": [410, 30, 530, 400], "label": "row"}]',
+                                                              "gemini-test"))
+    words = [{"text": "Dharamshala Trip", "x": 200, "y": 290, "w": 120, "h": 20},
+             {"text": "Premium Deals", "x": 200, "y": 440, "w": 110, "h": 20}]
+    point, box, why = ground.box_by_vision("the Dharamshala Trip chat", (100, 50, 800, 500), None, words)
+    assert box is not None and 120 <= box[0] <= 130 and 250 <= box[1] <= 260      # x0 = 100 + 0.03*800 ...
+    assert point == (260.0, 300.0) and "on the words" in why                       # snapped to the label itself
+    monkeypatch.setattr(ground, "_generate", lambda *a, **k: ("[]", "gemini-test"))
+    assert ground.box_by_vision("a missing thing", (0, 0, 800, 500), None, [])[0] is None
+
+
+def test_screen_recording_that_shows_nothing_counts_as_off(monkeypatch):
+    import Quartz
+    try:
+        from mint.core import permissions
+        from mint.screen import vision
+    except ImportError:
+        from mint import permissions, vision
+    monkeypatch.setattr(Quartz, "CGPreflightScreenCaptureAccess", lambda: True)
+    monkeypatch.setattr(permissions, "_blind_seen", {"at": -1e9, "blind": False})
+    monkeypatch.setattr(vision, "sees_other_apps", lambda: False)
+    assert permissions.status("screen") == "denied"          # so the Set up chip, Settings and the ask flow show it
+    monkeypatch.setattr(permissions, "_blind_seen", {"at": -1e9, "blind": False})
+    monkeypatch.setattr(vision, "sees_other_apps", lambda: True)
+    assert permissions.status("screen") == "allowed"
+
+
+def test_mint_is_blind_when_another_apps_window_cannot_be_pictured(monkeypatch):
+    import PIL.Image
+    import PIL.ImageDraw
+    import Quartz
+    try:
+        from mint.screen import vision
+    except ImportError:
+        from mint import vision
+    telegram = [{"kCGWindowOwnerPID": 4242, "kCGWindowLayer": 0, "kCGWindowAlpha": 1.0, "kCGWindowNumber": 3783,
+                 "kCGWindowBounds": {"X": 846, "Y": 29, "Width": 380, "Height": 842}}]
+    monkeypatch.setattr(Quartz, "CGWindowListCopyWindowInfo", lambda *a: telegram)
+    monkeypatch.setattr(Quartz, "CGImageGetWidth", lambda picture: 760)
+
+    def probe(picture):
+        vision._probe_seen.update(at=-1e9)
+        return vision._probe_other_window()
+    monkeypatch.setattr(Quartz, "CGWindowListCreateImage", lambda *a: None)          # macOS refuses: blind
+    assert probe(None) is False and vision.blind_to_others()
+    window = PIL.Image.new("RGB", (760, 1684), (30, 30, 30))
+    PIL.ImageDraw.Draw(window).rectangle((40, 40, 700, 100), fill=(220, 220, 220))     # Telegram's search box
+    monkeypatch.setattr(Quartz, "CGWindowListCreateImage", lambda *a: object())
+    monkeypatch.setattr(vision, "_cg_to_pil", lambda picture: window)
+    assert probe(None) is True and not vision.blind_to_others()
+    monkeypatch.setattr(vision, "_cg_to_pil", lambda picture: PIL.Image.new("RGB", (760, 1684), (46, 46, 52)))
+    assert probe(None) is False                                                        # a flat grey stand-in
+    monkeypatch.setattr(Quartz, "CGWindowListCopyWindowInfo", lambda *a: [])
+    assert probe(None) is None and not vision.blind_to_others()                        # nothing to try: can't tell

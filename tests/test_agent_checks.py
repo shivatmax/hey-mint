@@ -374,3 +374,48 @@ def test_a_skip_put_back_clears_the_warning(world):
     _edit(world, "/repo/tests/test_math.py", "@pytest.mark.skip\ndef test_add():", "def test_add():")
     assert not _s(world).weakened
     assert not any("while the tests were failing" in f for f in _s(world).flags)
+
+
+def test_mint_never_adds_questions_when_claude_code_runs_without_asking(tmp_path):
+    import json
+    import subprocess
+    import sys
+    try:
+        from mint.tools import agent_hooks
+    except ImportError:
+        from mint import agent_hooks
+    settings = str(tmp_path / "settings.json")
+    open(settings, "w").write(json.dumps({"guard": "all"}))
+    script = agent_hooks.HOOK_SCRIPT.replace(
+        'os.path.expanduser("~/Library/Application Support/Mint/agents.sock")', repr(str(tmp_path / "none.sock"))).replace(
+        'os.path.expanduser("~/Library/Application Support/Mint/settings.json")', repr(settings))
+    (tmp_path / "hook.py").write_text(script)
+
+    def run(command, mode="default"):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "permission_mode": mode,
+                   "tool_input": {"command": command}}
+        out = subprocess.run([sys.executable, str(tmp_path / "hook.py")], input=json.dumps(payload),
+                             capture_output=True, text=True, timeout=15)
+        return json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"] if out.stdout.strip() else None
+    assert run("rm -rf build", "bypassPermissions") is None             # the user chose "never ask": Mint doesn't
+    assert run("mv a.txt b.txt") is None                                 # everyday work never asks
+    assert run("rm -rf build") == "ask"                                  # a delete still does, in the normal mode
+    assert run("rm -rf ~/.claude/settings.json", "bypassPermissions") == "ask"   # the floor: Claude's own settings
+
+
+def test_claude_usage_from_the_app_shows_until_its_window_could_reset(monkeypatch):
+    import time
+    try:
+        from mint.tools import agent_watch
+    except ImportError:
+        from mint import agent_watch
+    noted = time.time() - 4.5 * 3600                     # the Claude app noted 2% / 18% four and a half hours ago
+    monkeypatch.setattr(agent_watch, "_claude_saved", lambda: {})
+    monkeypatch.setattr(agent_watch, "_claude_app_usage", lambda: {"at": noted, "source": "app", "5h": 2.0,
+                                                                    "week": 18.0})
+    claude = agent_watch.limits(live=False)["claude"]
+    assert claude["5h"] == 2.0 and claude["week"] == 18.0 and not claude["live"]
+    monkeypatch.setattr(agent_watch, "_claude_app_usage", lambda: {"at": time.time() - 6 * 3600, "source": "app",
+                                                                    "5h": 2.0, "week": 18.0})
+    claude = agent_watch.limits(live=False)["claude"]
+    assert "5h" not in claude and claude["week"] == 18.0  # past five hours the 5-hour window has started over

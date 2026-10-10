@@ -113,7 +113,7 @@ def declarations() -> list[types.FunctionDeclaration]:
              "sort": _enum(("newest", "oldest", "biggest", "smallest", "name"), "default newest"),
              "limit": INTEGER}),
         _fn("file_action",
-            "Do something with a file or folder: open (in its default app), reveal (in Finder), info, "
+            "Do something with a file or folder: open (in its default app, or in the app named in `to`), reveal (in Finder), info, "
             "move / copy / rename (to `to`), make_folder, trash (moves it to the Trash - only when the "
             "user asked to delete it; it can be restored from there).",
             {"action": _enum(("open", "reveal", "info", "move", "copy", "rename", "make_folder", "trash"),
@@ -1392,6 +1392,18 @@ def file_action(args: dict) -> str:
     workspace = AppKit.NSWorkspace.sharedWorkspace()
     if action == "open":
         stale = _textedit_stale(path)
+        app_name = str(args.get("to") or "").strip()
+        if app_name:
+            # In a particular app ("play it in Infuse", "open it in GenOffice"): its default app may be another one.
+            from mint.tools import appfinder
+            resolved, _ = appfinder.resolve(app_name)
+            app_path = appfinder.installed().get(resolved or "")
+            if not app_path:
+                return f"FAILED: no app called {app_name} is installed."
+            done = subprocess.run(["open", "-a", app_path, str(path)], capture_output=True, text=True, check=False)
+            if done.returncode:
+                return f"FAILED: {resolved} could not open {_short(path)} ({done.stderr.strip()[:120]})."
+            return f"Opened {_short(path)} in {resolved}."
         ok = workspace.openURL_(NSURL.fileURLWithPath_(str(path)))
         if not ok:
             return f"FAILED: macOS could not open {_short(path)}."

@@ -23,7 +23,8 @@ NEEDS_ACCESSIBILITY = {"ui_act", "ui_elements", "click_at", "click_text", "drag"
                        "get_selected_text", "desktop", "edit_selection"}
 # What a tool says when it ran into a missing permission anyway (checked inside the tools).
 _SAID = {"accessibility": ("lacks Accessibility permission", "without Accessibility permission"),
-         "screen": ("lacks Screen Recording permission",)}
+         "screen": ("lacks Screen Recording permission", "does not have Screen Recording permission",
+                    "Screen Recording isn't working")}
 WATCH_FOR = 180.0           # how long Mint waits for the switch before it stops watching
 AGAIN_AFTER = 20.0          # a second tool in the same breath doesn't open System Settings twice
 
@@ -72,18 +73,33 @@ def request(kind: str, tool: str = "", resume=None) -> str:
         if not recent:
             times.append(now)
         tries = len(times)
+    import Quartz
+    stale = kind == "screen" and bool(Quartz.CGPreflightScreenCaptureAccess())
     if not recent:
         try:
-            permissions.ask(kind, _asked)
+            if stale:
+                permissions.open_pane(kind)       # macOS says yes, yet captures show nothing: only the switch fixes it
+            else:
+                permissions.ask(kind, _asked)
         except Exception:
             log.debug("ask %s", kind, exc_info=True)
             permissions.open_pane(kind)
-        _watch(kind, resume)
+        if not stale:
+            _watch(kind, resume)
     where = f"System Settings ▸ Privacy & Security ▸ {title}"
     loses = permissions.LOSES.get(kind, "").format(name=name)
+    if stale:
+        # Seen 10 Oct: Screen Recording "on", but every capture showed only Mint's own notch (macOS's monthly "keep
+        # recording?" box unanswered, or the grant no longer matching the updated app).
+        return (f"NEEDS PERMISSION: {name} can't see other apps' windows - {title} is on in System Settings but isn't "
+                f"working (macOS can drop it after an update or its monthly check). {where} is open now. Tell the user "
+                f"in one or two short sentences: switch {name} off and on there, then choose Quit & Reopen (or restart "
+                f"{name}). Until then you are blind on screen: don't guess clicks - say so, and offer what doesn't need "
+                "the screen.")
     if tries <= 1:
         shown = ("macOS's box asking for it is on screen now (it may say 'would like to control this computer'; "
                  "the button is Open System Settings)" if kind == "accessibility" else
+                 f"{where} is open now (macOS may also show its own box)" if kind == "screen" else
                  f"macOS's box asking for it is on screen now, or {where} is open")
         return (f"NEEDS PERMISSION: nothing was done - {name} needs {title} for this ({loses}). {shown}. Tell the user "
                 f"in one short sentence to switch on {name} there; you carry on by yourself as soon as it is on - "
@@ -158,13 +174,22 @@ def prompt_note(statuses: dict | None = None) -> str:
                 statuses[kind] = permissions.status(kind)
             except Exception:
                 statuses[kind] = "ask"
+    if statuses.get("screen") != "allowed":
+        try:
+            import Quartz
+            if Quartz.CGPreflightScreenCaptureAccess():
+                statuses["screen"] = "broken"      # on in System Settings, yet captures show only Mint's own windows
+        except Exception:
+            pass
     on = [permissions.title(k) for k in _KNOWN if statuses.get(k) == "allowed"]
     off = [k for k in _KNOWN if statuses.get(k) != "allowed"]
     lines = [f"Your macOS permissions right now - on: {', '.join(on) or 'none'}."]
     if off:
         lines.append("Off: " + "; ".join(
             f"{permissions.title(k)} ({permissions.LOSES[k].format(name=name).rstrip('.')}"
-            + (", though it may only be unconfirmed until a look" if k == "screen" else "") + ")" for k in off) + ".")
+            + (" - it is switched on but NOT working: you see only your own windows; the user must switch it off and "
+               "on, then reopen Mint" if statuses.get(k) == "broken" else
+               ", though it may only be unconfirmed until a look" if k == "screen" else "") + ")" for k in off) + ".")
     lines.append(
         "A tool needing a permission that is off asks for it (macOS's box, else System Settings open at the right "
         "switch): tell the user in one plain sentence what to switch on and why. A macOS box is theirs - you can't "

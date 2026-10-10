@@ -463,12 +463,16 @@ def _screen_words(limit: int = 45) -> str:
     try:
         import AppKit
         front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
-        items, _ = ocr.read_screen()
-        window = ocr._front_window()
         area = vision._last_area
-        if not items or not area:
+        try:
+            # That window alone: never Mint's own notch ("Clicking 'BotFather'") or another window's words.
+            mine, _, window = ocr.read_window(front)
+        except Exception:
+            items, _ = ocr.read_screen()
+            window = ocr._front_window()
+            mine = [i for i in items if window is None or ocr._inside(i, window)]
+        if not area:
             return ""
-        mine = [i for i in items if window is None or ocr._inside(i, window)]
         head = f"\n[In front: {front.localizedName() if front else 'nothing'}"
         head += "" if window else " - no window of it is on screen; open_app it again"
         if not mine:

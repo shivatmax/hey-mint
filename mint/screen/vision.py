@@ -8,6 +8,8 @@ tree, which is cheaper and more precise for acting on controls.
 from __future__ import annotations
 
 import base64
+import logging
+import os
 import io
 import re
 
@@ -49,6 +51,69 @@ def _check_not_blank(image) -> None:
             pass
         raise Blind()
 
+def blind_to_others(image=None, area: dict | None = None) -> bool:
+    """Mint can't see other apps' windows (Screen Recording isn't really allowed: macOS's monthly "keep recording?" box
+    unanswered, or a grant that no longer matches the app). Seen 10 Oct: every look grey but for the notch - the model
+    "saw" Telegram and clicked the desktop twenty times. The test: a picture of one other app's window, which macOS
+    gives only when the permission works. (Judging the whole picture failed: Mint's own full-screen overlay and a
+    window under the black menu bar fooled it.)"""
+    return _probe_other_window() is False
+
+
+_probe_seen = {"at": -1e9, "answer": None}
+
+
+def _probe_other_window() -> bool | None:
+    """True: another app's window could be pictured; False: it couldn't (blind); None: no other window to try."""
+    import os
+    import time
+
+    import Quartz
+    now = time.monotonic()
+    if now - _probe_seen["at"] < 5.0:
+        return _probe_seen["answer"]
+    answer = None
+    try:
+        rows = Quartz.CGWindowListCopyWindowInfo(
+            Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
+            Quartz.kCGNullWindowID) or []
+        others = [w for w in rows if int(w.get("kCGWindowOwnerPID", 0)) != os.getpid()
+                  and w.get("kCGWindowLayer", 0) == 0 and float(w.get("kCGWindowAlpha", 1) or 0) > 0
+                  and (w.get("kCGWindowBounds") or {}).get("Width", 0) >= 200
+                  and (w.get("kCGWindowBounds") or {}).get("Height", 0) >= 150]
+        others.sort(key=lambda w: -(w["kCGWindowBounds"]["Width"] * w["kCGWindowBounds"]["Height"]))
+        for w in others[:2]:
+            picture = Quartz.CGWindowListCreateImage(
+                Quartz.CGRectNull, Quartz.kCGWindowListOptionIncludingWindow, int(w["kCGWindowNumber"]),
+                Quartz.kCGWindowImageBoundsIgnoreFraming | Quartz.kCGWindowImageNominalResolution)
+            if picture is None or Quartz.CGImageGetWidth(picture) < 8:
+                answer = False
+                continue
+            small = _cg_to_pil(picture).convert("L").resize((48, 32))
+            low, high = small.getextrema()
+            if high - low >= 6:
+                answer = True
+                break
+            answer = False
+    except Exception:
+        answer = None
+    _probe_seen.update(at=now, answer=answer)
+    return answer
+
+
+def _cg_to_pil(picture):
+    import Quartz
+    width, height = Quartz.CGImageGetWidth(picture), Quartz.CGImageGetHeight(picture)
+    data = Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(picture))
+    stride = Quartz.CGImageGetBytesPerRow(picture)
+    return PIL.Image.frombuffer("RGBA", (width, height), bytes(data), "raw", "BGRA", stride, 1)
+
+
+def sees_other_apps() -> bool | None:
+    """True if other apps' windows can be pictured, False if Mint is blind to them, None when it can't tell."""
+    return _probe_other_window()
+
+
 _MSS = getattr(mss, "MSS", None) or mss.mss
 
 
@@ -64,6 +129,9 @@ def grab_screen(display: int = 0) -> dict[str, str]:
         shot = sct.grab(monitors[index])
         image = PIL.Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
+    if blind_to_others(image, _last_area):
+        _last_area = None
+        raise Blind()
     image.thumbnail((MAX_EDGE, MAX_EDGE))
     _check_not_blank(image)
     buffer = io.BytesIO()
@@ -211,6 +279,32 @@ def drag(from_target: str = "", to_target: str = "", from_x=None, from_y=None, t
             "should.")
 
 
+def _box_in_front_window(target: str):
+    """Not found by name or by words near the hint: ask Gemini for the box around it in a picture of the front app's
+    window alone (ground.box_by_vision), snapped to the words read inside it. -> a screen point or None."""
+    import AppKit
+
+    from mint.screen import ground
+    from mint.screen import ocr
+    try:
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        window = ocr._front_window()
+        if front is None or window is None or front.processIdentifier() == os.getpid():
+            return None
+        try:
+            words, _, info = ocr.read_window(front)
+            wid = info.get("window_id")
+        except Exception:
+            words, wid = [], None
+        area = (window["x"], window["y"], window["w"], window["h"])
+        point, _, why = ground.box_by_vision(target, area, wid, words)
+        logging.getLogger("mint.screen.vision").info("box for %r: %s %s", target, point, why)
+        return point
+    except Exception:
+        logging.getLogger("mint.screen.vision").debug("box grounding failed", exc_info=True)
+        return None
+
+
 def _other_app_at(x: float, y: float) -> str:
     """The name of the app whose window is at (x, y), when it isn't the app in front (and isn't Mint); else ''."""
     import os
@@ -306,7 +400,14 @@ def click_at(x: float | None = None, y: float | None = None, button: str = "left
             located = None
             import logging
             logging.getLogger("mint.screen.vision").info("find_target failed: %s", error)
-    if located is not None:
+    if located is None and target:
+        boxed = _box_in_front_window(target)
+        if boxed is not None:
+            (px, py), found, how = boxed, target, "vision"
+            located = True
+    if located is True:
+        pass
+    elif located is not None:
         (px, py), found, how = located.point, located.label or target, located.how
     elif pointed is not None:
         px, py = pointed

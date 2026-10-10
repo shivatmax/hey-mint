@@ -115,10 +115,19 @@ def read_screen() -> tuple[list[dict], dict]:
     image, area = _screen()
     small = image.convert("L").resize((64, 40))
     low, high = small.getextrema()
-    if high - low < 12:
-        from mint.screen.vision import Blind
+    from mint.screen.vision import Blind, blind_to_others
+    if high - low < 12 or blind_to_others(image, area):
         raise Blind()
     return recognize(image, area), area
+
+
+def blind_now() -> bool:
+    """Is Mint unable to see other apps right now (Screen Recording not really allowed)? One picture of the screen."""
+    try:
+        read_screen()
+        return False
+    except Exception as error:
+        return type(error).__name__ == "Blind"
 
 
 def read_area(x: float, y: float, w: float, h: float) -> list[dict]:
@@ -279,6 +288,17 @@ def click_text(target: str, double: bool = False, app=None) -> str:
 
     if not fastinput.has_accessibility():
         return "Cannot click: Mint lacks Accessibility permission."
+    if app is None:
+        # Words are looked for in the front app's own window first (a picture of that window alone). Read off the
+        # whole screen they included Mint's own notch, which said "Clicking 'BotFather'": click_text "BotFather"
+        # clicked the notch's words, twenty times, each "confirmed" (9 Oct). The screen only if it isn't there.
+        import AppKit
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        if front is not None and front.processIdentifier() != os.getpid() and front.localizedName():
+            first = click_text(target, double, app=front.localizedName())
+            if not first.startswith(("FAILED: could not find", "No text is visible", "FAILED: ")) or \
+                    "covers that spot" in first:
+                return first
     running = _running(app)
     if app is not None and running is None:
         return f"FAILED: {app} is not running, so nothing was clicked; open it first."
@@ -302,6 +322,9 @@ def click_text(target: str, double: bool = False, app=None) -> str:
                     "guess; tell the user to allow it in System Settings.")
         if isinstance(error, LookupError):
             return f"FAILED: {error}, so nothing was clicked."
+        if "could not capture" in str(error) and blind_now():
+            return ("Cannot see the screen: Mint lacks Screen Recording permission (it sees only its own windows). "
+                    "Do not guess; tell the user to allow it in System Settings.")
         return f"Could not read the screen: {error}"
     if not items:
         return f"No text is visible in {front['app']}'s window." if running is not None else "No text is visible on screen."
@@ -505,7 +528,7 @@ def _front_window() -> dict | None:
             _, size = AX.AXUIElementCopyAttributeValue(window, "AXSize", None)
             p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)[1]
             s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)[1]
-            if s.width > 100:
+            if s.width > 100 and s.height > 100:
                 return {"x": p.x, "y": p.y, "w": s.width, "h": s.height,
                         "app": front.localizedName() or "", "pid": int(front.processIdentifier())}
     except Exception:
@@ -513,10 +536,12 @@ def _front_window() -> dict | None:
     windows = Quartz.CGWindowListCopyWindowInfo(
         Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
         Quartz.kCGNullWindowID) or []
+    # Its real window, not a strip: Telegram keeps four empty 1440 x 29 windows across the top of the screen, and
+    # the first of them was taken for "the window" - every read of it found nothing (9 Oct).
     for window in windows:
         if window.get("kCGWindowOwnerPID") == front.processIdentifier() and window.get("kCGWindowLayer", 0) == 0:
             b = window.get("kCGWindowBounds") or {}
-            if b.get("Width", 0) > 100:
+            if b.get("Width", 0) > 100 and b.get("Height", 0) > 100:
                 return {"x": b["X"], "y": b["Y"], "w": b["Width"], "h": b["Height"],
                         "app": front.localizedName() or "", "pid": int(front.processIdentifier())}
     return None

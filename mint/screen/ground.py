@@ -170,8 +170,9 @@ def _client():
                                                              retry_options=types.HttpRetryOptions(attempts=1)))
 
 
-def _generate(contents, models=None, json_mode=True):
-    """First model in the chain that answers. -> (text, model)."""
+def _generate(contents, models=None, json_mode=True, think: bool = True):
+    """First model in the chain that answers. -> (text, model). think=False: no thinking where the model allows it -
+    a box or a point from a picture needs none, and with it a call took over 12 s (the timeout) on 10 Oct."""
     from google.genai import types
     client = _client()
     last = None
@@ -179,10 +180,19 @@ def _generate(contents, models=None, json_mode=True):
         if time.monotonic() < _dead.get(model, -1e9):
             continue
         try:
-            reply = client.models.generate_content(
-                model=model, contents=contents,
-                config=types.GenerateContentConfig(
-                    temperature=0, **({"response_mime_type": "application/json"} if json_mode else {})))
+            extra = {"response_mime_type": "application/json"} if json_mode else {}
+            if not think and model not in _NO_THINK_OFF:
+                extra["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            try:
+                reply = client.models.generate_content(
+                    model=model, contents=contents, config=types.GenerateContentConfig(temperature=0, **extra))
+            except Exception as error:
+                if "thinking_config" not in extra or "INVALID_ARGUMENT" not in str(error):
+                    raise
+                _NO_THINK_OFF.add(model)          # this model can't switch thinking off: ask it the usual way
+                extra.pop("thinking_config")
+                reply = client.models.generate_content(
+                    model=model, contents=contents, config=types.GenerateContentConfig(temperature=0, **extra))
             return str(reply.text or ""), model
         except Exception as error:
             last = error
@@ -193,6 +203,9 @@ def _generate(contents, models=None, json_mode=True):
                 _dead[model] = time.monotonic() + 300
             _debug(f"{model} failed: {str(error)[:80]}")
     raise RuntimeError(f"no vision model answered: {str(last)[:120]}")
+
+
+_NO_THINK_OFF: set[str] = set()
 
 
 def _json(text: str):
@@ -1170,6 +1183,57 @@ def point_by_vision(target: str, area, model: str = "gemini-robotics-er-2-previe
         if again is not None:
             point, note = plan.to_screen(*again), ", zoomed"
     return point, f"point {used} ({time.monotonic() - started:.1f}s{note})"
+
+
+# Two fast models, thinking off: a click can't wait for a slow chain (flash-lite took 49 s on 10 Oct).
+BOX_MODELS = [m for m in (os.environ.get("MINT_BOX_MODEL"), "gemini-3.5-flash", "gemini-3.6-flash") if m][:2]
+
+
+def box_by_vision(target: str, area, window_id: int | None = None, words: list[dict] | None = None):
+    """The box around `target` in a picture of the app's window, from Gemini's detection output (box_2d =
+    [ymin, xmin, ymax, xmax], 0-1000, the format it is trained on) -> ((x, y) screen point, (x, y, w, h) box, why)
+    or (None, None, why). For apps that show Accessibility nothing (Telegram): pointing from the conversation's
+    screenshot missed by hundreds of points (10 Oct). The box's centre is snapped to the words read on screen inside
+    it that match the target, so the click lands on the label itself."""
+    from google.genai import types
+
+    from mint.screen import choose
+    started = time.monotonic()
+    image, scale = screenshot(area, window_id)
+    sent, ratio = choose.prepare(image, 1024)
+    prompt = (f"Find this on the screen of a Mac app: {target}. Return a JSON list with at most one item: "
+              '[{"box_2d": [ymin, xmin, ymax, xmax], "label": "<what it is>"}], coordinates normalized to 0-1000. '
+              "If it is not visible, return [].")
+    try:
+        text, used = _generate([types.Part.from_bytes(data=_png(sent), mime_type="image/png"), prompt],
+                               models=BOX_MODELS, json_mode=True, think=False)
+        found = _json(text)
+    except Exception as error:
+        return None, None, f"box: {str(error)[:120]}"
+    item = next((i for i in (found if isinstance(found, list) else [found]) if isinstance(i, dict)
+                 and isinstance(i.get("box_2d"), list) and len(i["box_2d"]) == 4), None)
+    if item is None:
+        return None, None, f"box: not visible ({used})"
+    ymin, xmin, ymax, xmax = (float(v) for v in item["box_2d"])
+
+    def screen(x, y, axis_size):
+        return choose.denorm(x, axis_size) / ratio / scale
+
+    x0 = area[0] + screen(xmin, 0, sent.size[0])
+    x1 = area[0] + screen(xmax, 0, sent.size[0])
+    y0 = area[1] + screen(ymin, 0, sent.size[1])
+    y1 = area[1] + screen(ymax, 0, sent.size[1])
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return None, None, f"box: empty box from {used}"
+    point = ((x0 + x1) / 2, (y0 + y1) / 2)
+    note = ""
+    wanted = set(_words(target))
+    inside = [w for w in (words or []) if x0 - 4 <= w["x"] + w["w"] / 2 <= x1 + 4 and y0 - 4 <= w["y"] + w["h"] / 2 <= y1 + 4]
+    named = [w for w in inside if wanted & set(_words(w["text"]))]
+    if named:
+        best = max(named, key=lambda w: len(wanted & set(_words(w["text"]))))
+        point, note = (best["x"] + best["w"] / 2, best["y"] + best["h"] / 2), f", on the words '{best['text'][:30]}'"
+    return point, (x0, y0, x1 - x0, y1 - y0), f"box {used} ({time.monotonic() - started:.1f}s{note})"
 
 
 def _scroll_region_search(target: str, action: str, inv: dict):

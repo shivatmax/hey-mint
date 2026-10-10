@@ -1152,6 +1152,8 @@ async def _wrapped(core, name: str, args: dict):
                            "it is not ready to type into yet.")
             await asyncio.to_thread(axkit.unlock, app, 0.8)
         result += _skill_hint(str(target))
+        from mint.tools import app_routes
+        result += app_routes.card(app.localizedName() if app is not None else str(target))
     elif name in {"open_slack", "open_chrome"}:
         result += _skill_hint("Slack" if name == "open_slack" else "Chrome")
     return result + note, image

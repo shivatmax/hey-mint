@@ -137,8 +137,10 @@ def decide(said: str, task_step: str = "", agent_asking: bool = False) -> str:
             st["nudges"] += 1
             st["tools_since"] = 0
             return (f"(Mint autopilot - this is not the user speaking. Don't hand it back yet: the user asked "
-                    f"\"{request[:300]}\", and there are ways you haven't tried. Try a different way now - not a "
-                    "call that already failed: if the app's window may not be showing, open_app it again; look or "
+                    f"\"{request[:300]}\", and there are ways you haven't tried. Try a different ROUTE now - not a "
+                    "call that already failed: the app's own feature (its menus: Export, Save As, Share, Download - "
+                    "menu action=list), its link (open_url, e.g. tg://resolve?domain=NAME), a small script that "
+                    "repeats the clicks; if the app's window may not be showing, open_app it again; look or "
                     "read_window to see what is really on screen; click_text the words you see (a search box by its "
                     "placeholder, an item by its name); after opening something, read_window to check it is the "
                     "right one, and if not, go back and pick the next one. Only if this try fails too, tell the user "
