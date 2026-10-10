@@ -555,31 +555,49 @@ class Mint:
         self._state("awake")
 
     async def hold_to_talk(self, down: bool) -> None:
-        """The hold-to-talk keys (fn+⌃ by default, ui._register_talk_hold): held, Mint listens - no wake word, even
-        while paused or speaking; let go, the words are over and it works on them. Paused before, it pauses again
-        once it is done (go_to_sleep)."""
+        """The hold-to-talk keys (fn+⌃ by default, ui._register_talk_hold). Held: the words are recorded
+        (dictation.talk, from the instant the keys went down - Mint's own stream, or a plain microphone when its
+        engine is off). Let go: Mint wakes and the clip goes to the model as the user's turn, with its end marked.
+        Seen 10 Oct 19:22: waking first and streaming live put Mint to sleep in the same second (the follow-up clock
+        saw no server activity for minutes) and, paused, the restarting audio engine heard nothing."""
+        from mint.voice import dictation
         if down:
+            dictation.talk.begin()              # (already on since the keys went down: keeps what it has)
             self._ptt = True
-            if self.paused:
-                self._ptt_repause = True
-                self.set_paused(False)
             if self.audio.playing or not self.audio_in.empty():
                 self._flush_playback()          # talking over Mint: the user has the floor
-            if self.asleep:
-                await self.wake_up("shortcut hold")
-            else:
-                self._next_kind = "asked"
-            self._window.handling()             # no clock while the keys are down
-            if self._gate is not None:
-                self._gate.force_open()         # their own keys: no voice check
             self._print("[listening while the keys are held]")
-            self._state("awake")
+            self._state("awake")                # the orb shows it is listening
             return
         if not getattr(self, "_ptt", False):
             return
         self._ptt = False
+        pcm = dictation.talk.end()
+        seconds = len(pcm) / 2 / dictation.RATE
+        if not dictation._spoken(pcm):
+            self._print(f"[hold to talk: nothing heard in {seconds:.1f}s]")
+            self._state(self._idle_state())
+            return
+        self._print(f"[keys let go: {seconds:.1f}s of words - working on it]")
+        if self.paused:
+            self._ptt_repause = True
+            self.set_paused(False)
+        if self.asleep:
+            await self.wake_up("shortcut hold")
+        else:
+            self._next_kind = "asked"
         self._window.woke(time.monotonic())      # time for the words' verdict; a request keeps it open
-        self._print("[keys let go: working on it]")
+        self._server_at = time.monotonic()       # (the stale-request clock starts now, not at the last reply)
+        session = self.session
+        if session is None:
+            return
+        step = 3200                              # 0.1 s chunks
+        try:
+            for at in range(0, len(pcm), step):
+                await session.send_realtime_input(
+                    audio=types.Blob(data=pcm[at:at + step], mime_type="audio/pcm;rate=16000"))
+        except Exception:
+            log.debug("hold-to-talk audio not sent", exc_info=True)
         await self._close_user_audio()           # the words are over now - no waiting for a pause
 
     def _converse(self, on: bool) -> None:
@@ -829,6 +847,10 @@ class Mint:
             return
         from mint.voice import dictation
         from mint.voice import wake_train
+        dictation.ring(pcm)                       # the half second before a dictation / hold-to-talk key
+        if dictation.talk.on:
+            dictation.talk.feed(pcm)              # hold-to-talk: recorded, sent when the keys are let go
+            return
         if wake_train.capturing():
             wake_train.feed(pcm)                  # Settings ▸ Microphone & voice is recording a take
             return

@@ -83,12 +83,42 @@ def test_ctrl_then_fn_never_starts_dictation(monkeypatch):
     assert calls == []
 
 
-def test_holding_wakes_mint_even_paused_and_letting_go_ends_the_words():
+def _dictation():
+    try:
+        from mint.voice import dictation
+    except ImportError:
+        from mint import dictation
+    return dictation
+
+
+def _voice(seconds=1.5, loud=6000):
+    import numpy as np
+    t = np.arange(int(16000 * seconds)) / 16000
+    return (np.sin(2 * np.pi * 220 * t) * loud * (np.sin(2 * np.pi * 2 * t) > 0)).astype(np.int16).tobytes()
+
+
+def test_capture_keeps_the_moment_before_the_key_and_skips_engine_zeros(monkeypatch):
+    d = _dictation()
+    monkeypatch.setattr(d.Capture, "_plain_mic_if_needed", lambda self: None)     # no real microphone in tests
+    d._ring.clear()
+    d.ring(b"\x01\x00" * 1600)                                               # heard just before the key
+    cap = d.Capture("t")
+    assert cap.begin() and not cap.begin()
+    cap.feed(bytes(3200))                                                    # the engine still starting: zeros
+    cap.feed(b"\x02\x00" * 1600)
+    pcm = cap.end()
+    assert pcm == b"\x01\x00" * 1600 + b"\x02\x00" * 1600 and not cap.on
+
+
+def test_holding_records_and_letting_go_wakes_mint_and_sends_the_words(monkeypatch):
     try:
         from mint.app import session
         from mint.voice import listening
     except ImportError:
         from mint import session, listening
+    d = _dictation()
+    monkeypatch.setattr(d.Capture, "_plain_mic_if_needed", lambda self: None)
+    d._ring.clear()
 
     class Audio:
         playing = False
@@ -97,13 +127,21 @@ def test_holding_wakes_mint_even_paused_and_letting_go_ends_the_words():
         def empty(self):
             return True
 
+    class Live:
+        def __init__(self):
+            self.chunks = 0
+
+        async def send_realtime_input(self, audio=None, **_):
+            self.chunks += 1
+
     m = session.Mint.__new__(session.Mint)
     log = []
     m.paused, m.asleep, m.hands_free = True, True, True
-    m.audio, m.audio_in, m._gate = Audio(), Queue(), None
+    m.audio, m.audio_in, m._gate, m.session = Audio(), Queue(), None, Live()
     m._window = listening.Window()
     m._print = log.append
     m._state = lambda *a: None
+    m._idle_state = lambda: "paused"
 
     def set_paused(value):
         m.paused = value
@@ -121,10 +159,66 @@ def test_holding_wakes_mint_even_paused_and_letting_go_ends_the_words():
         log.append("end of words")
     m._close_user_audio = close
     asyncio.run(m.hold_to_talk(True))
-    assert "paused=False" in log and "wake:shortcut hold" in log
-    assert m._window.until == float("inf")
+    assert m.paused and "paused=False" not in log                       # nothing restarts while the keys are down
+    d.talk.feed(_voice())                                                 # the user talks
     asyncio.run(m.hold_to_talk(False))
-    assert log[-1] == "end of words" and m._window.until != float("inf")
+    assert "paused=False" in log and "wake:shortcut hold" in log
+    assert m.session.chunks == 15 and log[-1] == "end of words"           # 1.5 s in 0.1 s chunks, then the end
     m._wake, m.meet, m.loop, m.session = None, None, None, None
     m.go_to_sleep("done")                                                 # it was paused: paused again
     assert m.paused
+
+
+def test_holding_without_words_does_nothing(monkeypatch):
+    try:
+        from mint.app import session
+    except ImportError:
+        from mint import session
+    d = _dictation()
+    monkeypatch.setattr(d.Capture, "_plain_mic_if_needed", lambda self: None)
+    d._ring.clear()
+    m = session.Mint.__new__(session.Mint)
+    log = []
+
+    class Audio:
+        playing = False
+
+    class Queue:
+        def empty(self):
+            return True
+    m.audio, m.audio_in, m.paused = Audio(), Queue(), True
+    m._print, m._state, m._idle_state = log.append, (lambda *a: None), (lambda: "paused")
+    asyncio.run(m.hold_to_talk(True))
+    asyncio.run(m.hold_to_talk(False))
+    assert m.paused and "nothing heard" in log[-1]
+
+
+def test_dictation_key_down_records_before_the_hold_is_sure(monkeypatch):
+    d = _dictation()
+    monkeypatch.setattr(d.Capture, "_plain_mic_if_needed", lambda self: None)
+    d._ring.clear()
+    d._state.clear()
+    d._state["mode"] = "idle"
+    d.prime()                                                             # fn down
+    d.feed(b"\x03\x00" * 1600)                                         # "Hey..." said at once
+    d.unprime()                                                           # it was only a tap
+    assert not d.capturing()
+    d.prime()
+    d.feed(b"\x03\x00" * 1600)
+    d.start()                                                             # the hold is sure 0.28 s later
+    d.feed(b"\x04\x00" * 1600)
+    assert d._rec.seconds() == 0.2
+    d.cancel()
+
+
+def test_dictation_tells_a_silent_mic_from_a_quiet_room(capsys):
+    try:
+        from mint.voice import dictation
+    except ImportError:
+        from mint import dictation
+    dictation._write(bytes(16000 * 2 * 3))                               # 3 s of digital zeros
+    assert "only silence" in capsys.readouterr().out and "still starting" in dictation._state["error"]
+    import numpy as np
+    hiss = (np.random.default_rng(1).normal(0, 30, 16000 * 3)).astype(np.int16).tobytes()
+    dictation._write(hiss)                                               # a quiet room: nothing said
+    assert "too quiet" in capsys.readouterr().out and dictation._state["error"] == "Didn't hear anything"

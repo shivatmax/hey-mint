@@ -199,9 +199,10 @@ class ModifierChord:
 
     HOLD = 0.15
 
-    def __init__(self, shortcut: str, on_hold, on_release) -> None:
+    def __init__(self, shortcut: str, on_hold, on_release, on_down=None, on_drop=None) -> None:
         self.mask = chord_mask(shortcut)
         self.on_hold, self.on_release = on_hold, on_release
+        self.on_down, self.on_drop = on_down, on_drop      # the chord formed / broke before the hold (see ModifierHold)
         self.down_at = 0.0
         self.holding = False
         self.spoiled = False
@@ -233,6 +234,8 @@ class ModifierChord:
 
     def key(self, event) -> None:
         if self.down_at and not self.holding:
+            if not self.spoiled:
+                ModifierHold._call(self.on_drop)
             self.spoiled = True
 
     def flags(self, event, later=None) -> None:
@@ -244,6 +247,7 @@ class ModifierChord:
             if not self.down_at:
                 self.down_at, self.spoiled = now, False
                 stamp = now
+                ModifierHold._call(self.on_down)
 
                 def check():
                     if self.down_at == stamp and not self.spoiled and not self.holding:
@@ -259,6 +263,8 @@ class ModifierChord:
             if self.holding:
                 self.holding = False
                 ModifierHold._call(self.on_release)
+            elif not self.spoiled:
+                ModifierHold._call(self.on_drop)
 
 
 class ModifierHold:
@@ -269,10 +275,14 @@ class ModifierHold:
     HOLD = 0.28           # held this long with nothing else pressed: it is a hold
     DOUBLE = 0.42         # two taps within this: a double tap
 
-    def __init__(self, name: str, on_hold, on_release, on_double_tap=None, on_cancel=None) -> None:
+    def __init__(self, name: str, on_hold, on_release, on_double_tap=None, on_cancel=None, on_down=None,
+                 on_drop=None) -> None:
         self.code, self.flag = MODIFIER_KEYS[name]
         self.on_hold, self.on_release, self.on_double_tap = on_hold, on_release, on_double_tap
         self.on_cancel = on_cancel          # another modifier joined a hold (fn, then ⌃ for hold-to-talk)
+        # on_down: the key went down alone - start recording now, the hold may follow (the first words were lost
+        # while waiting HOLD seconds to be sure). on_drop: it wasn't a hold after all (a tap, a shortcut).
+        self.on_down, self.on_drop = on_down, on_drop
         self.down_at = 0.0
         self.last_tap = 0.0
         self.holding = False
@@ -306,6 +316,8 @@ class ModifierHold:
 
     def _key(self, event) -> None:
         if self.down_at:
+            if not self.spoiled and not self.holding:
+                self._call(self.on_drop)
             self.spoiled = True              # a key with it: typing, not a hold
 
     def _flags(self, event) -> None:
@@ -314,6 +326,8 @@ class ModifierHold:
         from PyObjCTools import AppHelper
         if int(event.keyCode()) != self.code:
             if self.down_at:
+                if not self.spoiled and not self.holding:
+                    self._call(self.on_drop)
                 self.spoiled = True          # another modifier joined: a shortcut, not ours
                 if self.holding:
                     self.holding = False     # ...after the hold began: undo it (fn held, then ⌃ = talk to Mint)
@@ -326,6 +340,8 @@ class ModifierHold:
             # Pressed while another modifier is down (⌃ then fn): a chord, not this key alone.
             self.down_at, self.spoiled = now, bool(flags & _ALL_MODS & ~self.flag)
             stamp = now
+            if not self.spoiled:
+                self._call(self.on_down)
 
             def check():
                 if self.down_at == stamp and not self.spoiled:
@@ -337,7 +353,10 @@ class ModifierHold:
             if self.holding:
                 self.holding = False
                 self._call(self.on_release)
-            elif not self.spoiled and held < self.HOLD:
+                return
+            if not self.spoiled:
+                self._call(self.on_drop)     # a tap: whatever on_down started is not wanted (a double tap restarts)
+            if not self.spoiled and held < self.HOLD:
                 if now - self.last_tap < self.DOUBLE and self.on_double_tap is not None:
                     self.last_tap = 0.0
                     self._call(self.on_double_tap)

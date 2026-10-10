@@ -221,7 +221,10 @@ class Presence:
         key = str(keys.get("talk_hold") or "")
         press, release = (lambda: self.fire("talk_hold")), (lambda: self.fire("talk_release"))
         if hotkeys.is_chord(key):
-            self._talk_chord = hotkeys.ModifierChord(key, press, release)
+            from mint.voice import dictation
+            # Recording starts as the keys go down, before the hold is sure: no first word lost.
+            self._talk_chord = hotkeys.ModifierChord(key, press, release, on_down=dictation.talk.begin,
+                                                     on_drop=dictation.talk.end)
             self._talk_chord.start()
         elif not (key and self._hotkeys.register(key, press, on_release=release)):
             return
@@ -237,7 +240,8 @@ class Presence:
         key = str(keys.get("dictate") or "")
         if key in hotkeys.MODIFIER_KEYS:
             self._dictation_hold = hotkeys.ModifierHold(key, dictation.start, dictation.finish, dictation.toggle,
-                                                        on_cancel=dictation.cancel)
+                                                        on_cancel=dictation.cancel, on_down=dictation.prime,
+                                                        on_drop=dictation.unprime)
             self._dictation_hold.start()
             print(f"  [shortcut: hold {hotkeys.display(key)} to dictate, tap it twice for hands-free]", flush=True)
         elif key and self._hotkeys.register(key, dictation.start, on_release=dictation.finish):

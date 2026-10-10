@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.22 (2026-10-10)
+
+- **Hold fn ⌃ to talk works:** holding the keys woke Mint and put it straight back to sleep (the "no reply for a
+  while" clock counted from Mint's last answer, minutes before). Now your words are recorded while you hold the keys
+  and sent to Mint the moment you let go - it wakes, answers, and if it was paused, pauses again after.
+- **Dictation and hold-to-talk start instantly:** recording begins the moment the key goes down (it used to wait
+  0.28 s to be sure it was a hold, losing your first word), keeps the half second before it, and when Mint is
+  paused uses the microphone directly instead of waiting for Mint's audio engine to restart - which gave silence for
+  a moment and "Didn't hear anything".
+- **Clearer dictation errors:** a microphone that sent nothing says "The mic was still starting - try again"; a quiet
+  room still says "Didn't hear anything". Neither is sent to Gemini.
+
 ## 0.6.21 (2026-10-10)
 
 - **The walkthrough shows one page, cleanly:** closing setup, finishing it or closing "What I can do" left its
