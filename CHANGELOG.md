@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.21 (2026-10-10)
+
+- **The walkthrough shows one page, cleanly:** closing setup, finishing it or closing "What I can do" left its
+  page behind in the window, so opening the walkthrough again drew the welcome, About you and the tour on top of
+  each other. Every page is cleared now before the next one comes in.
+
 ## 0.6.20 (2026-10-10)
 
 - **A request never ends in silence:** when the model ran a tool and then said nothing (seen: a file search found

@@ -112,3 +112,29 @@ def test_jev_is_an_optional_page_after_gemini():
     assert onboarding.PAGES.index("jev") == onboarding.PAGES.index("connect") + 1
     assert onboarding.TYPESAFE_KEYS == "https://console.typesafe.ai/keys"
     assert onboarding.JEV_ENV == "TYPESAFE_API_KEY"
+
+
+def test_reopening_shows_one_page_not_a_pile(monkeypatch, tmp_path):
+    """Closing setup (or "What I can do") and opening the walkthrough again left the old page on the stage: the
+    welcome, About you and the tour drew on top of each other."""
+    import AppKit
+    prefs = onboarding.prefs
+    monkeypatch.setattr(prefs, "PATH", tmp_path / "settings.json")
+    monkeypatch.setattr(prefs, "_values", {})
+    monkeypatch.setattr(prefs, "_mtime", None)
+    monkeypatch.setattr(prefs, "_listeners", [])
+    AppKit.NSApplication.sharedApplication()
+    o = onboarding.Onboarding()
+    monkeypatch.setattr(o, "_drift", lambda page, animated=True: None)
+    o.show(onboarding.PAGES.index("welcome"))
+    o.closed()                                              # the red button
+    o.show(onboarding.PAGES.index("tour"), tour_only=True)  # Settings ▸ the walkthrough
+    assert len(o.stage.subviews()) == 1
+    o._close_tour()
+    o.show(onboarding.PAGES.index("about"))
+    o.finish()
+    o.show(onboarding.PAGES.index("tour"), tour_only=True)
+    o._go(onboarding.PAGES.index("tour"))
+    assert len(o.stage.subviews()) == 1 and o.view is o.stage.subviews()[0]
+    o._leave()
+    o.window.orderOut_(None)

@@ -1839,13 +1839,10 @@ class Onboarding:
     def _go(self, page: int) -> None:
         page = max(0, min(page, len(PAGES) - 1))
         self._leave()
-        old = self.view
-        if old is not None:
-            # The old page goes at once; the new one springs in piece by piece. (A crossfade showed both pages
-            # on top of each other: building a page with its glass cards holds the main thread, so the old
-            # page's fade and its delayed removal ran late - seconds late while Mint was busy.)
-            self.orbs = [o for o in self.orbs if not o[1].isDescendantOf_(old)]
-            old.removeFromSuperview()
+        # The old page goes at once; the new one springs in piece by piece. (A crossfade showed both pages
+        # on top of each other: building a page with its glass cards holds the main thread, so the old
+        # page's fade and its delayed removal ran late - seconds late while Mint was busy.)
+        self._clear_stage()
         self.page = page
         self.fields = {}
         view = _OnbFlipped.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, W, H))
@@ -1860,6 +1857,15 @@ class Onboarding:
         self._drift(page)
         first = next((f for f in self.fields.values()), None)
         self.window.makeFirstResponder_(first if first is not None else self.window.contentView())
+
+    def _clear_stage(self) -> None:
+        """Every page view goes, not only the current one: closing setup, finishing it or closing "What I can do"
+        let go of its page without taking it off the stage, so opening the walkthrough again stacked the new page
+        on the old ones (the welcome, About you and the tour all at once)."""
+        for sub in list(self.stage.subviews()):
+            sub.removeFromSuperview()
+        self.orbs = []
+        self.view = None
 
     def _leave(self) -> None:
         """Keep what this page asked for."""
@@ -2030,10 +2036,7 @@ class Onboarding:
             return
         self.tour_only = tour_only
         self.window.setTitle_(f"What {prefs.name()} can do" if tour_only else f"Welcome to {prefs.name()}")
-        self.orbs = []
-        if self.view is not None:
-            self.view.removeFromSuperview()
-            self.view = None
+        self._clear_stage()
         self.page = page
         self.window.setAlphaValue_(1.0)
         self.window.center()
