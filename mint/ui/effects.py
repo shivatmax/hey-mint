@@ -16,6 +16,8 @@ from __future__ import annotations
 import math
 import os
 
+import time
+
 import AppKit
 import Quartz
 from PyObjCTools import AppHelper
@@ -84,8 +86,10 @@ class Effects:
             view = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, frame.size.width, frame.size.height))
             view.setWantsLayer_(True)
             window.setContentView_(view)
-            window.orderFrontRegardless()
+            # Not on screen until an effect plays: a full-screen window on top, even empty, is blended again
+            # every time anything under it changes (a video: every frame) - battery (12 Oct).
             self._overlays.append((frame, window, view.layer(), screen.backingScaleFactor()))
+        self._shown = False
 
     # --- public API (any thread) ---------------------------------------------------
 
@@ -144,10 +148,31 @@ class Effects:
 
     # --- drawing (main thread) -------------------------------------------------------
 
+    def _wake_overlays(self) -> None:
+        """An effect is about to be drawn: the overlay windows on screen, and off again once idle."""
+        self._used_at = time.monotonic()
+        if not getattr(self, "_shown", False):
+            self._shown = True
+            for _, window, _, _ in self._overlays:
+                window.orderFrontRegardless()
+            AppHelper.callLater(IDLE_HIDE, self._maybe_hide)
+
+    def _maybe_hide(self) -> None:
+        if not getattr(self, "_shown", False):
+            return
+        idle = time.monotonic() - getattr(self, "_used_at", 0.0)
+        if idle < IDLE_HIDE:
+            AppHelper.callLater(IDLE_HIDE - idle + 0.05, self._maybe_hide)
+            return
+        self._shown = False
+        for _, window, _, _ in self._overlays:
+            window.orderOut_(None)
+
     def _locate(self, x: float, y: float):
         """Quartz global point -> (root layer, local point, frame, scale)."""
         if not self._overlays:
             return None
+        self._wake_overlays()
         cx, cy = x, _primary_height() - y
         if self.on_target is not None:
             self.on_target((cx, cy))
@@ -545,6 +570,7 @@ class Effects:
 ARROW = 1.2              # the arrow's size against a 15 x 22 pt pointer
 CURSOR_APPEAR = 0.18     # the cursor fading in where it is first needed
 CURSOR_LINGER = 2.4      # how long it stays after Mint's last action
+IDLE_HIDE = 10.0         # the overlay windows leave the screen this long after the last effect
 
 
 def glide_seconds(start, end) -> float:

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.23 (2026-10-12)
+
+- **Much lighter on the battery:** while Mint only waits for "Hey Mint" it does far less. Measured on a MacBook Air,
+  listening and asleep: ~41% of a CPU core before, ~7-12% now (the low end in a quiet room). The speaker is no longer
+  kept running (and keeping the Mac awake) while Mint is silent; only the microphone stays on, to hear "Hey Mint".
+  - **The plain microphone while waiting** (echo cancellation only during a conversation): echo cancellation all the
+    time cost ~10-15% of a core all day. Pausing mid-conversation also goes back to the plain microphone.
+  - **Fixed: a reconnect loop that drained the battery.** If the audio engine failed half-way through starting, every
+    later start failed too ("nullptr == Tap()"), and Mint reconnected every 2 seconds for hours. The microphone is
+    now always cleaned up first, and a connection that keeps dropping right away waits longer each time (up to a
+    minute).
+  - **Fixed: the chat window grew forever** (one row per note, ~28,000 after a day of reconnects, all re-laid out
+    on every frame). It keeps the last 400 rows.
+  - **A still face while asleep:** the little Mint stops breathing and following the room's sound when asleep and
+    nothing is near (it changed 30 times a second, each a redraw of the screen); it wakes the moment the pointer
+    comes. The "Zzz" plays for the first 45 seconds of a nap, not all night.
+  - **No invisible full-screen windows:** the cursor effects, on-screen marks and the island now leave the screen
+    when they show nothing (an empty full-screen window on top is blended again every frame of a video).
+  - **Silence is free for the wake word:** after 1.3 s of near-silence the wake-word model stops computing until
+    there is sound again (it hears "Hey Mint" after a quiet spell exactly as before - tested with two voices).
+  - **The speaker side pauses when Mint is silent** (4 s after its last sound) and starts again in a few
+    milliseconds before the next one - it used to play silence all day.
+  - Background checks sleep longer when they have nothing to watch (coding-agent files, approvals, trackers), the
+    notch skips redraws that change nothing, and the music widget repaints only when the song changes.
+  - For developers: `kill -USR2 <Mint's pid>` writes a one-minute profile of where Mint's time goes.
+
 ## 0.6.22 (2026-10-10)
 
 - **Hold fn ⌃ to talk works:** holding the keys woke Mint and put it straight back to sleep (the "no reply for a

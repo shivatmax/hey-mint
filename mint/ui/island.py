@@ -1579,6 +1579,7 @@ class Island:
         screen = AppKit.NSScreen.mainScreen().frame()
         self.screen = screen
         self.panel = _panel(screen, click_through=True)
+        self.panel.orderOut_(None)                       # on screen only while a scene shows (_open, _close)
         root = _IslandRoot.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, screen.size.width, screen.size.height))
         root.setWantsLayer_(True)
         root.registerForDraggedTypes_([AppKit.NSPasteboardTypeFileURL, AppKit.NSPasteboardTypeString])
@@ -1669,9 +1670,14 @@ class Island:
 
     def _watch_drag(self) -> None:
         """A drag (files or text) started anywhere: show the drop target until the button is let go."""
-        board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
-        count = board.changeCount()
         pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
+        if not pressed and not self.dragging and not getattr(self, "_drag_pressed", False):
+            return                               # no button down: no drag can be starting (battery, 12 Oct)
+        self._drag_pressed = pressed
+        board = getattr(self, "_drag_board", None)
+        if board is None:
+            board = self._drag_board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
+        count = board.changeCount()
         if count != self.drag_count:
             self.drag_count = count
             types = [str(t) for t in (board.types() or [])]
@@ -2061,6 +2067,9 @@ class Island:
             self.scene, self.shown, self.rect, self.closing = None, False, None, False
             self.hud.island_active = False
             self.panel.setIgnoresMouseEvents_(True)
+            # Off the screen until the next scene (_open brings it back): this window covers the whole screen,
+            # and even empty it was blended again each time anything under it changed (battery, 12 Oct).
+            self.panel.orderOut_(None)
             self.hud._bubble_dirty = True
         AppHelper.callLater(0.3, finish)
         AppHelper.callLater(0.55, done)

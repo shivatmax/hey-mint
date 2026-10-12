@@ -852,6 +852,10 @@ def player_view(width: float, height: float):
 
 
 def _paint_compact(info: dict) -> None:
+    key = (info.get("state"), info.get("title"), info.get("artist"), info.get("app"), info.get("artwork"))
+    if key == _compact.get("painted_key") and _compact.get("art_view") is not None:
+        return                                   # the notch asks every tick; nothing changed (battery, 12 Oct)
+    _compact["painted_key"] = key
     playing = info.get("state") == "playing"
     image = _image(info.get("artwork") or "")
     art = _compact.get("art_view")
@@ -880,7 +884,7 @@ def compact_info(height: float = 22) -> dict:
         art.layer().setMasksToBounds_(True)
         art.layer().setBackgroundColor_(_cg((1, 1, 1), 0.08))
         bars = _MusicPlayerBars.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, round(size * 0.8), round(size * 0.55)))
-        _compact.update(size=size, art_view=art, bars_view=bars)
+        _compact.update(size=size, art_view=art, bars_view=bars, painted_key=None)     # new views: paint them
     _paint_compact(_music().cached())
     return dict(_compact)
 

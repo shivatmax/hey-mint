@@ -1145,7 +1145,12 @@ class Orb:
         self._busy = bool(visible_work) or state in ("thinking", "working")
         self._hover += ((1.0 if hovering else 0.0) - self._hover) * 0.25
         asleep = state in ("sleeping", "paused", "offline")
-        breath = 0.03 * math.sin(now * (1.2 if asleep else 2.1))
+        calm = getattr(self, "calm", False)          # hud: asleep and nothing near - a still face, no redraws
+        if asleep and not getattr(self, "_asleep_since", 0.0):
+            self._asleep_since = now
+        elif not asleep:
+            self._asleep_since = 0.0
+        breath = 0.0 if calm else 0.03 * math.sin(now * (1.2 if asleep else 2.1))
         annoyed = now < self._annoyed_until
         self._swell += ((1.12 if annoyed else 1.0) - self._swell) * 0.2
         self._size += ((0.62 if self._thumb else 1.0) - self._size) * 0.25
@@ -1162,7 +1167,8 @@ class Orb:
         self.status.tick(now)
         self.status.hover(hovering and not self._thumb)
         self._update_tint()
-        if asleep and prefs.get("face") and now >= self._next_z:
+        snoozing = now - (self._asleep_since or now) < 45.0 or self._hover > 0.1    # Zzz: not all night
+        if asleep and snoozing and prefs.get("face") and now >= self._next_z:
             self._next_z = now + random.uniform(1.6, 2.6)
             self._snooze()
 

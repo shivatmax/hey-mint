@@ -255,8 +255,15 @@ class Watcher:
             except Exception:
                 log.exception("agent watch pass failed")
             self._passed.set()
-            self._wake.wait(POLL)
+            self._wake.wait(self._poll_wait())
             self._wake.clear()
+
+    def _poll_wait(self) -> float:
+        """Every POLL while an agent is writing (its words show at once); every SCAN (new files are only looked
+        for that often anyway) while nothing is followed or nothing was written for a minute - a Mac left on
+        with idle sessions otherwise wakes for this ~100 times a minute (battery, 12 Oct)."""
+        newest = max((f.mtime or 0.0 for f in self._files.values()), default=0.0)
+        return POLL if time.time() - newest < 60 else SCAN
 
     def _pass(self) -> None:
         now = time.time()

@@ -555,3 +555,26 @@ def test_only_input_tokens_count_toward_the_limit(models, monkeypatch):
     except Exception:
         pass
     assert seen == [24_000]
+
+
+def test_a_connection_that_keeps_dying_at_once_waits_longer_each_time(monkeypatch):
+    """12 Oct: the audio failed right after every connect, which reset the attempt count - Mint reconnected every
+    2 s for six hours. A connection that dies within seconds now waits longer each time (up to a minute)."""
+    import time as _t
+    m = _mint()
+    waits = []
+
+    async def count_down(delay, why):
+        waits.append(delay)
+    monkeypatch.setattr(m, "_count_down", count_down, raising=False)
+    error = RuntimeError("com.apple.coreaudio.avfaudio - required condition is false: nullptr == Tap()")
+
+    async def run():
+        for _ in range(7):
+            m._connected_at = _t.monotonic()                   # it had just connected
+            await m._backoff(error, 1)
+        m._connected_at = _t.monotonic() - 600                 # a long, healthy connection ends
+        await m._backoff(error, 1)
+    asyncio.run(run())
+    assert waits[:6] == [2, 4, 8, 16, 32, 60] and waits[6] == 60
+    assert waits[-1] == 2                                      # healthy again: back to a quick retry

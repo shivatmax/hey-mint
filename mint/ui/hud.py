@@ -853,7 +853,20 @@ class HUD:
             look = (mouse.x - center[0], mouse.y - center[1])
         busy = self._activity is not None or self._state in ("working", "thinking", "speaking")
         self.orb.primary = True                  # the orb Mint drives (floating or in the notch) wears the status badge
-        self.orb.tick(now, self._level, look, over, busy)
+        # Calm: asleep, nothing near, nothing showing. The face then changes twice a second, doesn't breathe and
+        # doesn't follow the room's sound - every change redraws the screen (WindowServer), 30 times a second,
+        # for hours (12 Oct, battery). The pointer is still checked every tick, so coming near wakes it at once.
+        calm = (self._state in ("sleeping", "paused", "offline") and not over and not dragging and not busy
+                and not self._bubble_visible and not self._bubble_dirty and not getattr(self, "island_active", False)
+                and not getattr(self.chat, "is_open", False))
+        self.orb.calm = calm
+        if calm:
+            self._calm_n = (getattr(self, "_calm_n", 0) + 1) % 15
+            if self._calm_n:
+                return
+        else:
+            self._calm_n = 0
+        self.orb.tick(now, 0.0 if calm else self._level, look, over, busy)
 
         if self._bubble_dirty or (self._activity and int(now * 3) != int((now - 1 / 30) * 3)):
             self._render_bubble(now)

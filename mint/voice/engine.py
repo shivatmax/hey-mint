@@ -54,6 +54,7 @@ _CURRENT_DEVICE = 2000        # kAudioOutputUnitProperty_CurrentDevice
 _SCOPE_GLOBAL = 0
 _DUCK_MIN = 10                # AVAudioVoiceProcessingOtherAudioDuckingLevelMin
 MIN_GAP = 2.0                 # seconds between two rebuilds of the engine
+OUT_IDLE = 4.0                # the speaker side (plain-mic mode) pauses after this long with nothing to say
 
 
 def _resample(samples: np.ndarray, source: float, target: float) -> np.ndarray:
@@ -285,8 +286,10 @@ class VoiceAudio:
 
     def _teardown(self) -> None:
         try:
-            if self._started:
-                self.mic.removeTapOnBus_(0)
+            self.mic.removeTapOnBus_(0)        # always: a start that failed half-way leaves its tap behind
+        except Exception:
+            pass
+        try:
             self.engine.stop()
             if self.out_engine is not self.engine:
                 self.out_engine.stop()
@@ -310,6 +313,12 @@ class VoiceAudio:
                 self._build()
                 if self.on_reconfigure is not None:
                     self.on_reconfigure(self)
+            # A tap left by a start that failed half-way makes this throw "nullptr == Tap()" - and then every
+            # reconnect after it fails the same way (12 Oct: ~1,000 drops an hour for six hours, battery drained).
+            try:
+                self.mic.removeTapOnBus_(0)
+            except Exception:
+                pass
             self.mic.installTapOnBus_bufferSize_format_block_(0, 4800, self.in_format, self._tap)
             ok, error = self.engine.startAndReturnError_(None)
             if ok and self.out_engine is not self.engine:
@@ -321,6 +330,7 @@ class VoiceAudio:
             self.player.play()
             self._started = True
             self._last_tap = time.monotonic()
+            self._rest_output_later()
             # Starting (and choosing devices) makes the engine post its own
             # "configuration changed"; reacting to that looped rebuilds forever
             # in testing. Real changes after this are still caught, and the
@@ -489,12 +499,56 @@ class VoiceAudio:
             if self._pending:
                 return
         self.playing = False
+        self._rest_output_later()
         if self._relax_after_play:
             self._relax_after_play = False
             if not self.conversation:
                 self._switch_later("Mint is asleep: plain microphone")
         if self._on_idle is not None and self._loop is not None:
             self._loop.call_soon_threadsafe(self._on_idle)
+
+    # The speaker side, with the plain microphone (two engines): running, it plays silence to the speaker all the
+    # time - the Mac is kept from idle sleep and coreaudiod works for nothing (12 Oct, battery). So it pauses
+    # after OUT_IDLE with nothing to say, and starts again (a few ms) before the next sound. With echo
+    # cancellation it is one engine with the microphone and keeps running.
+
+    def _output_lock(self):
+        lock = getattr(self, "_out_lock", None)
+        if lock is None:
+            lock = self._out_lock = threading.Lock()
+        return lock
+
+    def _ensure_output(self) -> bool:
+        if self.out_engine is self.engine:
+            return True
+        with self._output_lock():
+            if self.out_engine.isRunning():
+                return True
+            ok, error = self.out_engine.startAndReturnError_(None)
+            if not ok:
+                log.warning("the speaker did not start: %s", error)
+                return False
+            self.player.play()
+            return True
+
+    def _rest_output_later(self) -> None:
+        if getattr(self, "out_engine", None) is None or self.out_engine is self.engine:
+            return
+        timer = threading.Timer(OUT_IDLE, self._rest_output)
+        timer.daemon = True
+        timer.start()
+
+    def _rest_output(self) -> None:
+        if self._closed or not self._started or self.out_engine is self.engine or self.playing:
+            return
+        if time.monotonic() - getattr(self, "_out_wanted", 0.0) < OUT_IDLE:
+            return                             # something was just played: the next idle schedules it again
+        with self._lock:
+            if self._pending:
+                return
+        with self._output_lock():
+            if self.out_engine.isRunning() and not self.playing:
+                self.out_engine.pause()
 
     async def play(self, in_queue: asyncio.Queue, on_idle=None, on_chunk=None) -> None:
         self._loop = asyncio.get_running_loop()
@@ -511,6 +565,9 @@ class VoiceAudio:
                 waited += 0.05
             if self.suspended or not self._started:
                 continue                       # a call has the speaker; say nothing
+            self._out_wanted = time.monotonic()     # (a pending _rest_output now leaves it alone)
+            if not self._ensure_output():
+                continue
             samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768
             if samples.size == 0:
                 continue
@@ -543,7 +600,8 @@ class VoiceAudio:
             self._pending = 0
         if self._started:
             self.player.stop()
-            self.player.play()
+            if self.out_engine.isRunning():    # (paused while idle: it starts again with the next sound)
+                self.player.play()
         self.playing = False
 
     def close(self) -> None:

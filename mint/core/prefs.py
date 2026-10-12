@@ -144,12 +144,13 @@ DEFAULTS: dict = {
     # After Mint is done, it listens this many seconds for a follow-up, then needs the wake word
     # again (listening.py). 0 = the wake word every time.
     "follow_up_seconds": 6,
-    # True: while Mint only waits for the wake word, the plain microphone (other apps' sound is not turned down),
-    # echo cancellation only in a conversation. False (default since 8 Oct): one microphone mode all the time -
-    # switching rebuilt the audio engine mid-conversation (the user's first words lost while it switched, 10 s
-    # after the wake word) and on falling asleep (once it failed to come back: Mint deaf). Calls still get the
-    # plain microphone (listen_in_calls).
-    "quiet_while_waiting": False,
+    # True (default again since 12 Oct): while Mint only waits for the wake word, the plain microphone - echo
+    # cancellation only in a conversation. Echo cancellation all the time cost ~10-15% of a core all day (with
+    # the Mac kept from idle sleep) and the battery went with it. What made it the default off on 8 Oct is
+    # fixed: a rebuild that failed half-way jammed every start after it (tap left installed, 12 Oct) and is
+    # retried 4 times; the switch happens after the user's words (the reply waits for it, nothing is dropped).
+    # False: one microphone mode all the time (more battery). Calls still get the plain microphone.
+    "quiet_while_waiting": True,
     # How readily the wake word fires: normal | high (catches more, a few more false starts) | low.
     "wake_sensitivity": "normal",
     # A voice model that stalls, answers slowly or fails: use the next one for a while (live_models.py).

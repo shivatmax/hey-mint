@@ -373,7 +373,9 @@ def _watch_pending() -> None:
     """A held approval ends when the hook goes away (answered in the terminal: Claude Code stops the
     hook) or after WAIT. Either way the notch stops offering the buttons."""
     while True:
-        time.sleep(0.5)
+        with _lock:
+            waiting = bool(_pending)
+        time.sleep(0.5 if waiting else 3.0)        # no approval held: look rarely (battery)
         with _lock:
             items = list(_pending.items())
         for ident, item in items:

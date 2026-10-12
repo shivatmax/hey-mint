@@ -29,6 +29,7 @@ W, H = 360, 470
 HEADER = 54
 INPUT = 56
 PAD = 12
+MAX_ROWS = 400                  # rows kept in the window (older ones are dropped)
 
 
 def _font(size, weight=AppKit.NSFontWeightRegular):
@@ -362,6 +363,14 @@ class ChatPanel:
             AppKit.NSFontAttributeName: _font(11.5), AppKit.NSForegroundColorAttributeName: color})
 
     def _add(self, kind: str, text: str, layout: bool = True) -> dict:
+        if len(self._rows) >= MAX_ROWS:
+            # The oldest go: every row is a view the window lays out each frame. Unbounded, a day of reconnect
+            # notes left ~28,000 rows and kept the Mac's main thread busy (12 Oct, battery drain).
+            gone, self._rows = self._rows[:len(self._rows) - MAX_ROWS + 1], self._rows[len(self._rows) - MAX_ROWS + 1:]
+            for row in gone:
+                row["view"].removeFromSuperview()
+            if self._rows:
+                self._layout(0)
         view = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, 10, 10))
         view.setWantsLayer_(True)
         label = AppKit.NSTextField.wrappingLabelWithString_("")

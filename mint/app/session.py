@@ -638,6 +638,9 @@ class Mint:
         self.paused = paused
         if paused:
             self.asleep = self.hands_free
+            # The conversation is over too: back to the plain microphone. Paused mid-conversation, it resumed
+            # still in echo cancellation and stayed in it while asleep (12 Oct, battery).
+            self._converse(False)
             self._audio_rest_later()
         elif getattr(self.audio, "resting", False):
             threading.Thread(target=self.audio.wake, name="audio-wake", daemon=True).start()
@@ -3559,7 +3562,12 @@ class Mint:
             traceback.print_exception(error)
         if attempt > 6 and not transient:
             raise SystemExit(1)
-        delay = min(2 ** attempt, 30)
+        # A connection that keeps dying within seconds of opening (12 Oct: the audio engine failing on every
+        # start) resets `attempt` each time it connects: wait longer each such time anyway, up to a minute,
+        # instead of reconnecting every 2 s for hours.
+        lived = time.monotonic() - (getattr(self, "_connected_at", 0.0) or 0.0)
+        self._quick_drops = (getattr(self, "_quick_drops", 0) + 1) if lived < 20 else 0
+        delay = min(2 ** max(attempt, self._quick_drops), 60 if self._quick_drops else 30)
         log.warning("session dropped (%s); reconnecting in %ss", _short_error(message), delay)
         await self._count_down(delay, why)
 

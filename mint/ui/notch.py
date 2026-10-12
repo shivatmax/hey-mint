@@ -2196,12 +2196,20 @@ class Notch:
         """A file drag coming near the notch opens it on the shelf, as boring.notch does."""
         if prefs.get("notch_shelf") is False or self._search_dragging():
             return                               # (a search result being dragged OUT is not for the shelf)
-        board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
         pressed = bool(AppKit.NSEvent.pressedMouseButtons() & 1)
-        count = board.changeCount()
+        board = getattr(self, "_drag_board", None)
+        if board is None:
+            board = self._drag_board = AppKit.NSPasteboard.pasteboardWithName_(AppKit.NSPasteboardNameDrag)
+            self._drag_count = board.changeCount()
         if not pressed:
-            self._drag_count = count
+            # A drag needs the button down: the drag pasteboard is read only when it is let go (the baseline for
+            # the next press), not every tick (battery, 12 Oct).
+            if getattr(self, "_drag_pressed", False):
+                self._drag_pressed = False
+                self._drag_count = board.changeCount()
             return
+        self._drag_pressed = True
+        count = board.changeCount()
         if count == self._drag_count:
             return                               # the button is down, but no drag started
         near = abs(mouse.x - self.cx) < HOME_W / 2 + 40 and mouse.y > self.top - self.nh - 160
@@ -2405,6 +2413,9 @@ class Notch:
         if playful and state == "speaking" and mode in ("open", "compact"):
             level = float(getattr(self.hud, "_level", 0.0) or 0.0)
             scale = 1.0 + min(0.04, level * 0.06)
+        if abs(scale - getattr(self, "_breath_scale", -1.0)) < 1e-4:
+            return                               # unchanged: no write, no redraw
+        self._breath_scale = scale
         Quartz.CATransaction.begin()
         Quartz.CATransaction.setDisableActions_(True)
         self.shape.setAffineTransform_(Quartz.CGAffineTransformMakeScale(scale, 1.0 + (scale - 1.0) * 0.6))
@@ -2427,16 +2438,22 @@ class Notch:
         if not (show_text and caption):
             self._fade(self.words, False)
         visible = show_text and bool(self.progress)
-        Quartz.CATransaction.begin()
-        Quartz.CATransaction.setDisableActions_(True)
-        if visible:
-            self.track.setFrame_(Quartz.CGRectMake(left, y - 5, inner, 3))
-        self.fill.setPosition_(Quartz.CGPointMake(left, y - 3.5))
-        self.fill.setBounds_(Quartz.CGRectMake(0, 0, inner * float(self.progress or 0), 3))
-        self.fill.setBackgroundColor_(gfx.cg(gfx.accent()))
-        Quartz.CATransaction.commit()
-        self.track.setOpacity_(1.0 if visible else 0.0)
-        self.fill.setOpacity_(1.0 if visible else 0.0)
+        # The progress bar's layers only when something about it changed: written every tick (30 a second), even
+        # hidden and unchanged, each write was a redraw of the screen (battery, 12 Oct).
+        bar = (visible, round(left, 1), round(y, 1), round(inner, 1), round(float(self.progress or 0), 4),
+               tuple(gfx.accent()))
+        if bar != getattr(self, "_bar_key", None):
+            self._bar_key = bar
+            Quartz.CATransaction.begin()
+            Quartz.CATransaction.setDisableActions_(True)
+            if visible:
+                self.track.setFrame_(Quartz.CGRectMake(left, y - 5, inner, 3))
+            self.fill.setPosition_(Quartz.CGPointMake(left, y - 3.5))
+            self.fill.setBounds_(Quartz.CGRectMake(0, 0, inner * float(self.progress or 0), 3))
+            self.fill.setBackgroundColor_(gfx.cg(gfx.accent()))
+            Quartz.CATransaction.commit()
+            self.track.setOpacity_(1.0 if visible else 0.0)
+            self.fill.setOpacity_(1.0 if visible else 0.0)
         # Controls: one row along the bottom, popping in one after another.
         hover = mode == "hover" or (mode == "home" and self.tab == "home" and not self._scene_shown
                                     and (not self._music() or bool(getattr(self, "_mint_words", ""))))

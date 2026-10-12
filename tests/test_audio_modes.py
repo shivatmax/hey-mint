@@ -99,6 +99,7 @@ def test_switches_are_spaced_and_skipped_when_no_longer_needed(monkeypatch):
 def test_a_reply_waits_for_the_switch_instead_of_being_dropped():
     a = _audio()
     a._started, a.silent, a.muted = True, False, False
+    a.engine = a.out_engine = object()                       # echo cancellation: one engine
     a._switching = True
     scheduled = []
 
@@ -161,3 +162,124 @@ def test_the_voice_lock_allows_for_the_plain_mic():
     assert voicelock.capture_shift == 0.0
     session.Mint._voice_allowance(_audio(echo="off"))
     assert voicelock.capture_shift == 0.0
+
+
+class _Mic:
+    """AVAudioInputNode's rule: installing a tap while one is installed throws ("nullptr == Tap()")."""
+
+    def __init__(self):
+        self.tap = None
+
+    def installTapOnBus_bufferSize_format_block_(self, bus, size, fmt, block):
+        if self.tap is not None:
+            raise RuntimeError("required condition is false: nullptr == Tap()")
+        self.tap = block
+
+    def removeTapOnBus_(self, bus):
+        self.tap = None
+
+
+class _Engine:
+    def __init__(self, fail_first=True):
+        self.fail = fail_first
+
+    def startAndReturnError_(self, _):
+        if self.fail:
+            self.fail = False
+            raise RuntimeError("the engine threw half-way")     # after the tap was installed
+        return True, None
+
+    def stop(self):
+        pass
+
+
+def test_a_start_that_failed_half_way_does_not_jam_every_start_after_it():
+    """12 Oct: a tap left by a failed start made every reconnect throw "nullptr == Tap()" - ~1,000 session drops
+    an hour for six hours, and the battery drained. The tap is now cleared before it is installed again."""
+    a = _audio()
+    a.__class__ = type("Quiet", (audio_vp.VoiceAudio,), {"status": "test"})   # (the log line's summary)
+    a.mic, a.engine = _Mic(), _Engine()
+    a.out_engine = a.engine
+    a.in_format, a._tap, a._started = None, object(), False
+    a.player = type("P", (), {"play": lambda self: None})()
+    a._observers = []
+    try:
+        a._start()
+    except RuntimeError:
+        pass
+    assert a.mic.tap is not None and not a._started           # the failed start left its tap behind
+    a._start()                                                 # used to throw "nullptr == Tap()" forever
+    assert a._started
+
+
+def test_pausing_mid_conversation_goes_back_to_the_plain_mic():
+    """12 Oct: paused in the middle of a conversation, Mint resumed still in echo cancellation and stayed in it
+    while asleep - the costly mode, all day. Pausing ends the conversation's microphone mode."""
+    m = session.Mint.__new__(session.Mint)
+    m.hands_free, m.loop, m.session = True, None, None
+    m.audio = _audio(cancelled=True)
+    m.audio.conversation = True
+    m._print = lambda *a: None
+    m.ui = type("UI", (), {"set_paused": lambda self, p: None})()
+    m._audio_rest_later = lambda after=3.0: None
+    m.set_paused(True)
+    assert not m.audio.conversation and m.audio.switches == ["Mint is asleep: plain microphone"]
+
+
+class _OutEngine:
+    def __init__(self):
+        self.running, self.starts, self.pauses = True, 0, 0
+
+    def isRunning(self):
+        return self.running
+
+    def startAndReturnError_(self, _):
+        self.running, self.starts = True, self.starts + 1
+        return True, None
+
+    def pause(self):
+        self.running, self.pauses = False, self.pauses + 1
+
+
+class _Player:
+    def __init__(self):
+        self.plays = 0
+
+    def play(self):
+        self.plays += 1
+
+    def stop(self):
+        pass
+
+
+def test_the_speaker_side_pauses_when_idle_and_starts_again_to_speak(monkeypatch):
+    """12 Oct: with the plain microphone the speaker engine played silence all day - the Mac kept from idle
+    sleep, coreaudiod busy. It pauses after OUT_IDLE with nothing to say and starts again before a sound."""
+    a = _audio()
+    a.engine, a.out_engine, a.player = object(), _OutEngine(), _Player()
+    a._started, a.playing = True, False
+    a._out_wanted = 0.0
+    a._rest_output()
+    assert not a.out_engine.running and a.out_engine.pauses == 1
+    assert a._ensure_output() and a.out_engine.running and a.out_engine.starts == 1 and a.player.plays == 1
+    a._out_wanted = __import__("time").monotonic()            # just asked to play
+    a._rest_output()
+    assert a.out_engine.running                               # not paused under a sound about to play
+    a.playing = True
+    a._out_wanted = 0.0
+    a._rest_output()
+    assert a.out_engine.running                               # never while speaking
+    a.flush()                                                 # cut off: the player restarts only on a running engine
+    a.out_engine.running = False
+    plays = a.player.plays
+    a.flush()
+    assert a.player.plays == plays
+
+
+def test_with_echo_cancellation_the_one_engine_keeps_running():
+    a = _audio(cancelled=True)
+    shared = _OutEngine()
+    a.engine = a.out_engine = shared
+    a.player, a._started, a.playing = _Player(), True, False
+    a._rest_output()
+    assert shared.running and shared.pauses == 0               # the microphone is on that engine too

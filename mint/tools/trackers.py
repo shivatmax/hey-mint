@@ -656,7 +656,9 @@ def _announce(t: dict, outcome: str, message: str, keep: bool = False) -> None:
 
 def _loop() -> None:
     while True:
-        time.sleep(1.0)
+        with _lock:
+            watching = any(t["status"] == "watching" for t in _trackers.values())
+        time.sleep(1.0 if watching else 5.0)      # nothing watched: no need to wake every second (battery)
         now = time.time()
         with _lock:
             live = [t for t in _trackers.values() if t["status"] == "watching"]

@@ -154,12 +154,33 @@ class MintWake:
         z = float(((window.reshape(-1) - self._mean) / self._scale) @ self._coef + self._bias)
         return 1.0 / (1.0 + np.exp(-max(-30.0, min(30.0, z))))
 
+    def _quiet(self, frame: np.ndarray) -> bool:
+        """Near-silence (well under any speech), judged against the room's own floor: tracked as the quietest
+        recent frame, rising slowly. A noisy room is never "quiet" (QUIET_MAX), so nothing is skipped there."""
+        level = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+        floor = getattr(self, "_floor", level)
+        self._floor = min(level, floor * 1.002 + 0.05)
+        return level < min(QUIET_MAX, max(QUIET_MIN, 1.6 * self._floor))
+
     def _windows(self, pcm: bytes):
-        """Per 80 ms window: each phrase's score (one dot product each, same features)."""
+        """Per 80 ms window: each phrase's score (one dot product each, same features).
+
+        Silence costs nothing: once SKIP_AFTER quiet frames have gone through (the model's whole 1.3 s context is
+        silence then), more quiet frames are not computed - the features would be the same silence. The first
+        frame with sound goes through as usual, so a soft "Hey Mint" after a quiet spell is heard the same. Most
+        of an idle Mac's day is quiet: the wake features were ~5% of a core, all the time (battery, 12 Oct)."""
         samples = np.frombuffer(pcm, dtype=np.int16)
         self._buffer = np.concatenate([self._buffer, samples])
         while len(self._buffer) >= FRAME_SAMPLES:
             frame, self._buffer = self._buffer[:FRAME_SAMPLES], self._buffer[FRAME_SAMPLES:]
+            if self._quiet(frame):
+                self._quiet_run = getattr(self, "_quiet_run", 0) + 1
+                if self._quiet_run > SKIP_AFTER:
+                    self._consumed += FRAME_SAMPLES
+                    self.skipped = getattr(self, "skipped", 0) + 1
+                    continue
+            else:
+                self._quiet_run = 0
             self._features(frame)
             self._consumed += FRAME_SAMPLES
             window = self._features.get_features(16)
@@ -208,12 +229,18 @@ class MintWake:
 
     def reset(self) -> None:
         self._buffer = np.empty(0, dtype=np.int16)
+        self._quiet_run = 0                       # real silence goes through again before any skipping
         for model in self._models:
             model.run = 0
         try:
             self._features.reset()
         except Exception:
             pass
+
+
+QUIET_MIN = 30.0         # int16 RMS: below this a frame is always near-silence ...
+QUIET_MAX = 120.0        # ... above this never (speech at a distance is several hundred)
+SKIP_AFTER = 17          # quiet frames computed before skipping: the 16-window context, plus one
 
 
 class _Model:

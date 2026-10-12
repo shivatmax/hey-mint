@@ -264,6 +264,8 @@ def main() -> int:
     import faulthandler
     import signal as _signal
     faulthandler.register(_signal.SIGUSR1, file=sys.stderr, all_threads=True)
+    from mint.core import profiler
+    profiler.install()                # kill -USR2 <pid>: a one-minute profile of where time goes
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
