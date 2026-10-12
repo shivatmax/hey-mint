@@ -856,12 +856,16 @@ def parse_raw(raw):
     return email.message_from_bytes(raw, policy=policy.default)
 
 
-def test_mail_closed_is_opened_in_the_background(mail_setup):
+def test_a_closed_mail_stays_closed(mail_setup):
+    """12 Oct: Mail came back each time the user quit it - Mint reopened it to watch the inbox. Now a closed Mail
+    is left alone (no `open`, no Apple Event, which would launch it); email control waits until it is open."""
     channel, fake, host, values = mail_setup
     fake.running = False
-    assert channel.poll_once() == 10 and fake.launched == 1 and fake.scripts == []    # never asked a closed Mail
+    assert channel.poll_once() == email_remote.MAIL_CLOSED_POLL
+    assert channel.poll_once() == email_remote.MAIL_CLOSED_POLL
+    assert fake.launched == 0 and fake.scripts == []                             # never opened, never asked
     status = channel.status()
-    assert "opening it in the background" in status["error"] and status["backend"] == "mail"
+    assert "waits until you open Mail" in status["error"] and status["backend"] == "mail"
     assert not status["password_set"] and status["where"] == "the “Google” inbox in Mail"
     fake.running = True
     assert channel.poll_once() == email_remote.MAIL_POLL and channel.status()["error"] == ""
@@ -1320,3 +1324,18 @@ def test_apple_mail_replies_stay_plain_text(mail_setup):
     channel.mailbox.send = lambda message, to: sent.append(message)
     channel.reply(parse(mail("Mint: hi")), OWNER, "**Done.**")
     assert [m.get_content_type() for m in sent] == ["text/plain"]
+
+
+def test_mail_scripts_ask_whether_mail_runs_and_compile_only_then(monkeypatch):
+    """Quit between the pgrep and the script, Mail must not be launched by the script itself: it asks first, and
+    Mail's part is only compiled (run script) when it runs - compiling a `tell application "Mail"` can launch it."""
+    seen = []
+    monkeypatch.setattr(email_remote, "osascript", lambda script, timeout=60: (seen.append(script) or True,
+                                                                                 email_remote._CLOSED))
+    ok, out = email_remote.mail_osascript('tell application "Mail"\nreturn "hi \\"x\\""\nend tell')
+    assert (ok, out) == (False, email_remote._CLOSED)
+    script = seen[0]
+    assert script.startswith('if application "Mail" is running then\nreturn run script "')
+    assert 'tell application \\"Mail\\"' in script and "\n" not in script.split("run script ", 1)[1].split("\n")[0][1:-1]
+    monkeypatch.setattr(email_remote, "osascript", lambda script, timeout=60: (True, "6"))
+    assert email_remote.mail_osascript("x") == (True, "6")

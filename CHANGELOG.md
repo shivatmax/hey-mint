@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.24 (2026-10-12)
+
+- **A closed app stays closed:** quitting Mail (or Spotify, or Music) no longer brings it back.
+  - Mail: email control used to reopen Mail in the background whenever it found it closed. Now it leaves Mail
+    alone, says once "Mail is closed - email control waits until you open Mail", checks (without asking Mail)
+    once a minute, and picks up again by itself within a minute of you opening Mail.
+  - Every question Mint asks Mail, Spotify or Music in the background first checks, inside the script, that the
+    app runs - and the app's part is only compiled then. (Even guarded, compiling `tell application "Mail"` could
+    launch the app: that is how a quit Spotify kept coming back.) Opening an app is left to what you ask for.
+
 ## 0.6.23 (2026-10-12)
 
 - **Much lighter on the battery:** while Mint only waits for "Hey Mint" it does far less. Measured on a MacBook Air,

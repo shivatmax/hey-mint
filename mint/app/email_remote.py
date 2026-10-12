@@ -88,6 +88,8 @@ IDLE_POLL = 120             # ... while IDLE is watching: only a safety net
 IDLE_RENEW = 25 * 60        # IDLE is ended and started again this often (Gmail drops it at ~29 min)
 FAST_POLL = 5               # ... while a guard question waits for an emailed answer
 MAIL_POLL = 30              # the same through Apple Mail: each AppleScript call takes 1-2 s on a big inbox
+MAIL_CLOSED_POLL = 60       # Mail closed: how often to see (pgrep only) whether the user opened it again
+_CLOSED = "__mint_mail_closed__"
 MAIL_FAST_POLL = 8
 MAIL_WINDOW = 20 * 60       # Apple Mail: read messages this recent are listed too (mail sent to oneself may
                             # arrive read, or the user opened it on the Mac); the id cursor and dedupe keep it once
@@ -688,6 +690,11 @@ class MailError(Exception):
     pass
 
 
+class MailClosed(MailError):
+    """Mail isn't running. Mint never opens it for this: the user closed it, so it stays closed - email control
+    waits until they open Mail again (12 Oct: Mail kept coming back after being quit, like Spotify did)."""
+
+
 @dataclass
 class Incoming:
     uid: int
@@ -997,6 +1004,18 @@ def osascript(script: str, timeout: float = 60) -> tuple[bool, str]:
     return True, (done.stdout or "").removesuffix("\n")
 
 
+def mail_osascript(script: str, timeout: float = 60) -> tuple[bool, str]:
+    """osascript for Mail, asking whether it runs inside the script too (it may be quit between mail_running and
+    the script). Mail's part is compiled only if it runs (`run script`): compiling `tell application "Mail"` by
+    itself can launch it (tested 12 Oct). -> (False, _CLOSED) when it isn't running."""
+    guarded = (f'if application "Mail" is running then\nreturn run script {as_applescript(script)}\n'
+               f'else\nreturn "{_CLOSED}"\nend if')
+    ok, out = osascript(guarded, timeout)
+    if ok and out == _CLOSED:
+        return False, _CLOSED
+    return ok, out
+
+
 def mail_running() -> bool:
     """Asks the system, never Mail (an Apple Event would open it in front)."""
     try:
@@ -1045,7 +1064,7 @@ class AppleMailMailbox(Mailbox):
                  outbox: Path | None = None, clock=time.time):
         self.address, self.account = address.strip().lower(), _one_line(account)
         self.prefix = _one_line(prefix) or PREFS["email_prefix"]
-        self.runner = runner or osascript
+        self.runner = runner or mail_osascript
         self.running = running or mail_running
         self.launch = launch or launch_mail
         self.outbox, self.clock = Path(outbox or OUTBOX), clock
@@ -1056,9 +1075,11 @@ class AppleMailMailbox(Mailbox):
 
     def _run(self, script: str, timeout: float = 60) -> str:
         if not self.running():
-            self.launch()
-            raise MailError("Mail wasn't open, so Mint is opening it in the background - checking again shortly.")
+            # Never an Apple Event to a closed Mail (it would launch it) and never `open`: the user quit it.
+            raise MailClosed("Mail is closed - email control waits until you open Mail.")
         ok, out = self.runner(script, timeout)
+        if not ok and out == _CLOSED:
+            raise MailClosed("Mail is closed - email control waits until you open Mail.")
         if not ok:
             raise MailError(self._problem(out))
         return out
@@ -1618,11 +1639,14 @@ class Channel:
             cursor = self._state.setdefault("cursor", {})
             items = self.mailbox.fetch_new(cursor, self.wanted)
             self._save()
+        except MailClosed as error:
+            self._trouble(str(error))                   # once, not each minute (see _trouble)
+            return MAIL_CLOSED_POLL                     # a look at whether it is open again: pgrep, not Mail
         except MailError as error:
             self._trouble(str(error))
             self.failures += 1
             text = str(error).lower()
-            return 120 if "login" in text else 10 if "opening it" in text else min(60, 2 ** self.failures)
+            return 120 if "login" in text else min(60, 2 ** self.failures)
         if not self.running:
             print(f"  [email: watching {self.status()['where'] if where[0] == 'mail' else address}"
                   + (" - IMAP" if where[0] == "imap" else "") + "]", flush=True)

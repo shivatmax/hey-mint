@@ -43,3 +43,21 @@ def test_spotify_open_is_told_directly(monkeypatch):
     fastinput.media_key("next")
     assert calls == [("pause", "Spotify"), ("resume", "Spotify"), ("next_track", "Spotify")]
     assert fastinput.media_key("dance").startswith("Action must be")
+
+
+def test_asking_a_player_never_launches_it(monkeypatch):
+    """12 Oct: a quit Spotify (and Music) kept coming back - `if application id ... is running` around a
+    `tell application id ... player state` still compiles the tell, which can launch the app. Now the player's
+    part is compiled only when it runs (run script)."""
+    try:
+        from mint.tools import music
+    except ImportError:
+        from mint import music
+    seen = []
+    monkeypatch.setattr(music, "_osa", lambda script, timeout=10: (seen.append(script) or True, ""))
+    music._tell("Spotify", 'return player state as text')
+    script = seen[0]
+    assert script.startswith('if application id "com.spotify.client" is running then\nreturn run script "')
+    assert '\\"com.spotify.client\\"' in script                     # the tell is text, not compiled code
+    music._tell("Spotify", "play", launch=True)                      # asked to play: launching is fine
+    assert seen[1].startswith('tell application id "com.spotify.client"')

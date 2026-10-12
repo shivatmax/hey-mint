@@ -139,11 +139,19 @@ def _osa(script: str, timeout: float = 10) -> tuple[bool, str]:
 
 
 def _tell(app: str, body: str, timeout: float = 10, launch: bool = False) -> tuple[bool, str]:
-    """Run `body` inside tell application; unless `launch`, only when the app already runs."""
+    """Run `body` inside tell application; unless `launch`, only when the app already runs. The app's part is
+    compiled only then (`run script`): compiling `tell application ... player state` by itself can launch the app
+    even inside an `if ... is running` - tested 12 Oct; why a quit Spotify kept coming back."""
     script = f'tell application id "{BUNDLES[app]}"\n{body}\nend tell'
     if not launch:
-        script = f'if application id "{BUNDLES[app]}" is running then\n{script}\nend if'
+        script = (f'if application id "{BUNDLES[app]}" is running then\nreturn run script {_literal(script)}\n'
+                  f'end if')
     return _osa(script, timeout)
+
+
+def _literal(text: str) -> str:
+    """`text` as one AppleScript string literal."""
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
 
 
 def _launch(app: str, wait: float = 15.0) -> bool:
