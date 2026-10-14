@@ -386,3 +386,17 @@ def test_big_result_is_cut_and_saved(tmp_path, monkeypatch):
     for _ in range(tool_diet.SPILL_KEEP + 3):
         tool_diet.fit("browser", text)
     assert len(list(tmp_path.glob("*.txt"))) == tool_diet.SPILL_KEEP
+
+
+def test_arguments_wrapped_once_more_are_unwrapped(monkeypatch):
+    """14 Oct: the model sent show_card {"card": "<the real arguments as JSON>"} - refused three times for a
+    missing title, then it said "here's your card" with none shown. One extra layer holding everything the tool
+    needs is unwrapped; anything else is still refused with the schema."""
+    import json
+    monkeypatch.setattr(tool_diet, "enabled", lambda: False)                  # (skip the first-use guide)
+    card = {"title": "Animals", "items": [{"title": "cat"}]}
+    for wrapped in (json.dumps({"card": json.dumps(card)}), json.dumps({"card": card})):
+        name, args, why = tool_diet.unwrap("use_tool", {"name": "show_card", "args": wrapped})
+        assert (name, why) == ("show_card", "") and args["title"] == "Animals"
+    name, args, why = tool_diet.unwrap("use_tool", {"name": "show_card", "args": json.dumps({"x": 1})})
+    assert name == "use_tool" and "needs title" in why

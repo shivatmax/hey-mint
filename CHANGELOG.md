@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.26 (2026-10-14)
+
+- **No more black notch during meetings:** a card under the notch (the meeting recorder offer, a list Mint shows)
+  could leave the notch as an empty black box - you had to swipe through pages before it appeared. Since 0.6.23
+  the cards' window was put away while nothing showed (to save battery), and put back it didn't always come
+  into a full-screen Space. Now it stays on screen at 1 x 1 point while idle (same battery saving) and grows back
+  for the card; if it is ever missing while a card shows, Mint brings it back. Cursor effects and on-screen
+  marks work the same way.
+- **Cards that the model wraps oddly still show:** a card request like {"card": "{...title...}"} was refused for a
+  missing title (and Mint then said it had shown it); one extra layer holding everything the tool needs is now
+  unwrapped.
+
 ## 0.6.25 (2026-10-14)
 
 - **AirPods keep their full sound:** with Bluetooth earbuds connected, videos and music sounded muddy even while

@@ -62,14 +62,15 @@ class Marks:
             view.setWantsLayer_(True)
             window.setContentView_(view)
             self._overlays.append((frame, window, view.layer(), screen.backingScaleFactor()))
+            gfx.stow(window)                      # full size only while marks show (_local, _clear)
 
     def _local(self, x: float, y: float, w: float, h: float):
         """Quartz rect (top-left origin) -> (root layer, Cocoa-local rect, scale)."""
         self._ensure()
         if not getattr(self, "_shown", False):    # on screen only while marks show (see _clear)
             self._shown = True
-            for _, window, _, _ in self._overlays:
-                window.orderFrontRegardless()
+            for frame, window, _, _ in self._overlays:
+                gfx.unstow(window, frame)
         primary = AppKit.NSScreen.screens()[0].frame().size.height
         cx, cy = x, primary - y - h
         for frame, _, root, scale in self._overlays:
@@ -105,7 +106,7 @@ class Marks:
         if getattr(self, "_shown", False):        # nothing left to show: off the screen (an empty full-screen
             self._shown = False                   # window on top is blended every frame of a video - battery)
             for _, window, _, _ in self._overlays:
-                window.orderOut_(None)
+                gfx.stow(window)
 
     def _add(self, root, layer):
         root.addSublayer_(layer)

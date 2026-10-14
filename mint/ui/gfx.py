@@ -234,3 +234,22 @@ def pace(owner, attr: str, target, selector: str, interval: float, common: bool 
         timer, AppKit.NSRunLoopCommonModes if common else AppKit.NSDefaultRunLoopMode)
     setattr(owner, attr, timer)
     return timer
+
+
+def stow(window) -> None:
+    """An overlay with nothing to show: 1 x 1 point, but still on screen. A full-screen transparent window is
+    blended again whenever anything under it changes (battery); put away entirely (orderOut) it didn't always
+    come back into a full-screen Space - a card's window stayed missing and the notch was a black box (14 Oct)."""
+    frame = window.frame()
+    if frame.size.width > 1 or frame.size.height > 1:
+        window.setFrame_display_(AppKit.NSMakeRect(frame.origin.x, frame.origin.y, 1, 1), False)
+    if not window.isVisible():
+        window.orderFrontRegardless()
+
+
+def unstow(window, frame) -> None:
+    """Back to full size (`frame`) and on screen, before something is drawn in it."""
+    if not AppKit.NSEqualRects(window.frame(), frame):
+        window.setFrame_display_(frame, False)
+    if not window.isVisible():
+        window.orderFrontRegardless()

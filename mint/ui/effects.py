@@ -86,9 +86,10 @@ class Effects:
             view = AppKit.NSView.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, frame.size.width, frame.size.height))
             view.setWantsLayer_(True)
             window.setContentView_(view)
-            # Not on screen until an effect plays: a full-screen window on top, even empty, is blended again
-            # every time anything under it changes (a video: every frame) - battery (12 Oct).
+            # Tiny until an effect plays: a full-screen window on top, even empty, is blended again every time
+            # anything under it changes (a video: every frame) - battery (12 Oct). gfx.stow, not orderOut.
             self._overlays.append((frame, window, view.layer(), screen.backingScaleFactor()))
+            gfx.stow(window)
         self._shown = False
 
     # --- public API (any thread) ---------------------------------------------------
@@ -153,8 +154,8 @@ class Effects:
         self._used_at = time.monotonic()
         if not getattr(self, "_shown", False):
             self._shown = True
-            for _, window, _, _ in self._overlays:
-                window.orderFrontRegardless()
+            for frame, window, _, _ in self._overlays:
+                gfx.unstow(window, frame)
             AppHelper.callLater(IDLE_HIDE, self._maybe_hide)
 
     def _maybe_hide(self) -> None:
@@ -166,7 +167,7 @@ class Effects:
             return
         self._shown = False
         for _, window, _, _ in self._overlays:
-            window.orderOut_(None)
+            gfx.stow(window)
 
     def _locate(self, x: float, y: float):
         """Quartz global point -> (root layer, local point, frame, scale)."""

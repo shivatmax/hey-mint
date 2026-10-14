@@ -1579,7 +1579,7 @@ class Island:
         screen = AppKit.NSScreen.mainScreen().frame()
         self.screen = screen
         self.panel = _panel(screen, click_through=True)
-        self.panel.orderOut_(None)                       # on screen only while a scene shows (_open, _close)
+        gfx.stow(self.panel)                     # full size only while a scene shows (_open, _close; gfx.stow)
         root = _IslandRoot.alloc().initWithFrame_(AppKit.NSMakeRect(0, 0, screen.size.width, screen.size.height))
         root.setWantsLayer_(True)
         root.registerForDraggedTypes_([AppKit.NSPasteboardTypeFileURL, AppKit.NSPasteboardTypeString])
@@ -1784,6 +1784,14 @@ class Island:
                     self._morph(scene, previous)
         if not self.shown or self.scene is None:
             return
+        if not self.panel.isVisible() or not AppKit.NSEqualRects(self.panel.frame(), self.screen):
+            # A card is showing, so its window must be full size and on screen: the notch grows around it,
+            # and without it the notch was a black box (14 Oct, meetings).
+            gfx.unstow(self.panel, self.screen)
+            if not getattr(self, "_told_hidden", False):
+                self._told_hidden = True
+                print(f"  {time.strftime('%H:%M:%S')} [island: its window was not showing while a card did - "
+                      f"brought back ({self.sig})]", flush=True)
         try:
             self.scene.tick(now)
         except Exception as error:
@@ -1997,7 +2005,7 @@ class Island:
         width, height = self._size(scene)
         rect, face = self._layout(width, height)
         cx, cy = self.anchor
-        self.panel.orderFrontRegardless()
+        gfx.unstow(self.panel, self.screen)
         # Start as the orb: a black circle exactly over it, and the little face as big as the orb.
         self._shape((cx - ORB / 2, cy - ORB / 2, ORB, ORB), ORB / 2, animate=False)
         self._place_face((cx, cy), animate=False, scale=ORB / FACE * 0.8)
@@ -2070,9 +2078,10 @@ class Island:
             self.scene, self.shown, self.rect, self.closing = None, False, None, False
             self.hud.island_active = False
             self.panel.setIgnoresMouseEvents_(True)
-            # Off the screen until the next scene (_open brings it back): this window covers the whole screen,
-            # and even empty it was blended again each time anything under it changed (battery, 12 Oct).
-            self.panel.orderOut_(None)
+            # Tiny until the next scene (_open brings it back): this window covers the whole screen, and even
+            # empty it was blended again each time anything under it changed (battery, 12 Oct). Never ordered
+            # out: then it didn't always come back into a full-screen Space (gfx.stow).
+            gfx.stow(self.panel)
             self.hud._bubble_dirty = True
         AppHelper.callLater(0.3, finish)
         AppHelper.callLater(0.55, done)

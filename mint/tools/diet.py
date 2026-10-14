@@ -822,6 +822,23 @@ def _alias(name: str) -> str:
     return name
 
 
+def _unnest(args: dict, required: list) -> dict | None:
+    """The arguments wrapped once more by the model - {"card": "{\\"title\\": ...}"} or {"card": {...}} for
+    show_card(title, ...) (14 Oct: three refusals, then "here's your card" with none shown): that inner object,
+    when it holds what the tool needs. None otherwise."""
+    if len(args) != 1:
+        return None
+    value = next(iter(args.values()))
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict) and all(value.get(r) not in (None, "") for r in required):
+        return value
+    return None
+
+
 def unwrap(name: str, args: dict | None) -> tuple[str, dict, str]:
     """(the real tool, its arguments, '') for a use_tool call - or (name, args, why not). Any other call
     comes back as it is. The caller runs the real tool through its normal path."""
@@ -853,6 +870,9 @@ def unwrap(name: str, args: dict | None) -> tuple[str, dict, str]:
             return name, args, f"NOT RUN: `args` must be a JSON object. Arguments of {inner}: {_schema(known[inner])}"
     required = list(getattr(known[inner].parameters, "required", None) or [])
     missing = [r for r in required if inner_args.get(r) in (None, "")]
+    if missing:
+        inner_args = _unnest(inner_args, required) or inner_args
+        missing = [r for r in required if inner_args.get(r) in (None, "")]
     if missing:
         return name, args, (f"NOT RUN: {inner} needs {', '.join(missing)}. Its arguments: "
                             f"{_schema(known[inner])}")
