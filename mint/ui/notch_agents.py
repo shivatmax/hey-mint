@@ -1132,9 +1132,7 @@ class AgentPane:
         self.view.setWantsLayer_(True)
         self._build()
         self.ticker = MintAgentTicker.alloc().initWithFn_(self._tick)
-        timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(1 / 30, self.ticker, "tick:",
-                                                                                    None, True)
-        AppKit.NSRunLoop.currentRunLoop().addTimer_forMode_(timer, AppKit.NSRunLoopCommonModes)
+        gfx.pace(self, "_timer", self.ticker, "tick:", 1 / 30, common=True)    # 2 a second while hidden (_tick)
 
     # building --------------------------------------------------------------------------------------
 
@@ -2478,7 +2476,9 @@ class AgentPane:
 
     def _tick(self) -> None:
         if not self._visible():
+            gfx.pace(self, "_timer", self.ticker, "tick:", 0.5, common=True)    # hidden: no need for 30 a second
             return
+        gfx.pace(self, "_timer", self.ticker, "tick:", 1 / 30, common=True)
         now = time.monotonic()
         mouse = AppKit.NSEvent.mouseLocation()
         local = None

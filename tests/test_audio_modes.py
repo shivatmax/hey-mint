@@ -283,3 +283,35 @@ def test_with_echo_cancellation_the_one_engine_keeps_running():
     a.player, a._started, a.playing = _Player(), True, False
     a._rest_output()
     assert shared.running and shared.pauses == 0               # the microphone is on that engine too
+
+
+def _devices_world(monkeypatch, default_in, bluetooth_mic=False):
+    world = {
+        1: {"id": 1, "uid": "BuiltInMicrophoneDevice", "name": "MacBook Air Microphone", "transport": "built-in",
+            "inputs": 1, "outputs": 0},
+        2: {"id": 2, "uid": "BuiltInSpeakerDevice", "name": "MacBook Air Speakers", "transport": "built-in",
+            "inputs": 0, "outputs": 1},
+        7: {"id": 7, "uid": "AA-BB-CC:input", "name": "Alex's AirPods", "transport": "Bluetooth", "inputs": 1,
+            "outputs": 1},
+    }
+    dev = audio_vp.audio_devices
+    monkeypatch.setattr(dev, "devices", lambda: list(world.values()))
+    monkeypatch.setattr(dev, "default_device", lambda output: 7 if output else default_in)
+    monkeypatch.setattr(audio_vp.VoiceAudio, "bluetooth_mic", property(lambda self: bluetooth_mic))
+    a = _audio()
+    a.input_uid = a.output_uid = ""
+    return a
+
+
+def test_airpods_keep_their_full_sound_while_mint_listens(monkeypatch):
+    """14 Oct: with AirPods connected, a video sounded muddy even while nobody talked to Mint - listening on the
+    AirPods' own mic puts them in headset (call) mode. The wake word is heard by the Mac's own mic instead."""
+    a = _devices_world(monkeypatch, default_in=7)
+    assert a._devices() == (1, 7) and a.input_override == 1
+    b = _devices_world(monkeypatch, default_in=7, bluetooth_mic=True)
+    assert b._devices() == (7, 7) and b.input_override is None          # the setting: their mic after all
+    c = _devices_world(monkeypatch, default_in=1)
+    assert c._devices() == (1, 7) and c.input_override is None          # already the Mac's mic: nothing to do
+    d = _devices_world(monkeypatch, default_in=7)
+    d.input_uid = "AA-BB-CC:input"                                      # the user chose the AirPods' mic
+    assert d._devices() == (7, 7) and d.input_override is None

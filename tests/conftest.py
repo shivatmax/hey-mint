@@ -70,3 +70,23 @@ def _private_tool_log(tmp_path, monkeypatch):
             return
     monkeypatch.setattr(session, "TRACE", str(tmp_path / "tools.log"))
     yield
+
+
+def pytest_unconfigure(config):
+    """The run is over and its result is known: end the process now, without the native libraries' own shutdown
+    (ONNX Runtime, CoreAudio, AppKit threads). Once in a while one of them aborted the interpreter on its way out
+    ("libc++abi: ... recursive_mutex lock failed") after every test had passed - and the release stopped on a
+    green run (14 Oct). The exit status is the real one."""
+    import os
+    import sys
+    status = getattr(config, "_mint_exit_status", None)
+    if status is None:
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(int(status))
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    session.config._mint_exit_status = int(exitstatus)

@@ -200,6 +200,9 @@ DEFAULTS: dict = {
     "share_mic": True,                 # step aside while a call or meeting app uses the mic
     # During a call: keep listening for the wake word on the plain microphone (False: let go of it entirely).
     "listen_in_calls": True,
+    # Listen for the wake word through a Bluetooth headset's own mic (AirPods...). Off (default): the Mac's own
+    # microphone - a headset mic held open switches the earbuds to call quality (everything sounds muddy).
+    "bluetooth_mic": False,
     "share_mic_apps": [],              # extra bundle ids to step aside for
     # Voice lock strictness: relaxed | balanced | strict.
     "lock_strictness": "balanced",

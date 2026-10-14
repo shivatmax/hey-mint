@@ -1624,8 +1624,7 @@ class Island:
         self._hide_bubble_while_shown()
 
         self.ticker = _IslandTicker.alloc().initWithOwner_(self)
-        AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            1 / 30, self.ticker, "tick:", None, True)
+        gfx.pace(self, "_timer", self.ticker, "tick:", 1 / 30)      # 10 a second while nothing shows (_tick)
 
     def _quiet_face(self) -> None:
         """The little Mint keeps its face and swirl, not the orb's outer pulse ring."""
@@ -1764,9 +1763,13 @@ class Island:
     def _tick(self) -> None:
         now = time.time()
         self.frame += 1
-        if self.frame % 3 == 0:
+        # Nothing showing and no drag: the ticker runs at 10 a second and looks every tick (as every 3rd at 30).
+        idle = not self.shown and not self.dragging and not self.closing
+        gfx.pace(self, "_timer", self.ticker, "tick:", 0.1 if idle else 1 / 30)
+        look = idle or self.frame % 3 == 0
+        if look:
             self._watch_drag()
-        if self.frame % 3 == 0 and not self.closing:
+        if look and not self.closing:
             scene = self._pick(now)
             sig = scene.signature() if scene is not None else ""
             if sig != self.sig:

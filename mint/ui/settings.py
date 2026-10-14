@@ -1271,6 +1271,10 @@ class SettingsWindow:
         page.section("Microphone and speaker")
         self._row_popup(page, "input_device", "Microphone", facts["inputs"], w=300)
         self._row_popup(page, "output_device", "Speaker", facts["outputs"], w=300)
+        self._row_switch(page, "bluetooth_mic", "Listen with AirPods' mic",
+                         "Off: with AirPods or other Bluetooth earbuds, “Hey Mint” is heard by the Mac's own "
+                         "microphone, so your earbuds keep their full sound. On: their mic (calls-quality sound "
+                         "while Mint listens) - for a closed lid.")
         if self._advanced():
             self._row_popup(page, "echo_cancellation", "Echo cancellation", ECHO, w=200,
                             hint="Automatic: off with headphones, on with speakers.")

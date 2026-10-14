@@ -216,3 +216,21 @@ def track_close(button, on_card: bool, mouse) -> None:
         AppKit.NSAnimationContext.endGrouping()
     local = button.convertPoint_fromView_(window.convertPointFromScreen_(mouse), None)
     button.setHot_(on_card and AppKit.NSPointInRect(local, button.bounds()))
+
+
+def pace(owner, attr: str, target, selector: str, interval: float, common: bool = False):
+    """Keep `owner.<attr>` a repeating NSTimer firing every `interval` s, made again only when the interval
+    changes: a ticker can run at 30 a second while something moves and slow down when calm (an NSTimer that
+    fires and does nothing still wakes the Mac - battery, 14 Oct). A little tolerance lets macOS group wake-ups."""
+    timer = getattr(owner, attr, None)
+    if timer is not None and timer.isValid() and abs(timer.timeInterval() - interval) < 1e-6:
+        return timer
+    if timer is not None:
+        timer.invalidate()
+    timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(interval, target, selector,
+                                                                                    None, True)
+    timer.setTolerance_(interval * 0.2)
+    AppKit.NSRunLoop.currentRunLoop().addTimer_forMode_(
+        timer, AppKit.NSRunLoopCommonModes if common else AppKit.NSDefaultRunLoopMode)
+    setattr(owner, attr, timer)
+    return timer

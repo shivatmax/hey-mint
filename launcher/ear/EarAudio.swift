@@ -27,6 +27,7 @@ final class EarAudio {
     private var inputRate: Double = 48000
     var inputUID = ""
     var echo = "auto"                          // settings.json echo_cancellation
+    var bluetoothMic = false                   // settings.json bluetooth_mic (see listeningDevice)
 
     /// The last 3 s of audio, int16 little-endian. Call on `queue`.
     func ringUnsafe() -> Data {
@@ -61,7 +62,7 @@ final class EarAudio {
                 voiceProcessing = false
             }
         }
-        if !inputUID.isEmpty, let device = EarAudio.device(uid: inputUID), let unit = input.audioUnit {
+        if let device = listeningDevice(), let unit = input.audioUnit {
             var id = device
             AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
                                  voiceProcessing ? 1 : 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
@@ -232,7 +233,59 @@ final class EarAudio {
         if start > 0 { pending.removeFirst(start) }
     }
 
+    /// The microphone to listen with, or nil for the system default: the one chosen in Settings; else, when the
+    /// default is a Bluetooth headset's mic (AirPods...), the Mac's own - a headset mic held open switches the
+    /// earbuds to call quality and everything they play sounds muddy (14 Oct). bluetooth_mic: theirs after all.
+    func listeningDevice() -> AudioDeviceID? {
+        if !inputUID.isEmpty, let chosen = EarAudio.device(uid: inputUID) { return chosen }
+        guard !bluetoothMic, let fallback = EarAudio.defaultInput(), EarAudio.isBluetooth(fallback) else { return nil }
+        if let own = EarAudio.builtInMic() {
+            Log.write("[ear] default mic is Bluetooth: listening with the Mac's own microphone")
+            return own
+        }
+        return nil
+    }
+
     // --- CoreAudio -----------------------------------------------------------------
+
+    private static func uint32(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                               _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> UInt32? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var value = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : nil
+    }
+
+    static func defaultInput() -> AudioDeviceID? {
+        let id = uint32(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice)
+        return id.flatMap { $0 != 0 ? AudioDeviceID($0) : nil }
+    }
+
+    static func isBluetooth(_ device: AudioDeviceID) -> Bool {
+        let kind = uint32(device, kAudioDevicePropertyTransportType)
+        return kind == kAudioDeviceTransportTypeBluetooth || kind == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    /// The Mac's built-in microphone (transport built-in, with input channels), if any.
+    static func builtInMic() -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(0)
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return nil }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return nil }
+        for id in ids where uint32(id, kAudioDevicePropertyTransportType) == kAudioDeviceTransportTypeBuiltIn {
+            var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                                                     mScope: kAudioDevicePropertyScopeInput,
+                                                     mElement: kAudioObjectPropertyElementMain)
+            var bytes = UInt32(0)
+            if AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &bytes) == noErr, bytes > 0 { return id }
+        }
+        return nil
+    }
 
     static func device(uid: String) -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice,

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.25 (2026-10-14)
+
+- **AirPods keep their full sound:** with Bluetooth earbuds connected, videos and music sounded muddy even while
+  nobody talked to Mint - listening for "Hey Mint" on the earbuds' own mic switches them to call quality. Mint now
+  listens with the Mac's own microphone whenever the default mic is a Bluetooth headset (and so does the Ear, the
+  small listener that runs before Mint loads). Settings ▸ Microphone & voice ▸ "Listen with AirPods' mic" turns it
+  back (for a closed lid, where the Mac's mic hears nothing); a microphone you chose is always used.
+- **A quit Spotify stays quit:** Mint asked the music player what was playing every few seconds - a question that
+  landed while you quit Spotify reopened it. Mint now reads Spotify's and Music's own "now playing" announcements
+  instead and asks the app only at start, when you act, and for a new song's cover. Fewer questions also means
+  less work for both apps.
+- **Lighter while idle:** Mint's on-screen timers now really slow down when nothing moves (10 a second instead of
+  30; the coding-agents bar 2 a second while hidden), and macOS may group their wake-ups.
+
 ## 0.6.24 (2026-10-12)
 
 - **A closed app stays closed:** quitting Mail (or Spotify, or Music) no longer brings it back.

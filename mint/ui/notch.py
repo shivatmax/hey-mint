@@ -504,9 +504,7 @@ class Notch:
         self._build_rim(box.layer())
         self._resize(self.nw + 2 * WING, self.nh, animate=False)
         self.ticker = MintNotchTicker.alloc().initWithOwner_(self)
-        timer = AppKit.NSTimer.timerWithTimeInterval_target_selector_userInfo_repeats_(
-            1 / 30, self.ticker, "tick:", None, True)
-        AppKit.NSRunLoop.currentRunLoop().addTimer_forMode_(timer, AppKit.NSRunLoopCommonModes)
+        gfx.pace(self, "_timer", self.ticker, "tick:", 1 / 30, common=True)     # 10 a second when calm (tick)
         center = AppKit.NSNotificationCenter.defaultCenter()
         self._menus = 0
 
@@ -931,13 +929,11 @@ class Notch:
             return                              # off, or a transition is steering the shape
         now = time.monotonic()
         mouse = AppKit.NSEvent.mouseLocation()
-        if self._calm and not self._stirring(hud, mouse, now):
-            # Nothing on the notch is moving and nothing is near: a full look 10 times a second is plenty.
-            # Anything happening (the pointer coming close, Mint waking, words, a song) is back at 30.
-            self._calm_skip = (self._calm_skip + 1) % 3
-            if self._calm_skip:
-                return
-        self._calm_skip = 0
+        # Nothing on the notch is moving and nothing is near: a look 10 times a second is plenty - the ticker
+        # itself slows (a timer firing to do nothing still wakes the Mac). Anything happening (the pointer coming
+        # close, Mint waking, words, a song) is back at 30.
+        gfx.pace(self, "_timer", self.ticker, "tick:",
+                 0.1 if self._calm and not self._stirring(hud, mouse, now) else 1 / 30, common=True)
         island = self._island()
         inside = self._inside(mouse)
         near_notch = (abs(mouse.x - self.cx) < self.nw / 2 + WING and mouse.y > self.top - self.nh - 4)

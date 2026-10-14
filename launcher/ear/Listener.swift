@@ -170,6 +170,7 @@ final class Listener {
         audio.onLive = { [weak self] chunk in self?.handoff.push(chunk) }
         audio.inputUID = prefs["input_device"] as? String ?? ""
         audio.echo = prefs["echo_cancellation"] as? String ?? "auto"
+        audio.bluetoothMic = prefs["bluetooth_mic"] as? Bool ?? false
         audio.start()
         watchStdin()
         watchCalls()

@@ -261,8 +261,7 @@ class HUD:
         self._built = True
         self.orb.apply_state(self._state, bool(prefs.get("voice")))
         self._ticker = _Ticker.alloc().initWithOwner_(self)
-        AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            1 / 30, self._ticker, "tick:", None, True)
+        gfx.pace(self, "_timer", self._ticker, "tick:", 1 / 30)       # 10 a second when calm (_tick)
         effects.fx.origin = self.orb_center
         effects.fx.on_target = self._glance
         AppHelper.callLater(0.3, self.orb.boot)
@@ -860,8 +859,11 @@ class HUD:
                 and not self._bubble_visible and not self._bubble_dirty and not getattr(self, "island_active", False)
                 and not getattr(self.chat, "is_open", False))
         self.orb.calm = calm
+        # Calm: the ticker itself slows to 10 a second (the pointer is still checked every tick, so coming near
+        # brings it back at once) and the face is updated every 5th (twice a second).
+        gfx.pace(self, "_timer", self._ticker, "tick:", 0.1 if calm else 1 / 30)
         if calm:
-            self._calm_n = (getattr(self, "_calm_n", 0) + 1) % 15
+            self._calm_n = (getattr(self, "_calm_n", 0) + 1) % 5
             if self._calm_n:
                 return
         else:

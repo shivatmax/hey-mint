@@ -115,6 +115,11 @@ def default_device(output: bool) -> int | None:
     return _uint(SYSTEM, "dOut" if output else "dIn ")
 
 
+def builtin_mic() -> dict | None:
+    """The Mac's own microphone, if it has one."""
+    return next((d for d in devices() if d["transport"] == "built-in" and d["inputs"] > 0), None)
+
+
 def device_by_uid(uid: str) -> dict | None:
     return next((d for d in devices() if d["uid"] == uid), None)
 

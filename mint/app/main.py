@@ -395,7 +395,7 @@ def main() -> int:
             mint.refresh_voice_lock()             # reloads the wake word models and the mic mode too
         elif key in ("theme", "position", "face"):
             presence.refresh()
-        elif key in ("input_device", "output_device", "echo_cancellation"):
+        elif key in ("input_device", "output_device", "echo_cancellation", "bluetooth_mic"):
             mint.apply_audio_settings()
         elif key == "assistant_name":
             rename_later()

@@ -134,7 +134,28 @@ class VoiceAudio:
             log.warning("chosen speaker %s is not connected; using the system default", self.output_uid)
         in_id = wanted_in["id"] if wanted_in else audio_devices.default_device(output=False)
         out_id = wanted_out["id"] if wanted_out else audio_devices.default_device(output=True)
+        self.input_override = None
+        if not wanted_in and not self.bluetooth_mic:
+            # A Bluetooth headset's mic held open puts it in headset (call) mode: everything it plays - a video,
+            # music - turns mono and muddy, even while nobody talks to Mint (14 Oct, AirPods). Listening for
+            # "Hey Mint" uses the Mac's own microphone instead, so the earbuds keep their full sound. (Settings:
+            # bluetooth_mic, for a closed lid where the Mac's mic hears nothing; a chosen mic is always used.)
+            chosen = audio_devices.describe(in_id)
+            if chosen and chosen.get("transport") == "Bluetooth":
+                own = audio_devices.builtin_mic()
+                if own:
+                    in_id = self.input_override = own["id"]
+                    log.info("default mic is %s (Bluetooth): listening with %s", chosen["name"], own["name"])
         return in_id, out_id
+
+    @property
+    def bluetooth_mic(self) -> bool:
+        """Settings: listen with a Bluetooth headset's own mic (off: the Mac's microphone, see _devices)."""
+        try:
+            from mint.core import prefs
+            return bool(prefs.get("bluetooth_mic"))
+        except Exception:
+            return False
 
     def _build(self) -> None:
         # Building (voice processing, device choice) posts the engine's own
@@ -255,7 +276,8 @@ class VoiceAudio:
         """Point the engine at the chosen devices. With voice processing both
         sides are set together on the one voice unit (input element 1, output
         element 0), before it starts - Apple's rules for that unit."""
-        if not self.input_uid and not self.output_uid:
+        override = getattr(self, "input_override", None)
+        if not self.input_uid and not self.output_uid and not override:
             return                       # system defaults: leave the engine alone
         try:
             if self.echo_cancelled:
@@ -271,7 +293,7 @@ class VoiceAudio:
             else:
                 if self.output_uid and out_id:
                     self.out_engine.outputNode().AUAudioUnit().setDeviceID_error_(out_id, None)
-                if self.input_uid and in_id:
+                if (self.input_uid or override) and in_id:
                     self.mic.AUAudioUnit().setDeviceID_error_(in_id, None)
                     if self.mic.AUAudioUnit().deviceID() != in_id:
                         log.warning("microphone choice did not take; using the system default")

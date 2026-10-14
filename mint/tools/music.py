@@ -36,11 +36,11 @@ Apple Music (the Music app) works from the library by name - songs, artists, alb
 genres - with the same controls. It is written defensively and UNTESTED (not used on the
 development Mac).
 
-now_playing() is cached and cheap: a background watcher asks the running player every second
-while something plays and the mini player is on screen (3 s otherwise, 6 s when paused), wakes at
-once on Spotify's / Music's own "playback changed" notifications, and never launches an app just
-to look (pgrep first; every script is wrapped in "if application ... is running"). One reading is
-one osascript (~0.15 s wall, ~0.04 s CPU). Spotify Free plays ads: they read as "Advertisement".
+now_playing() is cached and cheap: the background watcher reads Spotify's / Music's own "playback
+changed" announcements (they carry the track) and the process list (pgrep). It asks a player itself
+(one osascript, ~0.15 s) only at start, when the user acts, and for a new track's cover - never on a
+timer: a question landing while the user quit the app reopened it (14 Oct). Background questions
+are wrapped so a closed app is never launched (_tell). Spotify Free plays ads: "Advertisement".
 """
 
 from __future__ import annotations
@@ -333,8 +333,26 @@ _fast_until = [0.0]
 _thread: list = [None]
 
 
-def _refresh() -> dict:
+def _set(info: dict) -> dict:
+    """The watcher's new reading: kept, and listeners told when the track, state or app changed."""
     global _now, _stamp
+    with _lock:
+        before = dict(_now)
+        _now, _stamp = info, time.monotonic()
+    if (before.get("state"), before.get("uri"), before.get("title"), before.get("app")) != \
+            (info["state"], info["uri"], info["title"], info["app"]):
+        for listener in list(_listeners):
+            try:
+                listener(before, dict(info))
+            except Exception:
+                log.exception("music listener failed")
+    return dict(info)
+
+
+def _refresh() -> dict:
+    """Ask the running player(s) what they are doing - an Apple Event. Only when it's wanted: at start, when the
+    user acts (poke(), a voice command, the mini player's buttons) and for a new track's cover; never on a
+    timer (see _loop)."""
     running = _running_apps()
     info = None
     order = [app for app in (SPOTIFY, MUSIC) if app in running]
@@ -354,16 +372,7 @@ def _refresh() -> dict:
         info["artwork"] = before["artwork"]
     elif info.get("title"):
         info["artwork"] = _artwork(info)
-    with _lock:
-        _now, _stamp = info, time.monotonic()
-    if (before.get("state"), before.get("uri"), before.get("title"), before.get("app")) != \
-            (info["state"], info["uri"], info["title"], info["app"]):
-        for listener in list(_listeners):
-            try:
-                listener(before, dict(info))
-            except Exception:
-                log.exception("music listener failed")
-    return dict(info)
+    return _set(info)
 
 
 def cached() -> dict:
@@ -391,48 +400,140 @@ def on_change(listener) -> None:
 
 
 def want_fast(seconds: float = 2.5) -> None:
-    """The mini player is on screen: poll every second for the next `seconds`."""
+    """The mini player is on screen. (Kept for its callers: the position moves on by itself between the players'
+    own announcements, so nothing is asked more often.)"""
     _fast_until[0] = max(_fast_until[0], time.monotonic() + seconds)
 
 
 def poke() -> None:
-    """Something changed (a button, a voice command): read the player again now."""
+    """Something changed because of the user (a button, a voice command): read the player again now."""
+    _poked[0] = True
     _wake.set()
 
 
+_poked = [False]
+_notes: list = []               # (app, reading) from the players' own announcements, for the watcher thread
+
+
 def _interval() -> float:
+    """How often the watcher looks - at the process list only (pgrep), never at the players."""
     with _lock:
-        state, app = _now.get("state"), _now.get("app")
-    if not app and not _running_apps():
-        return 6.0
-    if state == "playing":
-        return 1.0 if time.monotonic() < _fast_until[0] else 3.0
-    return 6.0
+        app = _now.get("app")
+    return 5.0 if app else 10.0
 
 
 def _loop() -> None:
+    """Asks a player (an Apple Event) only with a reason: once at start, when the user acts, and for a new
+    track's cover. The rest comes from the players' own announcements (note) and the process list. Asking on a
+    timer is what reopened a Spotify the user had just quit (12-14 Oct): the question landed while it was
+    closing and macOS started it again to answer - and every question cost both apps battery."""
+    first = True
     while True:
         try:
-            _refresh()
+            if first or _poked[0]:
+                first, _poked[0] = False, False
+                _refresh()
+            else:
+                with _lock:
+                    notes, _notes[:] = list(_notes), []
+                if notes:
+                    _apply_note(*notes[-1])
+                else:
+                    _check_running()
         except Exception:
             log.exception("music watcher")
         _wake.wait(_interval())
         _wake.clear()
 
 
+def _check_running() -> None:
+    """The player shown was quit: stopped, without asking anything."""
+    with _lock:
+        app = _now.get("app")
+    if app and app not in _running_apps():
+        _set(_empty())
+
+
+def _from_note(app: str, user_info) -> dict:
+    """A reading from a player's own announcement (com.spotify.client.PlaybackStateChanged,
+    com.apple.Music.playerInfo) - no Apple Event."""
+    ui = {str(k): v for k, v in dict(user_info or {}).items()}
+    info = _empty(app)
+    state = str(ui.get("Player State") or "").strip().lower()
+    info["state"] = state if state in ("playing", "paused") else "stopped"
+    if info["state"] == "stopped":
+        return info
+    duration = _number(ui.get("Duration") if app == SPOTIFY else ui.get("Total Time") or 0)
+    if duration > 7200:                                   # milliseconds
+        duration /= 1000.0
+    if app == SPOTIFY:
+        uri = str(ui.get("Track ID") or "")
+    else:
+        uri = str(ui.get("PersistentID") or ui.get("Persistent ID") or ui.get("Store URL") or "")
+    info.update(title=str(ui.get("Name") or ""), artist=str(ui.get("Artist") or ""),
+                album=str(ui.get("Album") or ""), duration=duration, uri=uri,
+                position=_number(ui.get("Playback Position") or 0))
+    if uri.startswith("spotify:ad:") or (app == SPOTIFY and not info["title"] and info["state"] == "playing"):
+        info.update(title=info["title"] or "Advertisement", artist=info["artist"] or "Spotify", ad=True)
+    return info
+
+
+def _apply_note(app: str, info: dict) -> None:
+    """A player said what it is doing. Stopped (as it says when quitting): stopped. The same track: state and
+    position from the announcement alone. A new track playing: one question, for its cover and settings - it has
+    just announced itself, so it isn't closing."""
+    with _lock:
+        before = dict(_now)
+    if info["state"] == "stopped":
+        _set(_empty())
+        return
+    same = before.get("app") == app and (before.get("uri") or before.get("title")) == (info["uri"] or info["title"])
+    if same:
+        for key in ("artwork", "artwork_url", "volume", "shuffle", "repeat"):
+            info[key] = before.get(key, info.get(key))
+        if app == MUSIC and not info.get("position"):     # Music's announcement has no position
+            moving = before.get("state") == "playing"
+            info["position"] = cached().get("position", 0.0) if moving else before.get("position", 0.0)
+        _set(info)
+    elif info["state"] == "playing" and app in _running_apps():
+        _refresh()                                        # a new song: its cover (and position, volume...)
+    else:
+        _set(info)                                        # paused on another track: what it said is enough
+
+
+_NOTE_APPS = {"com.spotify.client.PlaybackStateChanged": SPOTIFY, "com.apple.Music.playerInfo": MUSIC}
+
+
+def note(name: str, user_info) -> None:
+    """A player's announcement (any thread): read here, applied by the watcher thread."""
+    app = _NOTE_APPS.get(str(name))
+    if app is None:
+        return
+    try:
+        info = _from_note(app, user_info)
+    except Exception:
+        log.debug("music announcement", exc_info=True)
+        return
+    with _lock:
+        _notes.append((app, info))
+        del _notes[:-4]
+    _wake.set()
+
+
 def _observe_notifications() -> None:
-    """Spotify and Music announce every play/pause/track change: wake the watcher at once (main thread)."""
+    """Spotify and Music announce every play/pause/track change, with the track: the watcher reads those instead
+    of asking the apps (main thread)."""
     try:
         import AppKit
         import objc
 
         class _MusicPlayerNotificationSink(AppKit.NSObject):
-            def changed_(self, note):
-                _wake.set()
+            def changed_(self, notification):
+                note(str(notification.name()), notification.userInfo())
 
         sink = _MusicPlayerNotificationSink.alloc().init()
         center = AppKit.NSDistributedNotificationCenter.defaultCenter()
-        for name in ("com.spotify.client.PlaybackStateChanged", "com.apple.Music.playerInfo"):
+        for name in _NOTE_APPS:
             center.addObserver_selector_name_object_(sink, objc.selector(sink.changed_, signature=b"v@:@"), name, None)
         _thread.append(sink)                 # keep it alive
     except Exception:
